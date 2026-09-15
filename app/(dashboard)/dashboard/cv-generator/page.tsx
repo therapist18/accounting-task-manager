@@ -16,6 +16,8 @@ import { buildCvDocument } from "@/app/(dashboard)/dashboard/cv-generator/utils/
 import { type DocumentViewerHandle } from "@/components/contracts/DocumentViewer";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase/client";
+import { useCurrentUser } from "@/lib/hooks/use-current-user";
+import { buildJobApplicantAuditLog } from "@/lib/jobApplicantAudit";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { type ComboOption } from "./components/CreatableCombobox";
 import { ClientPortalView } from "./components/ClientPortalView";
@@ -52,6 +54,89 @@ import {
 } from "./utils/cvGeneratorData";
 import { resolveCvMasterFieldValues } from "./utils/cvResolver";
 
+// Finds an existing 'Job Applicant' third_party_contacts row for this person (matched
+// on name + email/phone, since third_party_contacts has no date_of_birth to match on),
+// or creates one. Mirrors bcl-registry's own findOrCreateApplicantContact
+// (app/job-applicants/page.tsx) — kept as a separate copy here since the two apps
+// don't share code, but the shape must stay identical since both write into the same
+// third_party_contacts table.
+async function findOrCreateApplicantContact(fullName: string, email: string, phone: string) {
+  const trimmedName = fullName.trim();
+  const { data: existingContacts } = await supabase
+    .from('third_party_contacts')
+    .select('id, contact_name, email_address, personal_mobile')
+    .eq('contact_type', 'Job Applicant')
+    .ilike('contact_name', trimmedName);
+
+  const existingMatch = (existingContacts || []).find((c: any) =>
+    (email && c.email_address && c.email_address.toLowerCase() === email.toLowerCase()) ||
+    (phone && c.personal_mobile && c.personal_mobile === phone)
+  );
+  if (existingMatch) return existingMatch;
+
+  const { data: newContact, error } = await supabase
+    .from('third_party_contacts')
+    .insert({
+      contact_name: trimmedName,
+      contact_type: 'Job Applicant',
+      email_address: email || null,
+      personal_mobile: phone || null,
+      status: 'active',
+    })
+    .select('id, contact_name, email_address, personal_mobile')
+    .single();
+  if (error) throw new Error(`Failed to create applicant contact: ${error.message}`);
+  return newContact;
+}
+
+// Creates a brand-new job_applicant_cvs row for a CV being built from scratch (no
+// applicantId in the URL, nothing uploaded yet), applying the same registry-matching
+// bcl-registry's handleCVUpload uses: match against an existing client
+// (registry_individuals) by name + date of birth, otherwise track the person as a
+// 'Job Applicant' third-party contact — so a CV built here shows up correctly in the
+// registry's Job Applicants / Clients lists from the very first save.
+async function createNewApplicantRecord(cvData: CvData): Promise<{ applicantId: string; individualId: number | null }> {
+  const applicantId = crypto.randomUUID();
+  const fullName = (cvData.personalInfo?.fullName || '').trim();
+  const email = cvData.personalInfo?.email || '';
+  const phone = cvData.personalInfo?.phone || '';
+  const rawDob = cvData.personalDetails?.dateOfBirth || '';
+  const normalizedDob = rawDob && !isNaN(Date.parse(rawDob)) ? new Date(rawDob).toISOString().split('T')[0] : null;
+
+  let matchedIndividual: { id: number; full_name?: string } | null = null;
+  if (fullName && normalizedDob) {
+    const { data: matches } = await supabase
+      .from('registry_individuals')
+      .select('id, full_name')
+      .ilike('full_name', fullName)
+      .eq('date_of_birth', normalizedDob)
+      .limit(1);
+    if (matches && matches.length > 0) matchedIndividual = matches[0];
+  }
+
+  let thirdPartyContact: { id: string } | null = null;
+  if (!matchedIndividual && fullName) {
+    thirdPartyContact = await findOrCreateApplicantContact(fullName, email, phone);
+  }
+
+  const { error: insertError } = await supabase.from('job_applicant_cvs').insert([{
+    applicant_id: applicantId,
+    full_name: fullName || 'Unknown Applicant',
+    email: email || null,
+    phone_number: phone || null,
+    date_of_birth: normalizedDob || rawDob || null,
+    individual_id: matchedIndividual?.id || null,
+    third_party_id: thirdPartyContact?.id || null,
+    // Not null on this table, but a from-scratch CV build has no uploaded source file.
+    raw_cv_file_path: '',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }]);
+  if (insertError) throw new Error(`Failed to create applicant record: ${insertError.message}`);
+
+  return { applicantId, individualId: matchedIndividual?.id || null };
+}
+
 export default function CVGeneratorPage() {
   const [cvData, setCvData] = useState<CvData>(initialCVData);
   const [mobileView, setMobileView] = useState<'edit' | 'preview'>('edit');
@@ -74,6 +159,10 @@ export default function CVGeneratorPage() {
   const [isSavingCv, setIsSavingCv] = useState(false);
   const [applicantId, setApplicantId] = useState<string | null>(null);
   const [linkedIndividualId, setLinkedIndividualId] = useState<number | null>(null);
+  const { user: currentUser } = useCurrentUser();
+  // Holds the job_applicant_cvs row as last fetched/saved, for audit diffing —
+  // cvData itself is the live-edited state, not what's actually in the DB yet.
+  const originalRecordRef = useRef<Record<string, any> | null>(null);
   const previewRef = useRef<DocumentViewerHandle>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -368,6 +457,7 @@ export default function CVGeneratorPage() {
           });
 
           if (record.individual_id) setLinkedIndividualId(record.individual_id);
+          originalRecordRef.current = record;
 
           // PRIORITY: Use bcl_cv_snapshot if available (contains the full edited CV data)
           if (record.bcl_cv_snapshot && Object.keys(record.bcl_cv_snapshot).length > 0) {
@@ -591,32 +681,12 @@ export default function CVGeneratorPage() {
             // Clear localStorage to prevent stale data from interfering
             try { localStorage.removeItem('cv_generator_cvData'); } catch {}
 
-            // Check for existing draft at cv-builder/{applicant_id}/draft.json
-            try {
-              const { data: draftBlob, error: draftError } = await supabase.storage
-                .from('kyc-documents')
-                .download(`cv-builder/${applicantIdParam}/draft.json`);
-
-              if (!draftError && draftBlob) {
-                const draftText = await draftBlob.text();
-                const draft = JSON.parse(draftText);
-                console.log('[CV Builder] Found existing draft in storage:', draft.name);
-                toast(`Found existing draft "${draft.name}". Loading draft data instead.`, { icon: '📋' });
-                if (draft.data) setCvData(draft.data);
-                if (draft.cvSettings) setCvSettings(draft.cvSettings);
-                if (draft.selectedLayout) setSelectedLayout(draft.selectedLayout);
-              } else {
-                // No draft found, use prefilled data from extraction
-                console.log('[CV Builder] No draft found, using prefilled data from raw_cv_extracted_details');
-                setCvData(prefilledData);
-                toast.success('CV pre-filled from applicant data. You can now edit and build the CV.');
-              }
-            } catch {
-              // Draft check failed, use prefilled data
-              console.log('[CV Builder] Draft check failed, using prefilled data');
-              setCvData(prefilledData);
-              toast.success('CV pre-filled from applicant data. You can now edit and build the CV.');
-            }
+            // No bcl_cv_snapshot saved yet for this applicant — use the prefilled
+            // data from the raw extraction (bcl_cv_snapshot, checked above, is now
+            // the single source of truth for an in-progress draft; there's no
+            // separate storage draft to fall back to).
+            setCvData(prefilledData);
+            toast.success('CV pre-filled from applicant data. You can now edit and build the CV.');
           }
 
           if (!isPortalMode) {
@@ -732,17 +802,22 @@ export default function CVGeneratorPage() {
           cvSettings,
           selectedLayout,
         };
+        const mergeUpdatePayload = {
+          bcl_cv_snapshot: snapshotPayload,
+          bcl_cv_extracted_details: updatedData,
+          updated_at: new Date().toISOString(),
+        };
+        const actor = currentUser ? { id: currentUser.id, displayName: currentUser.displayName, email: currentUser.email } : null;
+        const auditLog = buildJobApplicantAuditLog(mergeUpdatePayload, originalRecordRef.current, actor, 'cv-generator');
         const { error } = await supabase
           .from('job_applicant_cvs')
-          .update({
-            bcl_cv_snapshot: snapshotPayload,
-            bcl_cv_extracted_details: updatedData,
-            updated_at: new Date().toISOString(),
-          })
+          .update({ ...mergeUpdatePayload, ...auditLog })
           .eq('applicant_id', applicantId);
-        
+
         if (error) {
           console.error('Failed to save merged data to database:', error);
+        } else {
+          originalRecordRef.current = { ...(originalRecordRef.current || {}), ...mergeUpdatePayload, ...auditLog };
         }
       } catch (e) {
         console.error('Database save failed:', e);
@@ -948,28 +1023,50 @@ export default function CVGeneratorPage() {
     };
     setCvDrafts(prev => { const filtered = prev.filter(d => d.id !== id); return [newDraft, ...filtered]; });
     if (forPortal) setCurrentPortalDraftId(id);
-    
+
     // Track if database save succeeded
     let dbSaveSucceeded = false;
-    
+
     try {
-      // Always save to database first (bcl_cv_snapshot) - this is the primary save
-      if (applicantId) {
-        console.log('[CV Builder] Saving CV data to bcl_cv_snapshot in job_applicant_cvs for applicantId:', applicantId);
+      // Building a CV from scratch (no applicantId yet, e.g. opened via the plain
+      // "Build CV" button rather than an upload or a registry link) — create the
+      // job_applicant_cvs row now so this draft always has somewhere durable to live,
+      // the same way the upload-and-extract flow already does.
+      let currentApplicantId = applicantId;
+      if (!currentApplicantId) {
+        try {
+          const created = await createNewApplicantRecord(cvData);
+          currentApplicantId = created.applicantId;
+          setApplicantId(created.applicantId);
+          if (created.individualId) setLinkedIndividualId(created.individualId);
+          const url = new URL(window.location.href);
+          url.searchParams.set('applicantId', created.applicantId);
+          window.history.replaceState({}, '', url.toString());
+        } catch (createErr: any) {
+          console.error('[CV Builder] Failed to create applicant record:', createErr);
+          toast.error('Failed to create applicant record');
+        }
+      }
+
+      // Save to database (bcl_cv_snapshot) - this is the sole primary save
+      if (currentApplicantId) {
+        console.log('[CV Builder] Saving CV data to bcl_cv_snapshot in job_applicant_cvs for applicantId:', currentApplicantId);
         // Save cvData along with cvSettings and selectedLayout in the snapshot
         const snapshotPayload = {
           ...cvData,
           cvSettings,
           selectedLayout,
         };
+        const draftUpdatePayload = {
+          bcl_cv_snapshot: snapshotPayload,
+          bcl_cv_extracted_details: cvData,
+          updated_at: new Date().toISOString(),
+        };
+        const actor = currentUser ? { id: currentUser.id, displayName: currentUser.displayName, email: currentUser.email } : null;
+        const auditLog = buildJobApplicantAuditLog(draftUpdatePayload, originalRecordRef.current, actor, 'cv-generator');
         const { error: snapshotError } = await supabase
           .from('job_applicant_cvs')
-          .upsert({
-            applicant_id: applicantId,
-            bcl_cv_snapshot: snapshotPayload,
-            bcl_cv_extracted_details: cvData,
-            updated_at: new Date().toISOString()
-          }, { onConflict: 'applicant_id' });
+          .upsert({ applicant_id: currentApplicantId, ...draftUpdatePayload, ...auditLog }, { onConflict: 'applicant_id' });
 
         if (snapshotError) {
           console.error('[CV Builder] Failed to save bcl_cv_snapshot:', snapshotError);
@@ -977,37 +1074,25 @@ export default function CVGeneratorPage() {
         } else {
           console.log('[CV Builder] Successfully saved bcl_cv_snapshot to job_applicant_cvs');
           dbSaveSucceeded = true;
-        }
-
-        // If linked individual, also update their record
-        if (linkedIndividualId) {
-          console.log('[CV Builder] Also saving CV data for linked individual:', linkedIndividualId);
+          originalRecordRef.current = { ...(originalRecordRef.current || {}), applicant_id: currentApplicantId, ...draftUpdatePayload, ...auditLog };
         }
       }
-      
-      // Then try to save to storage (backup) - catch errors gracefully
-      try {
-        const payload = JSON.stringify(newDraft);
-        const blob = new Blob([payload], { type: 'application/json' });
 
-        if (applicantId) {
-          console.log('[CV Builder] Saving draft to storage:', `cv-builder/${applicantId}/draft.json`);
-          // Try to remove existing file first, then upload
-          try {
-            await supabase.storage.from('kyc-documents').remove([`cv-builder/${applicantId}/draft.json`]);
-          } catch { /* ignore if file doesn't exist */ }
-          await supabase.storage.from('kyc-documents').upload(`cv-builder/${applicantId}/draft.json`, blob, { contentType: 'text/plain' });
-        } else {
-          // Fallback to cv-drafts/{id}/draft.json for portal drafts / standalone use
+      // Portal share links are opened by an unauthenticated candidate via a
+      // draftId token decoupled from applicantId (never exposed in that URL), so
+      // they still need their own storage copy — everything else now lives solely
+      // in job_applicant_cvs.
+      if (forPortal) {
+        try {
+          const payload = JSON.stringify(newDraft);
+          const blob = new Blob([payload], { type: 'text/plain' });
           try {
             await supabase.storage.from('kyc-documents').remove([`cv-drafts/${id}/draft.json`]);
           } catch { /* ignore if file doesn't exist */ }
           await supabase.storage.from('kyc-documents').upload(`cv-drafts/${id}/draft.json`, blob, { contentType: 'text/plain' });
+        } catch (storageErr) {
+          console.warn('[CV Builder] Portal draft storage save failed:', storageErr);
         }
-        console.log('[CV Builder] Draft saved to storage successfully');
-      } catch (storageErr) {
-        console.warn('[CV Builder] Storage save failed (database save succeeded):', storageErr);
-        // Don't fail the whole operation if storage fails
       }
     } catch (e) {
       console.warn('[CV Builder] Draft save failed:', e);
@@ -1023,14 +1108,18 @@ export default function CVGeneratorPage() {
 
   const loadDraft = async (draft: any) => {
     try {
-      // Try cv-builder path first (for applicant-linked drafts)
+      // Applicant-linked drafts live in job_applicant_cvs.bcl_cv_snapshot now — try
+      // that first, since it's always the freshest copy (the local `cvDrafts` list
+      // entry can be stale if this draft was last saved from a different tab/device).
       let draftData = null;
       if (applicantId) {
-        const { data: builderBlob, error: builderError } = await supabase.storage
-          .from('kyc-documents').download(`cv-builder/${applicantId}/draft.json`);
-        if (!builderError && builderBlob) {
-          const text = await builderBlob.text();
-          draftData = JSON.parse(text);
+        const { data: record, error: recordError } = await supabase
+          .from('job_applicant_cvs')
+          .select('bcl_cv_snapshot')
+          .eq('applicant_id', applicantId)
+          .single();
+        if (!recordError && record?.bcl_cv_snapshot && Object.keys(record.bcl_cv_snapshot).length > 0) {
+          draftData = { data: record.bcl_cv_snapshot, cvSettings: record.bcl_cv_snapshot.cvSettings, selectedLayout: record.bcl_cv_snapshot.selectedLayout };
         }
       }
       // Fallback to cv-drafts path (for standalone/portal drafts)
@@ -1069,11 +1158,7 @@ export default function CVGeneratorPage() {
   const deleteDraft = async (id: string) => {
     setCvDrafts(prev => prev.filter(d => d.id !== id));
     try {
-      // Try both paths
       await supabase.storage.from('kyc-documents').remove([`cv-drafts/${id}/draft.json`]);
-      if (applicantId) {
-        await supabase.storage.from('kyc-documents').remove([`cv-builder/${applicantId}/draft.json`]);
-      }
     } catch { /* ignore */ }
   };
 
@@ -1236,17 +1321,22 @@ export default function CVGeneratorPage() {
             };
 
             if (applicantId) {
+              const actor = currentUser ? { id: currentUser.id, displayName: currentUser.displayName, email: currentUser.email } : null;
+              const auditLog = buildJobApplicantAuditLog(cvRecordData, originalRecordRef.current, actor, 'cv-generator');
               const { error: updateError } = await supabase
                 .from('job_applicant_cvs')
-                .update(cvRecordData)
+                .update({ ...cvRecordData, ...auditLog })
                 .eq('applicant_id', applicantId);
               if (updateError) throw updateError;
+              originalRecordRef.current = { ...(originalRecordRef.current || {}), ...cvRecordData, ...auditLog };
             } else {
+              const insertPayload = { ...cvRecordData, applicant_id: finalApplicantId, created_at: new Date().toISOString() };
               const { error: insertError } = await supabase
                 .from('job_applicant_cvs')
-                .insert([{ ...cvRecordData, applicant_id: finalApplicantId, created_at: new Date().toISOString() }]);
+                .insert([insertPayload]);
               if (insertError) throw insertError;
               setApplicantId(finalApplicantId);
+              originalRecordRef.current = insertPayload;
               const url = new URL(window.location.href);
               url.searchParams.set('applicantId', finalApplicantId);
               window.history.replaceState({}, '', url.toString());
@@ -1558,35 +1648,31 @@ export default function CVGeneratorPage() {
         }, { onConflict: 'director_id,file_path' });
       }
 
-      // Path B: Save to cv-builder storage + update bcl_cv_snapshot (if applicantId)
+      // Path B: Update bcl_cv_snapshot in job_applicant_cvs (if applicantId) — the DB
+      // row is the sole source of truth here, no storage backup needed.
       if (applicantId) {
         console.log('[CV Builder] Saving CV for applicantId:', applicantId);
-        // 1. Store backup at cv-builder/{applicant_id}/built-cv.json
-        const builderPath = `cv-builder/${applicantId}/built-cv.json`;
-        const { error: uploadError } = await supabase.storage
-          .from('kyc-documents')
-          .upload(builderPath, blob, { upsert: true });
-        if (uploadError) throw uploadError;
-
-        // 2. Update bcl_cv_snapshot, bcl_cv_file_path, bcl_cv_extracted_details in job_applicant_cvs (include cvSettings and selectedLayout)
         console.log('[CV Builder] Updating bcl_cv_snapshot in job_applicant_cvs');
         const snapshotPayload = {
           ...cvData,
           cvSettings,
           selectedLayout,
         };
+        const cvUpdatePayload = {
+          bcl_cv_snapshot: snapshotPayload,
+          bcl_cv_extracted_details: cvData,
+          updated_at: new Date().toISOString(),
+        };
+        const actor = currentUser ? { id: currentUser.id, displayName: currentUser.displayName, email: currentUser.email } : null;
+        const auditLog = buildJobApplicantAuditLog(cvUpdatePayload, originalRecordRef.current, actor, 'cv-generator');
         const { error: snapshotError } = await supabase
           .from('job_applicant_cvs')
-          .update({
-            bcl_cv_snapshot: snapshotPayload,
-            bcl_cv_file_path: builderPath,
-            bcl_cv_extracted_details: cvData,
-            updated_at: new Date().toISOString(),
-          })
+          .update({ ...cvUpdatePayload, ...auditLog })
           .eq('applicant_id', applicantId);
         if (snapshotError) throw snapshotError;
+        originalRecordRef.current = { ...(originalRecordRef.current || {}), ...cvUpdatePayload, ...auditLog };
 
-        // 3. If linked client, also save to acc_portal_directors_documents
+        // If linked client, also save to acc_portal_directors_documents
         if (linkedIndividualId) {
           console.log('[CV Builder] Also saving to linked individual record:', linkedIndividualId);
           const registryPath = `individual-documents/${linkedIndividualId}/${CV_DOCUMENT_ID}/cv_${Date.now()}.json`;
