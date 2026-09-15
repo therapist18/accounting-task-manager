@@ -2,16 +2,39 @@
 "use client"
 
 import React, { useState, useEffect, useMemo, useCallback, memo, useRef, startTransition } from "react"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { Plus, Minus, Search, X, Download, Upload } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { 
+  Plus, 
+  Minus, 
+  ChevronDown, 
+  Layers, 
+  Search, 
+  X, 
+  Download, 
+  Upload, 
+  Loader2, 
+  Save, 
+  RotateCcw, 
+  Building2,
+  FolderTree,
+  FileText,
+  Users
+} from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { toast } from "@/lib/hooks/use-toast"
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "@/app/(dashboard)/dashboard/departments/main-shared-components/column-visibility"
 import { DocumentType, Department, OptimizedCheckbox } from "./components/types"
 import { CATEGORY_MAPPING } from "./components/config"
+import { getGroupedFields, FormField } from "./components/formFields"
 import {
   filterAndSortDocuments,
   getColumnKey as getColumnKeyUtil,
@@ -22,6 +45,7 @@ import { Input } from "@/components/ui/input"
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
 import { format } from "date-fns"
+import { toast } from "@/lib/hooks/use-toast"
 
 const MemoizedCheckbox = memo(OptimizedCheckbox)
 
@@ -31,6 +55,17 @@ const DOC_TABS = [
   { value: "individual", label: "Individual Documents" },
   { value: "application", label: "Application Documents" },
 ] as const
+
+// Fixed column metrics for seamless sticky alignment & comfortable breathing room
+const COL_INDEX_WIDTH = 64
+const COL_NAME_WIDTH = 380
+const DATA_COL_WIDTH = 136
+
+// Header row heights for precise sticky stacking
+const H_ROW_1 = 44
+const H_ROW_2 = 40
+const H_ROW_3 = 34
+const H_ROW_4 = 38
 
 export default function DocumentsFields() {
   const [departments, setDepartments] = useState<Department[]>([])
@@ -43,6 +78,7 @@ export default function DocumentsFields() {
   const [error, setError] = useState<string | null>(null)
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
+  const [expandedClientGroups, setExpandedClientGroups] = useState<Set<string>>(new Set())
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set())
   const [availableColumns, setAvailableColumns] = useState<ColumnVisibilityOption[]>([])
   const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({})
@@ -51,13 +87,12 @@ export default function DocumentsFields() {
   const [isSaving, setIsSaving] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
-  const [searchQuery, setSearchQuery] = useState("");
-  const [allExpanded, setAllExpanded] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("")
   const importFileRef = useRef<HTMLInputElement>(null)
   const lastFetchTimeRef = useRef(0)
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // FETCH  (accepts force=true to bypass 1-second debounce after saves)
+  // FETCH
   // ─────────────────────────────────────────────────────────────────────────────
   const fetchData = useCallback(async (force = false) => {
     const now = Date.now()
@@ -69,10 +104,10 @@ export default function DocumentsFields() {
       const [depts, docs, requirements] = await Promise.all([
         supabase.from('tm_departments').select(`*, tm_subdepartments (*, classes)`).order('order', { ascending: true }),
         supabase.from('acc_portal_kyc').select('*').order('main_category_number', { ascending: true }),
-        supabase.from('tm_class_requirements').select('documents_and_fields, job_level')
-      ]);
+        supabase.from('tm_class_requirements').select('documents_and_fields, client_fields, job_level')
+      ])
 
-      if (depts.error || docs.error || requirements.error) throw new Error("Fetch failed");
+      if (depts.error || docs.error || requirements.error) throw new Error("Fetch failed")
 
       const transformedDepts = (depts.data || []).map(dept => ({
         ...dept,
@@ -86,52 +121,72 @@ export default function DocumentsFields() {
             })),
             hasClasses: !!(sd.classes && sd.classes.length > 0)
           }))
-      }));
+      }))
 
       const processedDocs = (docs.data || []).map(doc => ({
         ...doc,
         fields: Array.isArray(doc.fields) ? doc.fields : [],
         display_name: doc.display_name || doc.name
-      }));
+      }))
 
-      // Build allocation lookup:  `entityId::hierarchyKey` → { boolType: true }
-      const docAllocations = {};
+      const docAllocations = {}
       requirements.data?.forEach(req => {
-        if (!req.job_level) return;
+        if (!req.job_level) return
         const classId = [
           req.job_level.subdepartment_id,
           req.job_level.class_id,
           req.job_level.subclass_id
-        ].filter(id => id !== null && id !== undefined).join('_');
+        ].filter(id => id !== null && id !== undefined).join('_')
 
-        (req.documents_and_fields || []).forEach(doc => {
-          const docId = String(doc.id);
-          // Doc-level booleans
+        ;(req.documents_and_fields || []).forEach(doc => {
+          const docId = String(doc.id)
           Object.keys(doc).forEach(key => {
             if (!['id', 'fields', 'updated_at'].includes(key) && doc[key] === true) {
               docAllocations[`${docId}::${classId}`] = {
                 ...docAllocations[`${docId}::${classId}`],
                 [key]: true
-              };
+              }
             }
-          });
-          // Field-level booleans  (separator: | between docId and fieldId)
-          (doc.fields || []).forEach(f => {
-            const fieldId = String(f.id);
+          })
+          ;(doc.fields || []).forEach(f => {
+            const fieldId = String(f.id)
             Object.keys(f).forEach(key => {
               if (!['id', 'updated_at'].includes(key) && f[key] === true) {
                 docAllocations[`${docId}|${fieldId}::${classId}`] = {
                   ...docAllocations[`${docId}|${fieldId}::${classId}`],
                   [key]: true
-                };
+                }
               }
-            });
-          });
-        });
-      });
+            })
+          })
+        })
+      })
 
-      // Build column list
-      const cols = [];
+      const clientFieldAllocationsMap = {}
+      requirements.data?.forEach(req => {
+        if (!req.job_level) return
+        const classId = [
+          req.job_level.subdepartment_id,
+          req.job_level.class_id,
+          req.job_level.subclass_id
+        ].filter(id => id !== null && id !== undefined).join('_')
+
+        ;(req.client_fields || []).forEach(item => {
+          const fieldId = String(item.id)
+          const flags = {}
+          if (item.ap === true || item.display === true) flags.ap = true
+          if (item.dp === true) flags.dp = true
+          if (item.understudy === true) flags.understudy = true
+          if (item.references === true) flags.references = true
+          if (!fieldId || Object.keys(flags).length === 0) return
+          clientFieldAllocationsMap[`${fieldId}::${classId}`] = {
+            ...clientFieldAllocationsMap[`${fieldId}::${classId}`],
+            ...flags
+          }
+        })
+      })
+
+      const cols = []
       transformedDepts.forEach(dept => {
         dept.subdepartments?.forEach(sd => {
           if (sd.hasClasses) {
@@ -143,520 +198,604 @@ export default function DocumentsFields() {
                   visible: !!sc.default_display,
                   isDefault: !!sc.default_display,
                   group: sd.name
-                }));
+                }))
               } else cols.push({
                 id: getColumnKeyUtil(sd.id, idx, null),
                 label: `${sd.name} > ${cls.name}`,
                 visible: !!cls.default_display,
                 isDefault: !!cls.default_display,
                 group: sd.name
-              });
-            });
+              })
+            })
           } else cols.push({
             id: getColumnKeyUtil(sd.id, null, null),
             label: sd.name,
             visible: !!sd.default_display,
             isDefault: !!sd.default_display,
             group: dept.name
-          });
-        });
-      });
+          })
+        })
+      })
 
       startTransition(() => {
-        setDepartments(transformedDepts);
-        setDocuments(processedDocs);
-        setDocumentAllocations(docAllocations);   // ← fresh allocation state → checkboxes re-render
-        setAvailableColumns(cols);
+        setDepartments(transformedDepts)
+        setDocuments(processedDocs)
+        setDocumentAllocations(docAllocations)
+        setClientFieldAllocations(clientFieldAllocationsMap)
+        setAvailableColumns(cols)
         if (transformedDepts.length > 0 && (!activeTab || !transformedDepts.find(d => String(d.id) === activeTab))) {
-          setActiveTab(String(transformedDepts[0].id));
+          setActiveTab(String(transformedDepts[0].id))
         }
-      });
-    } catch (err) { setError(err.message); } finally { setLoading(false); }
-  }, [activeTab]);
+      })
+    } catch (err) { 
+      setError(err.message) 
+    } finally { 
+      setLoading(false) 
+    }
+  }, [activeTab])
 
-  useEffect(() => { fetchData() }, [fetchData]);
+  useEffect(() => { fetchData() }, [fetchData])
 
   useEffect(() => {
     if (availableColumns.length > 0 && Object.keys(columnVisibility).length === 0) {
-      const initialVisibility: Record<string, boolean> = {};
-      availableColumns.forEach(col => { initialVisibility[col.id] = col.isDefault ?? true; });
-      setColumnVisibility(initialVisibility);
+      const initialVisibility: Record<string, boolean> = {}
+      availableColumns.forEach(col => { initialVisibility[col.id] = col.isDefault ?? true })
+      setColumnVisibility(initialVisibility)
     }
-  }, [availableColumns]);
+  }, [availableColumns])
 
   // ─────────────────────────────────────────────────────────────────────────────
   // DATA PROCESSING
   // ─────────────────────────────────────────────────────────────────────────────
   const { groupedDocuments } = useMemo(() => {
-    const filteredByCategory = documents.filter(doc => doc.category === CATEGORY_MAPPING[documentTab]);
+    const filteredByCategory = documents.filter(doc => doc.category === CATEGORY_MAPPING[documentTab])
     const filteredBySearch = searchQuery
       ? filteredByCategory.filter(doc =>
         (doc.display_name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
         (doc.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
         doc.fields?.some(field => field?.name?.toLowerCase()?.includes(searchQuery.toLowerCase()))
       )
-      : filteredByCategory;
-    return filterAndSortDocuments(filteredBySearch, documentTab);
-  }, [documents, documentTab, searchQuery]);
+      : filteredByCategory
+    return filterAndSortDocuments(filteredBySearch, documentTab)
+  }, [documents, documentTab, searchQuery])
 
-  // Pre-grouped docs for ALL tabs (used by export & import logic)
   const groupedDocsByTab = useMemo(() => {
-    const result: Record<string, any> = {};
+    const result: Record<string, any> = {}
     DOC_TABS.forEach(tab => {
-      const filtered = documents.filter(doc => doc.category === CATEGORY_MAPPING[tab.value]);
-      result[tab.value] = filterAndSortDocuments(filtered, tab.value).groupedDocuments;
-    });
-    return result;
-  }, [documents]);
+      const filtered = documents.filter(doc => doc.category === CATEGORY_MAPPING[tab.value])
+      result[tab.value] = filterAndSortDocuments(filtered, tab.value).groupedDocuments
+    })
+    return result
+  }, [documents])
+
+  const groupedClientFields = useMemo(() => {
+    const formType: "company" | "individual" = documentTab === "individual" ? "individual" : "company"
+    const grouped = getGroupedFields(formType)
+    const result: Array<{
+      key: string
+      type: "form-section" | "platform"
+      title: string
+      fields: Array<FormField & { allocationKey: string }>
+    }> = []
+
+    Object.entries(grouped.formSections).forEach(([key, section]) => {
+      const fields = (section.fields || []).filter(f => f.showInTable !== false)
+      if (!fields.length) return
+      result.push({
+        key: `form-section-${key}`,
+        type: "form-section",
+        title: section.title,
+        fields: fields.map(f => ({ ...f, allocationKey: `form-field-${f.name}` }))
+      })
+    })
+
+    Object.entries(grouped.platformCredentials).forEach(([platformKey, platform]) => {
+      const fields = (platform.fields || []).filter(f => f.showInTable !== false)
+      if (!fields.length) return
+      result.push({
+        key: `platform-${platformKey}`,
+        type: "platform",
+        title: platform.title,
+        fields: fields.map(f => ({ ...f, allocationKey: `platform-${platformKey}-${f.name}` }))
+      })
+    })
+
+    return result
+  }, [documentTab])
 
   const currentDepartment = useMemo(
     () => departments.find(d => String(d.id) === activeTab) || null,
     [departments, activeTab]
-  );
+  )
 
   const normalizedSubdepartments = useMemo(() => {
-    if (!currentDepartment?.subdepartments) return [];
+    if (!currentDepartment?.subdepartments) return []
     return currentDepartment.subdepartments.map(sd => ({
       ...sd,
       classes: sd.classes?.map(cls => ({
         ...cls,
         subclasses: cls.subClasses || cls.subclasses || []
       }))
-    }));
-  }, [currentDepartment]);
+    }))
+  }, [currentDepartment])
 
-  // Reusable column builder (used for current tab display AND per-tab export/import)
   const buildVisibleColumns = useCallback((tabValue: string, subdepts: any[]) => {
-    const cols = [];
-    const isIndiv = tabValue === "individual";
+    const cols = []
+    const isIndiv = tabValue === "individual"
 
     subdepts.forEach(sd => {
       const getFilteredEntityTypes = (item) => {
         const raw = item?.entity_types
           ? Array.isArray(item.entity_types) ? item.entity_types : JSON.parse(item.entity_types || "[]")
-          : [];
-        const entityTypes = raw.length > 0 ? raw : ["Company"];
+          : []
+        const entityTypes = raw.length > 0 ? raw : ["Company"]
         return isIndiv
           ? entityTypes.filter(s => s && s.toLowerCase() !== "company")
-          : entityTypes.filter(s => s && s.toLowerCase() === "company");
-      };
+          : entityTypes.filter(s => s && s.toLowerCase() === "company")
+      }
       const process = (item, cIdx, scIdx) => {
-        const key = getColumnKeyUtil(sd.id, cIdx, scIdx);
-        if (!columnVisibility[key]) return;
-        let specs = getFilteredEntityTypes(item);
-        if (specs.length === 0) specs = ["Standard"];
+        const key = getColumnKeyUtil(sd.id, cIdx, scIdx)
+        if (!columnVisibility[key]) return
+        let specs = getFilteredEntityTypes(item)
+        if (specs.length === 0) specs = ["Standard"]
         cols.push({
           subdept: sd, clsIndex: cIdx, subclsIndex: scIdx, columnKey: key,
           specifications: specs,
           isExpanded: expandedColumns.has(key),
-          width: expandedColumns.has(key) ? (specs.length * 120) : 120
-        });
-      };
+          width: expandedColumns.has(key) ? (specs.length * DATA_COL_WIDTH) : DATA_COL_WIDTH
+        })
+      }
 
       if (sd.hasClasses) {
         sd.classes.forEach((cls, cIdx) => {
-          if (cls.subclasses.length) cls.subclasses.forEach((sc, scIdx) => process(sc, cIdx, scIdx));
-          else process(cls, cIdx, null);
-        });
-      } else process(sd, null, null);
-    });
-    return cols;
-  }, [columnVisibility, expandedColumns]);
+          if (cls.subclasses.length) cls.subclasses.forEach((sc, scIdx) => process(sc, cIdx, scIdx))
+          else process(cls, cIdx, null)
+        })
+      } else process(sd, null, null)
+    })
+    return cols
+  }, [columnVisibility, expandedColumns])
 
-  // Column builder for export that includes ALL columns regardless of visibility
   const buildAllColumns = useCallback((tabValue: string, subdepts: any[]) => {
-    const cols = [];
-    const isIndiv = tabValue === "individual";
+    const cols = []
+    const isIndiv = tabValue === "individual"
 
     subdepts.forEach(sd => {
       const getFilteredEntityTypes = (item) => {
         const raw = item?.entity_types
           ? Array.isArray(item.entity_types) ? item.entity_types : JSON.parse(item.entity_types || "[]")
-          : [];
-        const entityTypes = raw.length > 0 ? raw : ["Company"];
+          : []
+        const entityTypes = raw.length > 0 ? raw : ["Company"]
         return isIndiv
           ? entityTypes.filter(s => s && s.toLowerCase() !== "company")
-          : entityTypes.filter(s => s && s.toLowerCase() === "company");
-      };
+          : entityTypes.filter(s => s && s.toLowerCase() === "company")
+      }
       const process = (item, cIdx, scIdx) => {
-        const key = getColumnKeyUtil(sd.id, cIdx, scIdx);
-        let specs = getFilteredEntityTypes(item);
-        if (specs.length === 0) specs = ["Standard"];
+        const key = getColumnKeyUtil(sd.id, cIdx, scIdx)
+        let specs = getFilteredEntityTypes(item)
+        if (specs.length === 0) specs = ["Standard"]
         cols.push({
           subdept: sd, clsIndex: cIdx, subclsIndex: scIdx, columnKey: key,
           specifications: specs,
           isExpanded: expandedColumns.has(key),
-          width: expandedColumns.has(key) ? (specs.length * 120) : 120
-        });
-      };
+          width: expandedColumns.has(key) ? (specs.length * DATA_COL_WIDTH) : DATA_COL_WIDTH
+        })
+      }
 
       if (sd.hasClasses) {
         sd.classes.forEach((cls, cIdx) => {
-          if (cls.subclasses.length) cls.subclasses.forEach((sc, scIdx) => process(sc, cIdx, scIdx));
-          else process(cls, cIdx, null);
-        });
-      } else process(sd, null, null);
-    });
-    return cols;
-  }, [expandedColumns]);
+          if (cls.subclasses.length) cls.subclasses.forEach((sc, scIdx) => process(sc, cIdx, scIdx))
+          else process(cls, cIdx, null)
+        })
+      } else process(sd, null, null)
+    })
+    return cols
+  }, [expandedColumns])
 
   const visibleColumns = useMemo(
     () => buildVisibleColumns(documentTab, normalizedSubdepartments),
     [buildVisibleColumns, documentTab, normalizedSubdepartments]
-  );
+  )
+
+  const flattenedColumns = useMemo(() => {
+    const flat = []
+    visibleColumns.forEach(col => {
+      const specs = col.isExpanded ? col.specifications : [col.specifications[0]]
+      specs.forEach((spec, sIdx) => {
+        flat.push({
+          ...col,
+          spec,
+          isFirstSpec: sIdx === 0,
+          uniqueKey: `${col.columnKey}-${spec}`
+        })
+      })
+    })
+    return flat
+  }, [visibleColumns])
+
+  const totalTableWidth = useMemo(() => {
+    return COL_INDEX_WIDTH + COL_NAME_WIDTH + (flattenedColumns.length * DATA_COL_WIDTH)
+  }, [flattenedColumns])
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // ALLOCATION HELPERS
+  // ALLOCATION TOGGLE HELPERS
   // ─────────────────────────────────────────────────────────────────────────────
   const resolveClassIdPart = useCallback((sdId, cIdx, scIdx) => {
-    const sd = currentDepartment?.subdepartments?.find(s => s.id === sdId);
-    const cls = cIdx !== null ? sd?.classes?.[cIdx] : null;
-    const sc = (cls && scIdx !== null) ? cls.subclasses?.[scIdx] : null;
-    return sc ? `${sdId}_${cls.id}_${sc.id}` : cls ? `${sdId}_${cls.id}` : `${sdId}`;
-  }, [currentDepartment]);
+    const sd = currentDepartment?.subdepartments?.find(s => s.id === sdId)
+    const cls = cIdx !== null ? sd?.classes?.[cIdx] : null
+    const sc = (cls && scIdx !== null) ? cls.subclasses?.[scIdx] : null
+    return sc ? `${sdId}_${cls.id}_${sc.id}` : cls ? `${sdId}_${cls.id}` : `${sdId}`
+  }, [currentDepartment])
 
   const getAllocationStatus = useCallback((id, sdId, cIdx, scIdx, type) => {
-    const classIdPart = resolveClassIdPart(sdId, cIdx, scIdx);
-    const key = `${id}::${classIdPart}`;
-    return pendingChanges.documents[key]?.[type] ?? documentAllocations[key]?.[type] ?? false;
-  }, [pendingChanges, documentAllocations, resolveClassIdPart]);
+    const classIdPart = resolveClassIdPart(sdId, cIdx, scIdx)
+    const key = `${id}::${classIdPart}`
+    return pendingChanges.documents[key]?.[type] ?? documentAllocations[key]?.[type] ?? false
+  }, [pendingChanges, documentAllocations, resolveClassIdPart])
 
   const handleToggle = useCallback((id, sdId, cIdx, scIdx, type, checked) => {
-    const classIdPart = resolveClassIdPart(sdId, cIdx, scIdx);
-    const key = `${id}::${classIdPart}`;
+    const classIdPart = resolveClassIdPart(sdId, cIdx, scIdx)
+    const key = `${id}::${classIdPart}`
 
     setPendingChanges(prev => {
-      const newDocs = { ...prev.documents };
-      const current = { ...(newDocs[key] || {}), [type]: checked };
-      if (checked === (documentAllocations[key]?.[type] ?? false)) delete current[type];
-      if (Object.keys(current).length === 0) delete newDocs[key];
-      else newDocs[key] = current;
-      return { ...prev, documents: newDocs };
-    });
-    setHasUnsavedChanges(true);
-  }, [resolveClassIdPart, documentAllocations]);
+      const newDocs = { ...prev.documents }
+      const current = { ...(newDocs[key] || {}), [type]: checked }
+      if (checked === (documentAllocations[key]?.[type] ?? false)) delete current[type]
+      if (Object.keys(current).length === 0) delete newDocs[key]
+      else newDocs[key] = current
+      return { ...prev, documents: newDocs }
+    })
+    setHasUnsavedChanges(true)
+  }, [resolveClassIdPart, documentAllocations])
 
-  const toggleAllRows = useCallback((expand: boolean) => {
-    if (expand) {
-      const newExpandedCategories = new Set(Object.keys(groupedDocuments));
-      const newExpandedItems = new Set<string>();
-      Object.values(groupedDocuments).forEach(group => {
-        group.documents.forEach(doc => { if (doc.fields?.length > 0) newExpandedItems.add(doc.id); });
-      });
-      setExpandedCategories(newExpandedCategories);
-      setExpandedItems(newExpandedItems);
-      setAllExpanded(true);
-    } else {
-      setExpandedCategories(new Set());
-      setExpandedItems(new Set());
-      setAllExpanded(false);
-    }
-  }, [groupedDocuments]);
+  const getClientFieldAllocationStatus = useCallback((allocationId, sdId, cIdx, scIdx, type) => {
+    const classIdPart = resolveClassIdPart(sdId, cIdx, scIdx)
+    const key = `${allocationId}::${classIdPart}`
+    return pendingChanges.clientFields[key]?.[type] ?? clientFieldAllocations[key]?.[type] ?? false
+  }, [pendingChanges, clientFieldAllocations, resolveClassIdPart])
+
+  const handleClientFieldToggle = useCallback((allocationId, sdId, cIdx, scIdx, type, checked) => {
+    const classIdPart = resolveClassIdPart(sdId, cIdx, scIdx)
+    const key = `${allocationId}::${classIdPart}`
+
+    setPendingChanges(prev => {
+      const newFields = { ...prev.clientFields }
+      const current = { ...(newFields[key] || {}), [type]: checked }
+      if (checked === (clientFieldAllocations[key]?.[type] ?? false)) delete current[type]
+      if (Object.keys(current).length === 0) delete newFields[key]
+      else newFields[key] = current
+      return { ...prev, clientFields: newFields }
+    })
+    setHasUnsavedChanges(true)
+  }, [resolveClassIdPart, clientFieldAllocations])
+
+  const toggleAllRows = useCallback((levels: { categories: boolean; documents: boolean; clientFields: boolean }) => {
+    setExpandedCategories(levels.categories ? new Set(Object.keys(groupedDocuments)) : new Set())
+    setExpandedItems(levels.documents
+      ? new Set<string>(
+        Object.values(groupedDocuments).flatMap(group => group.documents).filter(doc => doc.fields?.length > 0).map(doc => doc.id)
+      )
+      : new Set())
+    setExpandedClientGroups(levels.clientFields ? new Set(groupedClientFields.map(g => g.key)) : new Set())
+  }, [groupedDocuments, groupedClientFields])
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // SAVE — clear pending + force-refresh so checkboxes update immediately
+  // SAVE
   // ─────────────────────────────────────────────────────────────────────────────
   const handleSaveAllChanges = useCallback(async () => {
-    if (!hasUnsavedChanges) return;
-    setIsSaving(true);
+    if (!hasUnsavedChanges) return
+    setIsSaving(true)
     try {
-      // Group changes by hierarchy
-      const changesByHierarchy: Record<string, { documents: Record<string, Record<string, boolean>> }> = {};
+      const changesByHierarchy: Record<string, { documents: Record<string, Record<string, boolean>> }> = {}
       Object.entries(pendingChanges.documents).forEach(([allocationKey, changes]) => {
-        const [entityPart, hierarchyPart] = allocationKey.split('::');
-        if (!hierarchyPart) return;
-        if (!changesByHierarchy[hierarchyPart]) changesByHierarchy[hierarchyPart] = { documents: {} };
-        changesByHierarchy[hierarchyPart].documents[entityPart] = changes as Record<string, boolean>;
-      });
+        const [entityPart, hierarchyPart] = allocationKey.split('::')
+        if (!hierarchyPart) return
+        if (!changesByHierarchy[hierarchyPart]) changesByHierarchy[hierarchyPart] = { documents: {} }
+        changesByHierarchy[hierarchyPart].documents[entityPart] = changes as Record<string, boolean>
+      })
 
-      // Fetch existing records for this department in one query
-      const deptId = parseInt(activeTab);
+      const clientFieldChangesByHierarchy: Record<string, Record<string, Record<string, boolean>>> = {}
+      Object.entries(pendingChanges.clientFields).forEach(([allocationKey, changes]) => {
+        const [entityPart, hierarchyPart] = allocationKey.split('::')
+        if (!hierarchyPart) return
+        if (!clientFieldChangesByHierarchy[hierarchyPart]) clientFieldChangesByHierarchy[hierarchyPart] = {}
+        clientFieldChangesByHierarchy[hierarchyPart][entityPart] = changes as Record<string, boolean>
+      })
+
+      const deptId = parseInt(activeTab)
       const { data: allRequirements, error: fetchAllError } = await supabase
         .from('tm_class_requirements')
-        .select('id, documents_and_fields, job_level')
-        .eq('job_level->>department_id', String(deptId));
-      if (fetchAllError) throw fetchAllError;
+        .select('id, documents_and_fields, client_fields, job_level')
+        .eq('job_level->>department_id', String(deptId))
+      if (fetchAllError) throw fetchAllError
 
-      const existingByHierarchy: Record<string, { id: string; documents_and_fields: any[] }> = {};
-      (allRequirements || []).forEach(req => {
-        if (!req.job_level) return;
+      const existingByHierarchy: Record<string, { id: string; documents_and_fields: any[]; client_fields: any[] }> = {}
+      ;(allRequirements || []).forEach(req => {
+        if (!req.job_level) return
         const hKey = [req.job_level.subdepartment_id, req.job_level.class_id, req.job_level.subclass_id]
-          .filter(id => id !== null && id !== undefined).join('_');
+          .filter(id => id !== null && id !== undefined).join('_')
         existingByHierarchy[hKey] = {
           id: req.id,
-          documents_and_fields: Array.isArray(req.documents_and_fields) ? req.documents_and_fields : []
-        };
-      });
+          documents_and_fields: Array.isArray(req.documents_and_fields) ? req.documents_and_fields : [],
+          client_fields: Array.isArray(req.client_fields) ? req.client_fields : []
+        }
+      })
 
-      const savePromises = Object.entries(changesByHierarchy).map(async ([hierarchyKey, data]) => {
-        const parts = hierarchyKey.split('_');
-        const sdId = parts[0] ? parseInt(parts[0]) : null;
-        const clsId = parts[1] ? parseInt(parts[1]) : null;
-        const scId = parts[2] ? parseInt(parts[2]) : null;
+      const savePromises = Array.from(
+        new Set([...Object.keys(changesByHierarchy), ...Object.keys(clientFieldChangesByHierarchy)])
+      ).map(async (hierarchyKey) => {
+        const data = changesByHierarchy[hierarchyKey] || { documents: {} }
+        const parts = hierarchyKey.split('_')
+        const sdId = parts[0] ? parseInt(parts[0]) : null
+        const clsId = parts[1] ? parseInt(parts[1]) : null
+        const scId = parts[2] ? parseInt(parts[2]) : null
 
-        let level = 2;
-        if (scId) level = 4;
-        else if (clsId) level = 3;
+        let level = 2
+        if (scId) level = 4
+        else if (clsId) level = 3
 
         const jobLevelObj = {
           level, department_id: deptId,
           subdepartment_id: sdId, class_id: clsId ?? null, subclass_id: scId ?? null
-        };
-        const existingRecord = existingByHierarchy[hierarchyKey];
+        }
+        const existingRecord = existingByHierarchy[hierarchyKey]
 
-        const docsMap = new Map<string, any>();
-        (existingRecord?.documents_and_fields || []).forEach(doc => {
-          docsMap.set(String(doc.id), { ...doc, fields: Array.isArray(doc.fields) ? doc.fields : [] });
-        });
+        const docsMap = new Map<string, any>()
+        ;(existingRecord?.documents_and_fields || []).forEach(doc => {
+          docsMap.set(String(doc.id), { ...doc, fields: Array.isArray(doc.fields) ? doc.fields : [] })
+        })
 
         Object.entries(data.documents).forEach(([entityKey, typeChanges]) => {
-          const isField = entityKey.includes('|');
-          let docId: string, fieldId: string | undefined;
-          if (isField) [docId, fieldId] = entityKey.split('|');
-          else docId = entityKey;
+          const isField = entityKey.includes('|')
+          let docId: string, fieldId: string | undefined
+          if (isField) [docId, fieldId] = entityKey.split('|')
+          else docId = entityKey
 
           let docObj = docsMap.get(String(docId)) || {
             id: String(docId), fields: [], updated_at: new Date().toISOString()
-          };
+          }
 
           if (isField && fieldId) {
-            let fieldObj = docObj.fields.find((f: any) => String(f.id) === String(fieldId));
+            let fieldObj = docObj.fields.find((f: any) => String(f.id) === String(fieldId))
             if (!fieldObj) {
-              fieldObj = { id: String(fieldId), updated_at: new Date().toISOString() };
-              docObj.fields.push(fieldObj);
+              fieldObj = { id: String(fieldId), updated_at: new Date().toISOString() }
+              docObj.fields.push(fieldObj)
             }
             Object.entries(typeChanges).forEach(([type, val]) => {
-              if (val) fieldObj[type] = true; else delete fieldObj[type];
-            });
-            const remainingKeys = Object.keys(fieldObj).filter(k => !['id', 'updated_at'].includes(k));
+              if (val) fieldObj[type] = true; else delete fieldObj[type]
+            })
+            const remainingKeys = Object.keys(fieldObj).filter(k => !['id', 'updated_at'].includes(k))
             if (remainingKeys.length === 0) {
-              docObj.fields = docObj.fields.filter((f: any) => String(f.id) !== String(fieldId));
+              docObj.fields = docObj.fields.filter((f: any) => String(f.id) !== String(fieldId))
             }
           } else {
             Object.entries(typeChanges).forEach(([type, val]) => {
-              if (val) docObj[type] = true; else delete docObj[type];
-            });
+              if (val) docObj[type] = true; else delete docObj[type]
+            })
           }
 
-          docObj.updated_at = new Date().toISOString();
-          docsMap.set(String(docId), docObj);
-        });
+          docObj.updated_at = new Date().toISOString()
+          docsMap.set(String(docId), docObj)
+        })
 
         const finalDocs = Array.from(docsMap.values()).filter(doc => {
-          const docBooleans = Object.keys(doc).filter(k => !['id', 'fields', 'updated_at'].includes(k));
+          const docBooleans = Object.keys(doc).filter(k => !['id', 'fields', 'updated_at'].includes(k))
           const fieldBooleans = (doc.fields || []).some((f: any) =>
             Object.keys(f).some(k => !['id', 'updated_at'].includes(k))
-          );
-          return docBooleans.length > 0 || fieldBooleans;
-        });
+          )
+          return docBooleans.length > 0 || fieldBooleans
+        })
+
+        const clientFieldsChanges = clientFieldChangesByHierarchy[hierarchyKey]
+        const clientFieldsMap = new Map<string, any>()
+        ;(existingRecord?.client_fields || []).forEach(item => {
+          clientFieldsMap.set(String(item.id), { ...item })
+        })
+
+        if (clientFieldsChanges) {
+          Object.entries(clientFieldsChanges).forEach(([fieldId, typeChanges]) => {
+            let fieldObj = clientFieldsMap.get(String(fieldId)) || { id: String(fieldId) }
+            Object.entries(typeChanges).forEach(([type, val]) => {
+              if (val) fieldObj[type] = true; else delete fieldObj[type]
+            })
+            clientFieldsMap.set(String(fieldId), fieldObj)
+          })
+        }
+
+        const finalClientFields = Array.from(clientFieldsMap.values()).filter(item => {
+          return Object.keys(item).some(k => !['id', 'updated_at'].includes(k) && item[k] === true)
+        })
 
         const finalPayload = {
           job_level: jobLevelObj,
           documents_and_fields: finalDocs,
+          client_fields: finalClientFields,
           updated_at: new Date().toISOString()
-        };
-
-        console.log(`[Save] ${existingRecord ? `Updating ID ${existingRecord.id}` : 'Inserting NEW'}:`, finalPayload);
+        }
 
         if (existingRecord?.id) {
-          return supabase.from('tm_class_requirements').update(finalPayload).eq('id', existingRecord.id);
+          return supabase.from('tm_class_requirements').update(finalPayload).eq('id', existingRecord.id)
         } else {
-          return supabase.from('tm_class_requirements').insert([finalPayload]);
+          return supabase.from('tm_class_requirements').insert([finalPayload])
         }
-      });
+      })
 
-      const results = await Promise.all(savePromises);
-      const err = results.find(r => r?.error);
-      if (err) throw err.error;
+      const results = await Promise.all(savePromises)
+      const err = results.find(r => r?.error)
+      if (err) throw err.error
 
-      // ── Clear pending changes first, then force-refresh allocations ──────────
-      setPendingChanges({ documents: {}, clientFields: {} });
-      setHasUnsavedChanges(false);
-      await fetchData(true);   // force=true bypasses the 1s debounce
-      toast({ title: "✅ Saved successfully", description: "Allocations updated. Table refreshed." });
+      setPendingChanges({ documents: {}, clientFields: {} })
+      setHasUnsavedChanges(false)
+      await fetchData(true)
+      toast.success("Allocations updated successfully")
     } catch (error) {
-      console.error("[Save] Error:", error);
-      toast({ title: "Save Failed", description: error.message, variant: "destructive" });
+      console.error("[Save] Error:", error)
+      toast.error(`Save Failed: ${error.message}`)
     } finally {
-      setIsSaving(false);
+      setIsSaving(false)
     }
-  }, [pendingChanges, hasUnsavedChanges, fetchData, activeTab]);
+  }, [pendingChanges, hasUnsavedChanges, fetchData, activeTab])
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // EXPORT — one worksheet per tab (Company / Individual / Application)
+  // EXPORT
   // ─────────────────────────────────────────────────────────────────────────────
   const writeSheetForTab = useCallback((
     worksheet: ExcelJS.Worksheet,
     tabValue: string,
     tabCols: any[]
   ) => {
-    const tabGrouped = groupedDocsByTab[tabValue] || {};
+    const tabGrouped = groupedDocsByTab[tabValue] || {}
 
-    const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002060' } };
-    const subHeaderFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } };
-    const lightFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } };
-    const whiteFont = { color: { argb: 'FFFFFFFF' }, bold: true };
-    const centerAlign = { vertical: 'middle', horizontal: 'center' };
+    const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002060' } }
+    const subHeaderFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } }
+    const lightFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } }
+    const whiteFont = { color: { argb: 'FFFFFFFF' }, bold: true }
+    const centerAlign = { vertical: 'middle', horizontal: 'center' }
 
-    const HEADER_START = 3; // rows 1-2 are meta/instructions, rows 3-6 are 4-level column headers
+    const HEADER_START = 3
 
-    // Row 1 — title
-    worksheet.mergeCells('A1:F1');
-    const titleCell = worksheet.getCell('A1');
-    titleCell.value = `${currentDepartment?.name} — ${DOC_TABS.find(t => t.value === tabValue)?.label}  |  Exported: ${format(new Date(), 'yyyy-MM-dd HH:mm')}`;
-    titleCell.font = { size: 13, bold: true };
-    titleCell.alignment = { vertical: 'middle' };
+    worksheet.mergeCells('A1:F1')
+    const titleCell = worksheet.getCell('A1')
+    titleCell.value = `${currentDepartment?.name} — ${DOC_TABS.find(t => t.value === tabValue)?.label}  |  Exported: ${format(new Date(), 'yyyy-MM-dd HH:mm')}`
+    titleCell.font = { size: 14, bold: true }
+    titleCell.alignment = { vertical: 'middle' }
 
-    // Row 2 — import guide
-    worksheet.mergeCells('A2:B2');
-    const instrCell = worksheet.getCell('A2');
-    instrCell.value = 'IMPORT GUIDE: Type "Yes" in any cell to enable that allocation. Leave blank to disable. Do not add or remove rows.';
-    instrCell.font = { italic: true, color: { argb: 'FF595959' }, size: 10 };
+    worksheet.mergeCells('A2:B2')
+    const instrCell = worksheet.getCell('A2')
+    instrCell.value = 'IMPORT GUIDE: Type "Yes" in any cell to enable that allocation. Leave blank to disable. Do not add or remove rows.'
+    instrCell.font = { italic: true, color: { argb: 'FF595959' }, size: 11 }
 
-    // Fixed columns: #, Name, Document ID, Field ID (cols 1-4)
-    const fixedHeaders = ['#', 'Document / Field Name', 'Document ID', 'Field ID'];
-    const fixedWidths = [8, 52, 38, 14];
+    const fixedHeaders = ['#', 'Document / Field Name', 'Document ID', 'Field ID']
+    const fixedWidths = [10, 56, 38, 14]
     fixedHeaders.forEach((text, i) => {
-      const colNum = i + 1;
-      worksheet.mergeCells(HEADER_START, colNum, HEADER_START + 3, colNum);
-      const cell = worksheet.getCell(HEADER_START, colNum);
-      cell.value = text;
-      cell.fill = headerFill;
-      cell.font = whiteFont;
-      cell.alignment = centerAlign;
-      worksheet.getColumn(colNum).width = fixedWidths[i];
-    });
+      const colNum = i + 1
+      worksheet.mergeCells(HEADER_START, colNum, HEADER_START + 3, colNum)
+      const cell = worksheet.getCell(HEADER_START, colNum)
+      cell.value = text
+      cell.fill = headerFill
+      cell.font = whiteFont
+      cell.alignment = centerAlign
+      worksheet.getColumn(colNum).width = fixedWidths[i]
+    })
 
-    // Hide ID columns — present for import, invisible to users
-    worksheet.getColumn(3).hidden = true;  // Document ID
-    worksheet.getColumn(4).hidden = true;  // Field ID
+    worksheet.getColumn(3).hidden = true
+    worksheet.getColumn(4).hidden = true
 
-    // Dynamic columns starting at col 5
-    let colIndex = 5;
-    let lastSd = null, sdStart = 0;
-    let lastCls = null, clsStart = 0;
-    const subdepartmentBoundaries = []; // Track where each subdepartment ends for borders
+    let colIndex = 5
+    let lastSd = null, sdStart = 0
+    let lastCls = null, clsStart = 0
+    const subdepartmentBoundaries = []
 
     tabCols.forEach((col, idx) => {
-      const actualColIdx = colIndex;
-      const colSpan = col.isExpanded ? col.specifications.length : 1;
+      const actualColIdx = colIndex
+      const colSpan = col.isExpanded ? col.specifications.length : 1
 
-      // Subdept header (row HEADER_START)
       if (!lastSd || lastSd.id !== col.subdept.id) {
         if (lastSd && sdStart) {
-          // Add border to the right of the previous subdepartment
-          subdepartmentBoundaries.push(actualColIdx - 1);
-          try { worksheet.mergeCells(HEADER_START, sdStart, HEADER_START, actualColIdx - 1); } catch { }
+          subdepartmentBoundaries.push(actualColIdx - 1)
+          try { worksheet.mergeCells(HEADER_START, sdStart, HEADER_START, actualColIdx - 1) } catch { }
         }
-        lastSd = col.subdept; sdStart = actualColIdx;
-        const cell = worksheet.getCell(HEADER_START, actualColIdx);
-        cell.value = col.subdept.name;
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E78' } };
-        cell.font = whiteFont; cell.alignment = centerAlign;
+        lastSd = col.subdept; sdStart = actualColIdx
+        const cell = worksheet.getCell(HEADER_START, actualColIdx)
+        cell.value = col.subdept.name
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E78' } }
+        cell.font = whiteFont; cell.alignment = centerAlign
       }
       if (idx === tabCols.length - 1) {
-        // Add border to the right of the last subdepartment
-        subdepartmentBoundaries.push(actualColIdx + colSpan - 1);
-        try { worksheet.mergeCells(HEADER_START, sdStart, HEADER_START, actualColIdx + colSpan - 1); } catch { }
+        subdepartmentBoundaries.push(actualColIdx + colSpan - 1)
+        try { worksheet.mergeCells(HEADER_START, sdStart, HEADER_START, actualColIdx + colSpan - 1) } catch { }
       }
 
-      // Class header (row HEADER_START+1)
-      const className = col.clsIndex === null ? "Direct" : col.subdept.classes?.[col.clsIndex]?.name ?? '';
-      const uniqueClassId = `${col.subdept.id}-${col.clsIndex}`;
+      const className = col.clsIndex === null ? "Direct" : col.subdept.classes?.[col.clsIndex]?.name ?? ''
+      const uniqueClassId = `${col.subdept.id}-${col.clsIndex}`
       if (!lastCls || lastCls.id !== uniqueClassId) {
         if (lastCls && clsStart) {
-          try { worksheet.mergeCells(HEADER_START + 1, clsStart, HEADER_START + 1, actualColIdx - 1); } catch { }
+          try { worksheet.mergeCells(HEADER_START + 1, clsStart, HEADER_START + 1, actualColIdx - 1) } catch { }
         }
-        lastCls = { id: uniqueClassId }; clsStart = actualColIdx;
-        const cell = worksheet.getCell(HEADER_START + 1, actualColIdx);
-        cell.value = className;
-        cell.fill = subHeaderFill; cell.font = whiteFont; cell.alignment = centerAlign;
+        lastCls = { id: uniqueClassId }; clsStart = actualColIdx
+        const cell = worksheet.getCell(HEADER_START + 1, actualColIdx)
+        cell.value = className
+        cell.fill = subHeaderFill; cell.font = whiteFont; cell.alignment = centerAlign
       }
       if (idx === tabCols.length - 1) {
-        try { worksheet.mergeCells(HEADER_START + 1, clsStart, HEADER_START + 1, actualColIdx + colSpan - 1); } catch { }
+        try { worksheet.mergeCells(HEADER_START + 1, clsStart, HEADER_START + 1, actualColIdx + colSpan - 1) } catch { }
       }
 
-      // Subclass header (row HEADER_START+2)
       const subclassName = (col.subclsIndex !== null && col.clsIndex !== null)
         ? col.subdept.classes?.[col.clsIndex]?.subclasses?.[col.subclsIndex]?.name ?? '-'
-        : '-';
-      const scCell = worksheet.getCell(HEADER_START + 2, actualColIdx);
-      scCell.value = subclassName;
-      scCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5B9BD5' } };
-      scCell.font = { color: { argb: 'FFFFFFFF' } }; scCell.alignment = centerAlign;
+        : '-'
+      const scCell = worksheet.getCell(HEADER_START + 2, actualColIdx)
+      scCell.value = subclassName
+      scCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5B9BD5' } }
+      scCell.font = { color: { argb: 'FFFFFFFF' } }; scCell.alignment = centerAlign
       if (colSpan > 1) {
-        try { worksheet.mergeCells(HEADER_START + 2, actualColIdx, HEADER_START + 2, actualColIdx + colSpan - 1); } catch { }
+        try { worksheet.mergeCells(HEADER_START + 2, actualColIdx, HEADER_START + 2, actualColIdx + colSpan - 1) } catch { }
       }
 
-      // Entity-type header (row HEADER_START+3)
-      const specs = col.isExpanded ? col.specifications : [col.specifications[0]];
+      const specs = col.isExpanded ? col.specifications : [col.specifications[0]]
       specs.forEach((entityType, sIdx) => {
-        const specCell = worksheet.getCell(HEADER_START + 3, actualColIdx + sIdx);
-        specCell.value = entityType;
-        specCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBDD7EE' } };
-        specCell.font = { bold: true }; specCell.alignment = centerAlign;
-        worksheet.getColumn(actualColIdx + sIdx).width = 15;
-      });
+        const specCell = worksheet.getCell(HEADER_START + 3, actualColIdx + sIdx)
+        specCell.value = entityType
+        specCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBDD7EE' } }
+        specCell.font = { bold: true }; specCell.alignment = centerAlign
+        worksheet.getColumn(actualColIdx + sIdx).width = 16
+      })
 
-      colIndex += colSpan;
-    });
+      colIndex += colSpan
+    })
 
-    // Helper: allocation lookup for export
     const getAlloc = (id: string, sdId, cIdx, scIdx, type) => {
-      const sd = currentDepartment?.subdepartments?.find(s => s.id === sdId);
-      const cls = cIdx !== null ? sd?.classes?.[cIdx] : null;
-      const sc = (cls && scIdx !== null) ? cls.subclasses?.[scIdx] : null;
-      const classIdPart = sc ? `${sdId}_${cls.id}_${sc.id}` : cls ? `${sdId}_${cls.id}` : `${sdId}`;
-      const key = `${id}::${classIdPart}`;
-      return (pendingChanges.documents[key]?.[type] ?? documentAllocations[key]?.[type]) === true;
-    };
+      const sd = currentDepartment?.subdepartments?.find(s => s.id === sdId)
+      const cls = cIdx !== null ? sd?.classes?.[cIdx] : null
+      const sc = (cls && scIdx !== null) ? cls.subclasses?.[scIdx] : null
+      const classIdPart = sc ? `${sdId}_${cls.id}_${sc.id}` : cls ? `${sdId}_${cls.id}` : `${sdId}`
+      const key = `${id}::${classIdPart}`
+      return (pendingChanges.documents[key]?.[type] ?? documentAllocations[key]?.[type]) === true
+    }
 
-    // Data rows
     Object.entries(tabGrouped)
       .sort(([a], [b]) => parseInt(a === 'other' ? '999' : a) - parseInt(b === 'other' ? '999' : b))
       .forEach(([, group]) => {
-        // Category row
-        const catRow = worksheet.addRow([group.mainCategoryNumber, group.mainCategory, '', '']);
-        catRow.outlineLevel = 0;
-        catRow.font = { bold: true };
-        catRow.fill = lightFill;
+        const catRow = worksheet.addRow([group.mainCategoryNumber, group.mainCategory, '', ''])
+        catRow.outlineLevel = 0
+        catRow.font = { bold: true }
+        catRow.fill = lightFill
 
         group.documents.forEach((doc, dIdx) => {
-          const rowLabel = `${group.mainCategoryNumber}.${dIdx + 1}`;
-          const docRow = worksheet.addRow([rowLabel, doc.display_name, doc.id, '']);
-          docRow.outlineLevel = 1;
+          const rowLabel = `${group.mainCategoryNumber}.${dIdx + 1}`
+          const docRow = worksheet.addRow([rowLabel, doc.display_name, doc.id, ''])
+          docRow.outlineLevel = 1
 
-          let dataCol = 5;
+          let dataCol = 5
           tabCols.forEach(col => {
-            const specs = col.isExpanded ? col.specifications : [col.specifications[0]];
+            const specs = col.isExpanded ? col.specifications : [col.specifications[0]]
             specs.forEach(spec => {
-              const checked = getAlloc(doc.id, col.subdept.id, col.clsIndex, col.subclsIndex, spec);
-              const cell = docRow.getCell(dataCol++);
+              const checked = getAlloc(doc.id, col.subdept.id, col.clsIndex, col.subclsIndex, spec)
+              const cell = docRow.getCell(dataCol++)
               if (checked) {
-                cell.value = 'Yes';
-                cell.alignment = centerAlign;
-                cell.font = { color: { argb: 'FF00B050' }, bold: true };
+                cell.value = 'Yes'
+                cell.alignment = centerAlign
+                cell.font = { color: { argb: 'FF00B050' }, bold: true }
               }
-            });
-          });
+            })
+          })
 
-          // Field rows
           if (doc.fields?.length) {
             doc.fields.forEach(field => {
-              const fieldRow = worksheet.addRow([field.path, `    ${field.name}`, doc.id, field.id]);
-              fieldRow.outlineLevel = 2;
-              fieldRow.font = { italic: true, color: { argb: 'FF555555' } };
+              const fieldRow = worksheet.addRow([field.path, `    ${field.name}`, doc.id, field.id])
+              fieldRow.outlineLevel = 2
+              fieldRow.font = { italic: true, color: { argb: 'FF555555' } }
 
-              let fDataCol = 5;
+              let fDataCol = 5
               tabCols.forEach(col => {
-                const specs = col.isExpanded ? col.specifications : [col.specifications[0]];
+                const specs = col.isExpanded ? col.specifications : [col.specifications[0]]
                 specs.forEach(spec => {
-                  const checked = getAlloc(`${doc.id}|${field.id}`, col.subdept.id, col.clsIndex, col.subclsIndex, spec);
-                  const cell = fieldRow.getCell(fDataCol++);
+                  const checked = getAlloc(`${doc.id}|${field.id}`, col.subdept.id, col.clsIndex, col.subclsIndex, spec)
+                  const cell = fieldRow.getCell(fDataCol++)
                   if (checked) {
-                    cell.value = 'Yes';
-                    cell.alignment = centerAlign;
-                    cell.font = { color: { argb: 'FF00B050' }, bold: true };
+                    cell.value = 'Yes'
+                    cell.alignment = centerAlign
+                    cell.font = { color: { argb: 'FF00B050' }, bold: true }
                   }
                 });
               });
@@ -665,561 +804,868 @@ export default function DocumentsFields() {
         });
       });
 
-    // Apply distinguishable borders between subdepartments
-    const thickBorder = { style: 'thick', color: { argb: 'FF000000' } };
+    const thickBorder = { style: 'thick', color: { argb: 'FF000000' } }
     subdepartmentBoundaries.forEach(colIndex => {
-      // Apply thick right border to all rows in this column
       worksheet.eachRow((row, rowNumber) => {
-        if (rowNumber >= HEADER_START) { // Only apply to header and data rows
-          const cell = row.getCell(colIndex);
-          cell.border = {
-            ...cell.border,
-            right: thickBorder
-          };
+        if (rowNumber >= HEADER_START) {
+          const cell = row.getCell(colIndex)
+          cell.border = { ...cell.border, right: thickBorder }
         }
-      });
-    });
+      })
+    })
 
-    // Freeze pane: first 4 columns + 6 header rows
-    worksheet.views = [{ state: 'frozen', xSplit: 4, ySplit: HEADER_START + 4 }];
-  }, [groupedDocsByTab, currentDepartment, documentAllocations, pendingChanges]);
+    worksheet.views = [{ state: 'frozen', xSplit: 4, ySplit: HEADER_START + 4 }]
+  }, [groupedDocsByTab, currentDepartment, documentAllocations, pendingChanges])
 
   const exportToExcel = useCallback(async () => {
-    if (!currentDepartment) return;
-    setIsExporting(true);
+    if (!currentDepartment) return
+    setIsExporting(true)
     try {
-      const workbook = new ExcelJS.Workbook();
-      workbook.creator = 'Document Management';
-      workbook.created = new Date();
+      const workbook = new ExcelJS.Workbook()
+      workbook.creator = 'Document Management'
+      workbook.created = new Date()
 
       DOC_TABS.forEach(tab => {
         const ws = workbook.addWorksheet(tab.label, {
           properties: { outlineProperties: { summaryBelow: false, summaryRight: false } }
-        });
-        const tabCols = buildAllColumns(tab.value, normalizedSubdepartments);
-        writeSheetForTab(ws, tab.value, tabCols);
-      });
+        })
+        const tabCols = buildAllColumns(tab.value, normalizedSubdepartments)
+        writeSheetForTab(ws, tab.value, tabCols)
+      })
 
-      const buffer = await workbook.xlsx.writeBuffer();
-      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      saveAs(blob, `${currentDepartment.name}_Documents_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
-      toast({ title: "✅ Export Successful", description: `3 sheets: ${DOC_TABS.map(t => t.label).join(', ')}` });
+      const buffer = await workbook.xlsx.writeBuffer()
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      saveAs(blob, `${currentDepartment.name}_Documents_${format(new Date(), 'yyyy-MM-dd')}.xlsx`)
+      toast.success(`Export successful (${DOC_TABS.length} sheets)`)
     } catch (e) {
-      console.error('[Export] Failed:', e);
-      toast({ title: "Export Failed", variant: "destructive" });
+      console.error('[Export] Failed:', e)
+      toast.error("Export Failed")
     } finally {
-      setIsExporting(false);
+      setIsExporting(false)
     }
-  }, [currentDepartment, buildAllColumns, normalizedSubdepartments, writeSheetForTab]);
+  }, [currentDepartment, buildAllColumns, normalizedSubdepartments, writeSheetForTab])
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // IMPORT — reads "Yes" cells from each sheet and upserts to Supabase
+  // IMPORT
   // ─────────────────────────────────────────────────────────────────────────────
   const handleImport = useCallback(async (file: File) => {
-    if (!currentDepartment) return;
-    setIsImporting(true);
-    console.log(`[Import] ──────────────────────────────────────────`);
-    console.log(`[Import] Starting import | File: ${file.name} | Dept: ${currentDepartment.name}`);
+    if (!currentDepartment) return
+    setIsImporting(true)
 
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(arrayBuffer);
-      console.log(`[Import] Workbook loaded | Sheets: ${workbook.worksheets.map(w => w.name).join(' | ')}`);
+      const arrayBuffer = await file.arrayBuffer()
+      const workbook = new ExcelJS.Workbook()
+      await workbook.xlsx.load(arrayBuffer)
 
-      const deptId = parseInt(activeTab);
-
-      // Fetch ALL current requirements for this department
+      const deptId = parseInt(activeTab)
       const { data: allRequirements, error: fetchError } = await supabase
         .from('tm_class_requirements')
         .select('id, documents_and_fields, job_level')
-        .eq('job_level->>department_id', String(deptId));
-      if (fetchError) throw fetchError;
-      console.log(`[Import] Existing requirement records fetched: ${allRequirements?.length ?? 0}`);
+        .eq('job_level->>department_id', String(deptId))
+      if (fetchError) throw fetchError
 
-      const existingByHierarchy: Record<string, { id: string; documents_and_fields: any[] }> = {};
-      (allRequirements || []).forEach(req => {
-        if (!req.job_level) return;
+      const existingByHierarchy: Record<string, { id: string; documents_and_fields: any[] }> = {}
+      ;(allRequirements || []).forEach(req => {
+        if (!req.job_level) return
         const hKey = [req.job_level.subdepartment_id, req.job_level.class_id, req.job_level.subclass_id]
-          .filter(id => id !== null && id !== undefined).join('_');
+          .filter(id => id !== null && id !== undefined).join('_')
         existingByHierarchy[hKey] = {
           id: req.id,
           documents_and_fields: Array.isArray(req.documents_and_fields) ? req.documents_and_fields : []
-        };
-      });
+        }
+      })
 
-      // importChanges[hierarchyKey][entityKey] = { [boolType]: true }
-      // entityKey is either docId (doc-level) or docId|fieldId (field-level)
-      const importChanges: Record<string, Record<string, Record<string, boolean>>> = {};
-      let totalCellsScanned = 0;
-      let totalYesFound = 0;
+      const importChanges: Record<string, Record<string, Record<string, boolean>>> = {}
+      let totalYesFound = 0
 
       for (const tab of DOC_TABS) {
-        const worksheet = workbook.getWorksheet(tab.label);
-        if (!worksheet) {
-          console.warn(`[Import] Sheet "${tab.label}" NOT FOUND — skipping`);
-          continue;
-        }
+        const worksheet = workbook.getWorksheet(tab.label)
+        if (!worksheet) continue
 
-        const tabCols = buildVisibleColumns(tab.value, normalizedSubdepartments);
-        console.log(`[Import] Sheet: "${tab.label}" | Columns mapped: ${tabCols.length}`);
-
-        // Map Excel column index (1-based) → column metadata
-        // Fixed cols: 1=#, 2=Name, 3=DocId, 4=FieldId → data starts at col 5
-        const colMetaMap: Record<number, { subdept: any; clsIndex: number | null; subclsIndex: number | null; spec: string }> = {};
-        let cIdx = 5;
+        const tabCols = buildVisibleColumns(tab.value, normalizedSubdepartments)
+        const colMetaMap: Record<number, { subdept: any; clsIndex: number | null; subclsIndex: number | null; spec: string }> = {}
+        let cIdx = 5
         tabCols.forEach(col => {
-          const specs = col.isExpanded ? col.specifications : [col.specifications[0]];
+          const specs = col.isExpanded ? col.specifications : [col.specifications[0]]
           specs.forEach(spec => {
             colMetaMap[cIdx] = {
               subdept: col.subdept,
               clsIndex: col.clsIndex,
               subclsIndex: col.subclsIndex,
               spec
-            };
-            cIdx++;
-          });
-        });
-        const maxDataCol = cIdx - 1;
+            }
+            cIdx++
+          })
+        })
+        const maxDataCol = cIdx - 1
 
-        let sheetYes = 0;
-        // Rows 1-6 are headers — data starts at row 7
         worksheet.eachRow((row, rowNumber) => {
-          if (rowNumber < 7) return;
+          if (rowNumber < 7) return
 
-          const docId = String(row.getCell(3).value ?? '').trim();
-          const fieldId = String(row.getCell(4).value ?? '').trim();
-          if (!docId) return; // category summary row — no docId
+          const docId = String(row.getCell(3).value ?? '').trim()
+          const fieldId = String(row.getCell(4).value ?? '').trim()
+          if (!docId) return
 
-          let rowYes = 0;
           for (let c = 5; c <= maxDataCol; c++) {
-            totalCellsScanned++;
-            const meta = colMetaMap[c];
-            if (!meta) continue;
+            const meta = colMetaMap[c]
+            if (!meta) continue
 
-            const rawVal = row.getCell(c).value;
-            const cellStr = String(rawVal ?? '').trim().toLowerCase();
-            if (cellStr !== 'yes') continue;
+            const rawVal = row.getCell(c).value
+            const cellStr = String(rawVal ?? '').trim().toLowerCase()
+            if (cellStr !== 'yes') continue
 
-            totalYesFound++;
-            sheetYes++;
-            rowYes++;
+            totalYesFound++
 
-            // Derive hierarchy key from column metadata
-            const sd = meta.subdept;
-            const cls = meta.clsIndex !== null ? sd.classes?.[meta.clsIndex] : null;
-            const sc = (cls && meta.subclsIndex !== null) ? cls.subclasses?.[meta.subclsIndex] : null;
+            const sd = meta.subdept
+            const cls = meta.clsIndex !== null ? sd.classes?.[meta.clsIndex] : null
+            const sc = (cls && meta.subclsIndex !== null) ? cls.subclasses?.[meta.subclsIndex] : null
             const hierarchyKey = [sd.id, cls?.id, sc?.id]
               .filter(id => id !== null && id !== undefined)
-              .join('_');
+              .join('_')
 
-            // entityKey: docId for doc-level, docId|fieldId for field-level
-            const entityKey = fieldId ? `${docId}|${fieldId}` : docId;
+            const entityKey = fieldId ? `${docId}|${fieldId}` : docId
 
-            if (!importChanges[hierarchyKey]) importChanges[hierarchyKey] = {};
-            if (!importChanges[hierarchyKey][entityKey]) importChanges[hierarchyKey][entityKey] = {};
-            importChanges[hierarchyKey][entityKey][meta.spec] = true;
-
-            console.log(`[Import]   ✓ Row ${rowNumber} | Doc: ${docId} | Field: ${fieldId || '-'} | Col: ${meta.spec} | Hierarchy: ${hierarchyKey}`);
+            if (!importChanges[hierarchyKey]) importChanges[hierarchyKey] = {}
+            if (!importChanges[hierarchyKey][entityKey]) importChanges[hierarchyKey][entityKey] = {}
+            importChanges[hierarchyKey][entityKey][meta.spec] = true
           }
-        });
-
-        console.log(`[Import] Sheet "${tab.label}" done | "Yes" cells: ${sheetYes}`);
+        })
       }
-
-      console.log(`[Import] ── Scan complete ──────────────────────────`);
-      console.log(`[Import] Cells scanned: ${totalCellsScanned} | "Yes" found: ${totalYesFound} | Hierarchy groups: ${Object.keys(importChanges).length}`);
 
       if (totalYesFound === 0) {
-        toast({ title: "Import", description: "No 'Yes' values found. Nothing was changed." });
-        return;
+        toast("No 'Yes' values found. Nothing was changed.")
+        return
       }
 
-      // ── Build upserts ─────────────────────────────────────────────────────
       const upsertPromises = Object.entries(importChanges).map(async ([hierarchyKey, entityMap]) => {
-        const parts = hierarchyKey.split('_');
-        const sdId = parts[0] ? parseInt(parts[0]) : null;
-        const clsId = parts[1] ? parseInt(parts[1]) : null;
-        const scId = parts[2] ? parseInt(parts[2]) : null;
+        const parts = hierarchyKey.split('_')
+        const sdId = parts[0] ? parseInt(parts[0]) : null
+        const clsId = parts[1] ? parseInt(parts[1]) : null
+        const scId = parts[2] ? parseInt(parts[2]) : null
 
-        let level = 2;
-        if (scId) level = 4;
-        else if (clsId) level = 3;
+        let level = 2
+        if (scId) level = 4
+        else if (clsId) level = 3
 
         const jobLevelObj = {
           level, department_id: deptId,
           subdepartment_id: sdId, class_id: clsId ?? null, subclass_id: scId ?? null
-        };
-        const existingRecord = existingByHierarchy[hierarchyKey];
+        }
+        const existingRecord = existingByHierarchy[hierarchyKey]
 
-        // Start from existing documents
-        const docsMap = new Map<string, any>();
-        (existingRecord?.documents_and_fields || []).forEach(doc => {
-          docsMap.set(String(doc.id), { ...doc, fields: Array.isArray(doc.fields) ? doc.fields : [] });
-        });
+        const docsMap = new Map<string, any>()
+        ;(existingRecord?.documents_and_fields || []).forEach(doc => {
+          docsMap.set(String(doc.id), { ...doc, fields: Array.isArray(doc.fields) ? doc.fields : [] })
+        })
 
-        // Apply imported "Yes" values
         Object.entries(entityMap).forEach(([entityKey, typeFlags]) => {
-          const isField = entityKey.includes('|');
-          let docId: string, fieldId: string | undefined;
-          if (isField) [docId, fieldId] = entityKey.split('|');
-          else docId = entityKey;
+          const isField = entityKey.includes('|')
+          let docId: string, fieldId: string | undefined
+          if (isField) [docId, fieldId] = entityKey.split('|')
+          else docId = entityKey
 
           let docObj = docsMap.get(String(docId)) || {
             id: String(docId), fields: [], updated_at: new Date().toISOString()
-          };
-
-          if (isField && fieldId) {
-            // Field-level: apply boolean flags onto the field object
-            let fieldObj = docObj.fields.find((f: any) => String(f.id) === String(fieldId));
-            if (!fieldObj) {
-              fieldObj = { id: String(fieldId), updated_at: new Date().toISOString() };
-              docObj.fields.push(fieldObj);
-            }
-            Object.entries(typeFlags).forEach(([type, val]) => {
-              if (val) fieldObj[type] = true; else delete fieldObj[type];
-            });
-          } else {
-            // Doc-level: apply boolean flags directly on the doc object
-            Object.entries(typeFlags).forEach(([type, val]) => {
-              if (val) docObj[type] = true; else delete docObj[type];
-            });
           }
 
-          docObj.updated_at = new Date().toISOString();
-          docsMap.set(String(docId), docObj);
-        });
+          if (isField && fieldId) {
+            let fieldObj = docObj.fields.find((f: any) => String(f.id) === String(fieldId))
+            if (!fieldObj) {
+              fieldObj = { id: String(fieldId), updated_at: new Date().toISOString() }
+              docObj.fields.push(fieldObj)
+            }
+            Object.entries(typeFlags).forEach(([type, val]) => {
+              if (val) fieldObj[type] = true; else delete fieldObj[type]
+            })
+          } else {
+            Object.entries(typeFlags).forEach(([type, val]) => {
+              if (val) docObj[type] = true; else delete docObj[type]
+            })
+          }
 
-        // Prune empty docs
+          docObj.updated_at = new Date().toISOString()
+          docsMap.set(String(docId), docObj)
+        })
+
         const finalDocs = Array.from(docsMap.values()).filter(doc => {
-          const hasDocFlags = Object.keys(doc).some(k => !['id', 'fields', 'updated_at'].includes(k) && doc[k] === true);
+          const hasDocFlags = Object.keys(doc).some(k => !['id', 'fields', 'updated_at'].includes(k) && doc[k] === true)
           const hasFieldFlags = (doc.fields || []).some((f: any) =>
             Object.keys(f).some(k => !['id', 'updated_at'].includes(k) && f[k] === true)
-          );
-          return hasDocFlags || hasFieldFlags;
-        });
+          )
+          return hasDocFlags || hasFieldFlags
+        })
 
         const finalPayload = {
           job_level: jobLevelObj,
           documents_and_fields: finalDocs,
           updated_at: new Date().toISOString()
-        };
-
-        console.log(`[Import] ${existingRecord ? `UPDATE id=${existingRecord.id}` : 'INSERT new'} | Hierarchy: ${hierarchyKey} | Docs: ${finalDocs.length}`);
+        }
 
         if (existingRecord?.id) {
-          return supabase.from('tm_class_requirements').update(finalPayload).eq('id', existingRecord.id);
+          return supabase.from('tm_class_requirements').update(finalPayload).eq('id', existingRecord.id)
         } else {
-          return supabase.from('tm_class_requirements').insert([finalPayload]);
+          return supabase.from('tm_class_requirements').insert([finalPayload])
         }
-      });
+      })
 
-      const results = await Promise.all(upsertPromises);
-      const err = results.find(r => r?.error);
-      if (err) throw err.error;
+      const results = await Promise.all(upsertPromises)
+      const err = results.find(r => r?.error)
+      if (err) throw err.error
 
-      console.log(`[Import] All upserts complete. Refreshing UI...`);
-      await fetchData(true);
-      toast({
-        title: "✅ Import Successful",
-        description: `${totalYesFound} allocations applied across ${Object.keys(importChanges).length} hierarchy groups.`
-      });
+      await fetchData(true)
+      toast.success(`Import Successful: ${totalYesFound} allocations applied.`)
     } catch (e) {
-      console.error('[Import] Failed:', e);
-      toast({ title: "Import Failed", description: e.message, variant: "destructive" });
+      console.error('[Import] Failed:', e)
+      toast.error(`Import Failed: ${e.message}`)
     } finally {
-      setIsImporting(false);
-      if (importFileRef.current) importFileRef.current.value = '';
+      setIsImporting(false)
+      if (importFileRef.current) importFileRef.current.value = ''
     }
-  }, [currentDepartment, activeTab, fetchData, buildVisibleColumns, normalizedSubdepartments]);
+  }, [currentDepartment, activeTab, fetchData, buildVisibleColumns, normalizedSubdepartments])
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // UI helpers
-  // ─────────────────────────────────────────────────────────────────────────────
-  const toggleColumnExpansion = (key) => setExpandedColumns(prev => toggleSetItem(prev, key));
-  const toggleCategoryExpansion = (key) => setExpandedCategories(prev => toggleSetItem(prev, key));
-  const toggleItemExpansion = (key) => setExpandedItems(prev => toggleSetItem(prev, key));
+  const toggleColumnExpansion = (key) => setExpandedColumns(prev => toggleSetItem(prev, key))
+  const toggleCategoryExpansion = (key) => setExpandedCategories(prev => toggleSetItem(prev, key))
+  const toggleItemExpansion = (key) => setExpandedItems(prev => toggleSetItem(prev, key))
+  const toggleClientGroupExpansion = (key) => setExpandedClientGroups(prev => toggleSetItem(prev, key))
 
   const handleDiscardChanges = useCallback(() => {
-    setPendingChanges({ documents: {}, clientFields: {} });
-    setHasUnsavedChanges(false);
-  }, []);
+    setPendingChanges({ documents: {}, clientFields: {} })
+    setHasUnsavedChanges(false)
+    toast("Changes discarded.")
+  }, [])
 
-  if (loading) return <div className="p-12 text-center animate-pulse">Loading Document Map...</div>;
+  if (loading && departments.length === 0) {
+    return (
+      <div className="h-[calc(100vh-4rem)] flex items-center justify-center bg-background">
+        <div className="flex items-center gap-2.5 text-[11px] text-muted-foreground font-medium">
+          <Loader2 className="h-5 w-5 animate-spin text-custom-blue" />
+          Loading Document Allocation Matrix…
+        </div>
+      </div>
+    )
+  }
 
   // ─────────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────────
   return (
-    <div className="w-full min-h-screen p-4">
-      {/* Hidden file input for import */}
+    <div className="h-[calc(100vh-4rem)] flex flex-col bg-background overflow-hidden">
       <input
         ref={importFileRef}
         type="file"
         accept=".xlsx"
         className="hidden"
         onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) handleImport(file);
+          const file = e.target.files?.[0]
+          if (file) handleImport(file)
         }}
       />
 
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-2xl font-bold">Document Management</h1>
-          {hasUnsavedChanges && <p className="text-orange-500 text-sm mt-1">Unsaved Changes Pending</p>}
-        </div>
-        <div className="flex gap-2 flex-wrap items-center">
-          <Button variant="outline" size="sm" onClick={exportToExcel} disabled={isExporting}>
-            <Download className="mr-2 h-4 w-4" />
-            {isExporting ? "Exporting..." : "Export Excel"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => importFileRef.current?.click()}
-            disabled={isImporting}
-          >
-            <Upload className="mr-2 h-4 w-4" />
-            {isImporting ? "Importing..." : "Import Excel"}
-          </Button>
-          <ColumnVisibilityControl
-            columns={availableColumns.map(c => ({ ...c, visible: !!columnVisibility[c.id] }))}
-            onVisibilityChange={(id, v) => setColumnVisibility(prev => ({ ...prev, [id]: v }))}
-          />
-          <div className="flex items-center gap-2 ml-2">
-            <Button variant="outline" size="sm" onClick={() => toggleAllRows(!allExpanded)} className="h-8 text-xs">
-              {allExpanded
-                ? <><Minus className="h-3 w-3 mr-1" />Collapse All</>
-                : <><Plus className="h-3 w-3 mr-1" />Expand All</>}
-            </Button>
+      {/* ── Top Navigation & Department Tabs ────────────────────────── */}
+      <div className="flex-none bg-gradient-to-b from-accent/80 to-card border-b z-20 shadow-sm">
+        <div className="px-5 py-3 flex items-center justify-between gap-4 border-b border-border/60">
+          <div className="flex items-center gap-3.5">
+            <div className="h-9 w-9 rounded-lg bg-custom-blue text-white flex items-center justify-center font-bold shadow-sm">
+              <FolderTree className="h-5 w-5" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold tracking-tight text-foreground flex items-center gap-2.5">
+                Document Allocation Map
+                {hasUnsavedChanges && (
+                  <Badge variant="outline" className="h-5 px-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 text-xs font-semibold animate-pulse">
+                    Unsaved Changes
+                  </Badge>
+                )}
+              </h1>
+              <p className="text-xs text-muted-foreground">
+                Configure required documents and metadata fields across organizational class tiers.
+              </p>
+            </div>
           </div>
-          {hasUnsavedChanges && (
-            <>
-              <Button variant="outline" onClick={handleDiscardChanges} disabled={isSaving}>Discard</Button>
-              <Button onClick={handleSaveAllChanges} disabled={isSaving} className="bg-green-600 hover:bg-green-700">
-                {isSaving ? 'Saving...' : 'Save Changes'}
-              </Button>
-            </>
-          )}
+
+          <div className="flex items-center gap-2.5">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 text-[11px] font-medium gap-2 bg-card border-border shadow-none hover:bg-muted"
+              onClick={exportToExcel}
+              disabled={isExporting}
+            >
+              <Download className={cn("h-4 w-4", isExporting && "animate-pulse")} />
+              <span>{isExporting ? "Exporting..." : "Export Excel"}</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 text-[11px] font-medium gap-2 bg-card border-border shadow-none hover:bg-muted"
+              onClick={() => importFileRef.current?.click()}
+              disabled={isImporting}
+            >
+              <Upload className={cn("h-4 w-4", isImporting && "animate-pulse")} />
+              <span>{isImporting ? "Importing..." : "Import Excel"}</span>
+            </Button>
+
+            {hasUnsavedChanges && (
+              <>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleDiscardChanges} 
+                  disabled={isSaving}
+                  className="h-9 text-[11px] font-medium gap-2 text-muted-foreground hover:text-destructive border-border shadow-none"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  Discard
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleSaveAllChanges}
+                  disabled={isSaving}
+                  className="h-9 text-[11px] gap-2 bg-custom-blue text-white hover:bg-custom-blue/90 shadow-none font-medium"
+                >
+                  {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  Save Allocations
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Department Switcher Tabs */}
+        <div className="px-5 pt-2 bg-accent/50 flex items-center justify-between overflow-x-auto custom-scrollbar">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className="h-9 bg-transparent p-0 gap-1.5 flex-wrap justify-start">
+              {departments.map(d => (
+                <TabsTrigger
+                  key={d.id}
+                  value={String(d.id)}
+                  className="h-8 text-[11px] font-medium px-3.5 rounded-t-md rounded-b-none border-b-2 border-transparent data-[state=active]:border-custom-blue data-[state=active]:bg-card data-[state=active]:text-custom-blue shadow-none transition-all"
+                >
+                  <Building2 className="h-3.5 w-3.5 mr-2 opacity-70" />
+                  {d.name}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-4 flex-wrap h-auto">
-          {departments.map(d => (
-            <TabsTrigger key={d.id} value={String(d.id)}>{d.name}</TabsTrigger>
-          ))}
-        </TabsList>
-
-        <TabsContent value={activeTab}>
-          <div className="flex items-center justify-between mb-4">
+      {/* ── Sub Toolbar (Doc Type Tabs, Search, Visibility & Matrix Controls) ── */}
+      <div className="flex-none bg-card border-b px-5 py-2.5 z-20">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3.5 flex-wrap">
             <Tabs
               value={documentTab}
               onValueChange={value => {
-                setDocumentTab(value as "company" | "individual" | "application");
-                setSearchQuery("");
+                setDocumentTab(value as "company" | "individual" | "application")
+                setSearchQuery("")
               }}
-              className="w-full"
             >
-              <div className="flex items-center justify-between">
-                <TabsList>
-                  {DOC_TABS.map(tab => (
-                    <TabsTrigger key={tab.value} value={tab.value}>{tab.label}</TabsTrigger>
-                  ))}
-                </TabsList>
-              </div>
-              <div className="relative w-64 mt-2">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="search"
-                  placeholder="Search documents..."
-                  className="w-full pl-8"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-                {searchQuery && (
-                  <X className="absolute right-2.5 top-2.5 h-4 w-4 text-muted-foreground cursor-pointer"
-                    onClick={() => setSearchQuery("")} />
-                )}
-              </div>
-
-              <div className="mt-4 border rounded-lg overflow-hidden bg-white shadow-sm">
-                <div className="overflow-auto max-h-[calc(100vh-250px)]">
-                  <Table>
-                    <TableHeader className="bg-blue-600 sticky top-0 z-20 shadow-sm">
-                      <TableRow>
-                        <TableHead rowSpan={4} className="bg-blue-600 text-white w-16 border-r border-blue-500 text-center">#</TableHead>
-                        <TableHead rowSpan={4} className="bg-blue-600 text-white w-[300px] border-r border-blue-500 sticky left-0 z-30">Document / Field Details</TableHead>
-                        {visibleColumns.reduce((acc, col, idx) => {
-                          const prev = visibleColumns[idx - 1];
-                          if (!prev || prev.subdept.id !== col.subdept.id) {
-                            const group = visibleColumns.filter(c => c.subdept.id === col.subdept.id);
-                            const span = group.reduce((s, c) => s + (c.isExpanded ? c.specifications.length : 1), 0);
-                            acc.push(
-                              <TableHead key={`sd-${col.subdept.id}`} colSpan={span}
-                                className="bg-blue-700 text-white text-center border-r border-blue-500 font-bold">
-                                {col.subdept.name}
-                              </TableHead>
-                            );
-                          }
-                          return acc;
-                        }, [])}
-                      </TableRow>
-                      <TableRow>
-                        {visibleColumns.reduce((acc, col, idx) => {
-                          const prev = visibleColumns[idx - 1];
-                          const isNew = !prev || prev.subdept.id !== col.subdept.id || prev.clsIndex !== col.clsIndex;
-                          if (isNew) {
-                            const group = visibleColumns.filter(c => c.subdept.id === col.subdept.id && c.clsIndex === col.clsIndex);
-                            const span = group.reduce((s, c) => s + (c.isExpanded ? c.specifications.length : 1), 0);
-                            acc.push(
-                              <TableHead key={`cls-${idx}`} colSpan={span}
-                                className="bg-blue-600 text-white text-center border-r border-blue-500">
-                                {col.clsIndex === null ? "Direct" : col.subdept.classes[col.clsIndex].name}
-                              </TableHead>
-                            );
-                          }
-                          return acc;
-                        }, [])}
-                      </TableRow>
-                      <TableRow>
-                        {visibleColumns.map((col, idx) => (
-                          <TableHead key={`sc-${idx}`} colSpan={col.isExpanded ? col.specifications.length : 1}
-                            className="bg-blue-500 text-white text-center border-r border-blue-400 text-[10px]">
-                            {col.subclsIndex !== null
-                              ? col.subdept.classes[col.clsIndex].subclasses[col.subclsIndex].name
-                              : "-"}
-                          </TableHead>
-                        ))}
-                      </TableRow>
-                      <TableRow>
-                        {visibleColumns.map(col => {
-                          if (!col.isExpanded) {
-                            return (
-                              <TableHead key={col.columnKey} style={{ width: '120px' }}
-                                className="border-r border-blue-400 text-center text-white text-[10px] bg-blue-300">
-                                <div className="flex items-center justify-center gap-1">
-                                  <span className="truncate">{col.specifications[0]}</span>
-                                  <Button variant="ghost" size="sm" className="h-4 w-4 p-0"
-                                    onClick={() => toggleColumnExpansion(col.columnKey)}>
-                                    <Plus className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              </TableHead>
-                            );
-                          }
-                          return col.specifications.map((spec, idx) => (
-                            <TableHead key={`${col.columnKey}-${spec}`} style={{ width: '120px' }}
-                              className="border-r border-blue-400 text-center text-white text-[10px] bg-blue-400">
-                              <div className="flex items-center justify-center gap-1">
-                                <span className="uppercase">{spec}</span>
-                                {idx === 0 && (
-                                  <Button variant="ghost" size="sm" className="h-4 w-4 p-0"
-                                    onClick={() => toggleColumnExpansion(col.columnKey)}>
-                                    <Minus className="h-3 w-3" />
-                                  </Button>
-                                )}
-                              </div>
-                            </TableHead>
-                          ));
-                        }).flat()}
-                      </TableRow>
-                    </TableHeader>
-
-                    <TableBody>
-                      {Object.entries(groupedDocuments)
-                        .sort(([a], [b]) => parseInt(a === 'other' ? '999' : a) - parseInt(b === 'other' ? '999' : b))
-                        .map(([catKey, group]) => {
-                          const isCatExpanded = expandedCategories.has(catKey);
-                          return (
-                            <React.Fragment key={`category-${catKey}`}>
-                              <TableRow
-                                className="bg-blue-50 hover:bg-blue-100 transition-colors cursor-pointer"
-                                onClick={() => toggleCategoryExpansion(catKey)}>
-                                <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-gray-700 w-16">
-                                  {group.mainCategoryNumber}
-                                </TableCell>
-                                <TableCell className="sticky left-10 bg-blue-100 border-r z-[5] w-[300px]">
-                                  <div className="flex items-center justify-between px-4">
-                                    <span className="font-semibold text-gray-700 flex-1 min-w-0 pr-2 truncate">{group.mainCategory}</span>
-                                    <span className="text-xs bg-blue-200 text-gray-700 px-2 py-1 rounded-full mr-2">{group.documents.length}</span>
-                                    {isCatExpanded ? <Minus className="h-4 w-4 text-gray-600" /> : <Plus className="h-4 w-4 text-gray-600" />}
-                                  </div>
-                                </TableCell>
-                                <TableCell colSpan={999} className="bg-blue-50" />
-                              </TableRow>
-
-                              {isCatExpanded && group.documents.map((doc, docIndex) => {
-                                const isDocExpanded = expandedItems.has(doc.id);
-                                const docHasFields = doc.fields && doc.fields.length > 0;
-                                return (
-                                  <React.Fragment key={`doc-${doc.id}`}>
-                                    <TableRow className="group hover:bg-blue-50">
-                                      <TableCell className="sticky left-0 bg-white group-hover:bg-blue-50 border-r z-[5] text-center font-medium text-sm">
-                                        {`${group.mainCategoryNumber}.${docIndex + 1}`}
-                                      </TableCell>
-                                      <TableCell className="sticky left-10 bg-white group-hover:bg-blue-50 border-r z-[5] pr-2">
-                                        <div className="flex items-center justify-between px-4">
-                                          <span className="font-medium text-gray-800 flex-1 min-w-0 pr-2 truncate">{doc.display_name}</span>
-                                          {docHasFields && (
-                                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-blue-600"
-                                              onClick={(e) => { e.stopPropagation(); toggleItemExpansion(doc.id); }}>
-                                              {isDocExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                                            </Button>
-                                          )}
-                                        </div>
-                                      </TableCell>
-                                      {visibleColumns.map(col => {
-                                        const specs = col.isExpanded ? col.specifications : [col.specifications[0]];
-                                        return specs.map(spec => (
-                                          <TableCell key={`${doc.id}-${col.columnKey}-${spec}`}
-                                            className="text-center border-r w-[120px]">
-                                            <MemoizedCheckbox
-                                              checked={getAllocationStatus(doc.id, col.subdept.id, col.clsIndex, col.subclsIndex, spec)}
-                                              onCheckedChange={c => handleToggle(doc.id, col.subdept.id, col.clsIndex, col.subclsIndex, spec, c)}
-                                            />
-                                          </TableCell>
-                                        ));
-                                      })}
-                                    </TableRow>
-
-                                    {isDocExpanded && docHasFields && doc.fields.map((field) => (
-                                      <TableRow key={`field-${field.id}`} className="bg-gray-50/80 hover:bg-gray-100">
-                                        <TableCell className="sticky left-0 bg-gray-50 hover:bg-gray-100 border-r z-[5] text-center text-xs text-gray-500">
-                                          {field.path}
-                                        </TableCell>
-                                        <TableCell className="sticky left-10 bg-gray-50 hover:bg-gray-100 border-r z-[5] pl-12 pr-4">
-                                          <span className="text-sm text-gray-600">{field.name}</span>
-                                        </TableCell>
-                                        {visibleColumns.map(col => {
-                                          const specs = col.isExpanded ? col.specifications : [col.specifications[0]];
-                                          return specs.map(spec => (
-                                            <TableCell key={`${field.id}-${col.columnKey}-${spec}`}
-                                              className="text-center border-r w-[120px] bg-white">
-                                              <MemoizedCheckbox
-                                                checked={getAllocationStatus(`${doc.id}|${field.id}`, col.subdept.id, col.clsIndex, col.subclsIndex, spec)}
-                                                onCheckedChange={c => handleToggle(`${doc.id}|${field.id}`, col.subdept.id, col.clsIndex, col.subclsIndex, spec, c)}
-                                              />
-                                            </TableCell>
-                                          ));
-                                        })}
-                                      </TableRow>
-                                    ))}
-                                  </React.Fragment>
-                                );
-                              })}
-                            </React.Fragment>
-                          );
-                        })}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
+              <TabsList className="h-9 p-1 bg-accent/70 border border-accent">
+                {DOC_TABS.map(tab => (
+                  <TabsTrigger
+                    key={tab.value}
+                    value={tab.value}
+                    className="h-7 text-[11px] font-medium px-3 rounded-sm data-[state=active]:bg-card data-[state=active]:text-custom-blue data-[state=active]:shadow-sm transition-all"
+                  >
+                    {tab.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
             </Tabs>
+
+            <div className="relative w-full max-w-xs">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search documents or fields..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 pr-8 h-9 text-[11px] bg-card border-border rounded-md shadow-none focus-visible:ring-1"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
           </div>
-        </TabsContent>
-      </Tabs>
+
+          <div className="flex items-center gap-2.5 self-end sm:self-center">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 text-[11px] font-medium gap-2 bg-card border-border shadow-none hover:bg-muted"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Expand Levels
+                  <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-60">
+                <DropdownMenuLabel>Expand Levels</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => toggleAllRows({ categories: true, documents: true, clientFields: true })}>
+                  <Layers className="h-4 w-4 text-custom-blue" />
+                  Expand Everything
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => toggleAllRows({ categories: true, documents: true, clientFields: false })}>
+                  <FileText className="h-4 w-4 text-custom-blue" />
+                  Documents &amp; Fields
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => toggleAllRows({ categories: true, documents: false, clientFields: false })}>
+                  <FolderTree className="h-4 w-4 text-custom-blue" />
+                  Categories Only
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => toggleAllRows({ categories: false, documents: false, clientFields: true })}>
+                  <Users className="h-4 w-4 text-custom-blue" />
+                  Client Fields Only
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={() => toggleAllRows({ categories: false, documents: false, clientFields: false })}
+                  className="text-destructive"
+                >
+                  <Minus className="h-4 w-4" />
+                  Collapse All
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <ColumnVisibilityControl
+              columns={availableColumns.map(c => ({ ...c, visible: !!columnVisibility[c.id] }))}
+              onVisibilityChange={(id, v) => setColumnVisibility(prev => ({ ...prev, [id]: v }))}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Main Data Grid Matrix ───────────────────────────────────── */}
+      <div className="flex-1 min-h-0 overflow-auto relative custom-scrollbar bg-background">
+        <table
+          className="text-[11px] border-separate border-spacing-0 table-fixed select-none"
+          style={{ width: totalTableWidth }}
+        >
+          <thead>
+            {/* Row 1: Subdepartment Tier */}
+            <tr style={{ height: H_ROW_1 }}>
+              <th
+                rowSpan={4}
+                style={{ width: COL_INDEX_WIDTH, left: 0, top: 0 }}
+                className="sticky z-50 bg-[#295287] text-white border-r border-b border-white/20 px-3 py-2 text-center align-middle font-bold text-[11px]"
+              >
+                #
+              </th>
+              <th
+                rowSpan={4}
+                style={{ width: COL_NAME_WIDTH, left: COL_INDEX_WIDTH, top: 0 }}
+                className="sticky z-50 bg-[#295287] text-white border-r border-b border-white/20 px-4 py-2 text-left align-middle font-bold text-[11px] shadow-[2px_0_6px_rgba(0,0,0,0.12)]"
+              >
+                Document / Field Details
+              </th>
+
+              {visibleColumns.reduce((acc, col, idx) => {
+                const prev = visibleColumns[idx - 1]
+                if (!prev || prev.subdept.id !== col.subdept.id) {
+                  const group = visibleColumns.filter(c => c.subdept.id === col.subdept.id)
+                  const span = group.reduce((s, c) => s + (c.isExpanded ? c.specifications.length : 1), 0)
+                  acc.push(
+                    <th
+                      key={`sd-${col.subdept.id}`}
+                      colSpan={span}
+                      style={{ top: 0, height: H_ROW_1 }}
+                      className="sticky z-30 bg-[#376bae] text-white border-r border-b border-white/20 px-3 py-2 text-center font-bold uppercase tracking-wider text-[11px]"
+                    >
+                      {col.subdept.name}
+                    </th>
+                  )
+                }
+                return acc
+              }, [])}
+            </tr>
+
+            {/* Row 2: Class Tier */}
+            <tr style={{ height: H_ROW_2 }}>
+              {visibleColumns.reduce((acc, col, idx) => {
+                const prev = visibleColumns[idx - 1]
+                const isNew = !prev || prev.subdept.id !== col.subdept.id || prev.clsIndex !== col.clsIndex
+                if (isNew) {
+                  const group = visibleColumns.filter(c => c.subdept.id === col.subdept.id && c.clsIndex === col.clsIndex)
+                  const span = group.reduce((s, c) => s + (c.isExpanded ? c.specifications.length : 1), 0)
+                  acc.push(
+                    <th
+                      key={`cls-${idx}`}
+                      colSpan={span}
+                      style={{ top: H_ROW_1, height: H_ROW_2 }}
+                      className="sticky z-30 bg-[#4a7cbe] text-white border-r border-b border-white/20 px-3 py-1.5 text-center font-semibold text-[11px]"
+                    >
+                      {col.clsIndex === null ? "Direct" : col.subdept.classes[col.clsIndex].name}
+                    </th>
+                  )
+                }
+                return acc
+              }, [])}
+            </tr>
+
+            {/* Row 3: Subclass Tier */}
+            <tr style={{ height: H_ROW_3 }}>
+              {visibleColumns.map((col, idx) => (
+                <th
+                  key={`sc-${idx}`}
+                  colSpan={col.isExpanded ? col.specifications.length : 1}
+                  style={{ top: H_ROW_1 + H_ROW_2, height: H_ROW_3 }}
+                  className="sticky z-30 bg-[#5f8cc9] text-white border-r border-b border-white/20 px-2.5 py-1 text-center text-xs font-normal truncate"
+                  title={col.subclsIndex !== null ? col.subdept.classes[col.clsIndex].subclasses[col.subclsIndex].name : "Standard"}
+                >
+                  {col.subclsIndex !== null
+                    ? col.subdept.classes[col.clsIndex].subclasses[col.subclsIndex].name
+                    : "—"}
+                </th>
+              ))}
+            </tr>
+
+            {/* Row 4: Entity-Type / Specification Tier */}
+            <tr style={{ height: H_ROW_4 }}>
+              {flattenedColumns.map(col => (
+                <th
+                  key={col.uniqueKey}
+                  style={{ width: DATA_COL_WIDTH, top: H_ROW_1 + H_ROW_2 + H_ROW_3, height: H_ROW_4 }}
+                  className="sticky z-30 bg-[#7ba3d4] text-white border-r border-b border-white/20 px-2 py-1 text-center text-[11px] font-semibold uppercase tracking-wider"
+                >
+                  <div className="flex items-center justify-center gap-1.5">
+                    <span className="truncate">{col.spec}</span>
+                    {col.isFirstSpec && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          toggleColumnExpansion(col.columnKey)
+                        }}
+                        className="rounded p-0.5 hover:bg-white/20 text-white/80 hover:text-white transition-colors"
+                        title={col.isExpanded ? "Collapse entity types" : "Expand entity types"}
+                      >
+                        {col.isExpanded ? <Minus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                      </button>
+                    )}
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody>
+            {Object.entries(groupedDocuments).length === 0 && groupedClientFields.length === 0 ? (
+              <tr>
+                <td 
+                  colSpan={2 + flattenedColumns.length} 
+                  className="p-16 text-center text-muted-foreground text-[11px]"
+                >
+                  No documents match your filter.
+                </td>
+              </tr>
+            ) : (
+              <>
+              {Object.entries(groupedDocuments)
+                .sort(([a], [b]) => parseInt(a === 'other' ? '999' : a) - parseInt(b === 'other' ? '999' : b))
+                .map(([catKey, group]) => {
+                  const isCatExpanded = expandedCategories.has(catKey)
+                  return (
+                    <React.Fragment key={`category-${catKey}`}>
+                      {/* Main Category Header Group Banner */}
+                      <tr
+                        onClick={() => toggleCategoryExpansion(catKey)}
+                        className="bg-accent hover:bg-accent/70 border-b border-border border-l-2 border-l-custom-blue cursor-pointer transition-colors group"
+                      >
+                        <td 
+                          style={{ left: 0 }}
+                          className="sticky z-20 bg-accent group-hover:bg-accent/90 border-r border-b border-border px-3 py-3 text-center font-bold text-[11px] text-custom-blue"
+                        >
+                          {group.mainCategoryNumber}
+                        </td>
+                        <td
+                          style={{ left: COL_INDEX_WIDTH }}
+                          className="sticky z-20 bg-accent group-hover:bg-accent/90 border-r border-b border-border px-4 py-3 font-bold text-[11px] text-foreground shadow-[2px_0_6px_rgba(0,0,0,0.06)]"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="truncate">{group.mainCategory}</span>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Badge variant="secondary" className="h-6 px-2 text-xs font-bold bg-custom-blue text-white border shadow-none">
+                                {group.documents.length}
+                              </Badge>
+                              <div className="p-1 rounded text-custom-blue group-hover:text-custom-blue">
+                                {isCatExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td 
+                          colSpan={flattenedColumns.length} 
+                          className="bg-accent/60 group-hover:bg-accent/80 border-b border-border" 
+                        />
+                      </tr>
+
+                      {/* Documents List within Category */}
+                      {isCatExpanded && group.documents.map((doc, docIndex) => {
+                        const isDocExpanded = expandedItems.has(doc.id)
+                        const docHasFields = doc.fields && doc.fields.length > 0
+                        const isEven = docIndex % 2 === 0
+                        const rowBg = isEven ? "bg-card" : "bg-accent"
+
+                        return (
+                          <React.Fragment key={`doc-${doc.id}`}>
+                            <tr className={cn(rowBg, "hover:bg-accent/60 border-b border-border transition-colors group")}>
+                              {/* Doc Index */}
+                              <td 
+                                style={{ left: 0 }}
+                                className={cn(
+                                  "sticky z-10 border-r border-b border-border px-3 py-2.5 text-center text-muted-foreground font-mono text-[11px] font-medium",
+                                  rowBg
+                                )}
+                              >
+                                {`${group.mainCategoryNumber}.${docIndex + 1}`}
+                              </td>
+
+                              {/* Doc Name */}
+                              <td 
+                                style={{ left: COL_INDEX_WIDTH }}
+                                className={cn(
+                                  "sticky z-10 border-r border-b border-border px-4 py-2.5 font-medium text-[11px] text-foreground truncate shadow-[2px_0_6px_rgba(0,0,0,0.06)]",
+                                  rowBg
+                                )}
+                                title={doc.display_name}
+                              >
+                                <div className="flex items-center justify-between gap-2.5">
+                                  <span className="truncate">{doc.display_name}</span>
+                                  {docHasFields && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        toggleItemExpansion(doc.id)
+                                      }}
+                                      className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground gap-1 hover:bg-accent/70"
+                                      title={isDocExpanded ? "Collapse fields" : "Expand fields"}
+                                    >
+                                      <span className="font-mono text-xs font-semibold">{doc.fields.length}f</span>
+                                      {isDocExpanded ? <Minus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                                    </Button>
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* Document Checkbox Matrix */}
+                              {flattenedColumns.map(col => {
+                                const checked = getAllocationStatus(doc.id, col.subdept.id, col.clsIndex, col.subclsIndex, col.spec)
+                                return (
+                                  <td
+                                    key={`${doc.id}-${col.uniqueKey}`}
+                                    onClick={() => handleToggle(doc.id, col.subdept.id, col.clsIndex, col.subclsIndex, col.spec, !checked)}
+                                    className="border-r border-b border-border p-0 text-center align-middle cursor-pointer hover:bg-custom-blue/5 transition-colors"
+                                  >
+                                    <div className="h-full w-full py-2.5 flex items-center justify-center">
+                                      <MemoizedCheckbox
+                                        checked={checked}
+                                        onCheckedChange={(c) => handleToggle(doc.id, col.subdept.id, col.clsIndex, col.subclsIndex, col.spec, !!c)}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="h-4 w-4 data-checked:bg-custom-blue data-checked:border-custom-blue border-muted-foreground/60"
+                                      />
+                                    </div>
+                                  </td>
+                                )
+                              })}
+                            </tr>
+
+                            {/* Sub-Fields Rows (if document is expanded) */}
+                            {isDocExpanded && docHasFields && doc.fields.map((field) => (
+                              <tr key={`field-${field.id}`} className="bg-accent/40 hover:bg-accent/70 border-b border-border transition-colors">
+                                {/* Field Path Index */}
+                                <td 
+                                  style={{ left: 0 }}
+                                  className="sticky z-10 bg-accent/60 border-r border-b border-border px-3 py-2 text-center text-xs text-muted-foreground font-mono"
+                                >
+                                  {field.path || "•"}
+                                </td>
+
+                                {/* Field Name */}
+                                <td 
+                                  style={{ left: COL_INDEX_WIDTH }}
+                                  className="sticky z-10 bg-accent/60 border-r border-b border-border pl-10 pr-4 py-2 text-xs text-muted-foreground truncate shadow-[2px_0_6px_rgba(0,0,0,0.06)]"
+                                  title={field.name}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 shrink-0" />
+                                    <span className="truncate">{field.name}</span>
+                                  </div>
+                                </td>
+
+                                {/* Field Checkbox Matrix */}
+                                {flattenedColumns.map(col => {
+                                  const checked = getAllocationStatus(`${doc.id}|${field.id}`, col.subdept.id, col.clsIndex, col.subclsIndex, col.spec)
+                                  return (
+                                    <td
+                                      key={`${field.id}-${col.uniqueKey}`}
+                                      onClick={() => handleToggle(`${doc.id}|${field.id}`, col.subdept.id, col.clsIndex, col.subclsIndex, col.spec, !checked)}
+                                      className="border-r border-b border-border p-0 text-center align-middle cursor-pointer hover:bg-custom-blue/5 transition-colors bg-card/60"
+                                    >
+                                      <div className="h-full w-full py-2 flex items-center justify-center">
+                                        <MemoizedCheckbox
+                                          checked={checked}
+                                          onCheckedChange={(c) => handleToggle(`${doc.id}|${field.id}`, col.subdept.id, col.clsIndex, col.subclsIndex, col.spec, !!c)}
+                                          onClick={(e) => e.stopPropagation()}
+                                          className="h-3.5 w-3.5 data-checked:bg-custom-blue data-checked:border-custom-blue border-muted-foreground/60"
+                                        />
+                                      </div>
+                                    </td>
+                                  )
+                                })}
+                              </tr>
+                            ))}
+                          </React.Fragment>
+                        )
+                      })}
+                    </React.Fragment>
+                  )
+                })}
+
+              {/* ── Separator: Documents → Client Fields ─────────────── */}
+              {groupedClientFields.length > 0 && (
+                <tr className="bg-custom-blue text-white">
+                  <td
+                    style={{ left: 0 }}
+                    className="sticky left-0 z-20 bg-custom-blue border-r border-b-2 border-black/20 px-4 py-3 text-center"
+                  >
+                    <Users className="h-5 w-5 mx-auto" />
+                  </td>
+                  <td
+                    style={{ left: COL_INDEX_WIDTH }}
+                    className="sticky z-20 bg-custom-blue border-r border-b-2 border-black/20 px-4 py-3 shadow-[2px_0_8px_rgba(0,0,0,0.18)]"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className="font-bold uppercase tracking-wider text-sm text-white">Client Fields</span>
+                    </div>
+                  </td>
+                  <td colSpan={flattenedColumns.length} className="bg-custom-blue border-b-2 border-black/20">
+                    <div className="flex items-center justify-end gap-3 px-4 text-[10px] uppercase tracking-[0.14em] text-white/70 font-semibold">
+                      Form sections &amp; platform credentials
+                    </div>
+                  </td>
+                </tr>
+              )}
+
+              {groupedClientFields.map((group, groupIndex) => {
+                const isOpen = expandedClientGroups.has(group.key)
+                return (
+                  <React.Fragment key={`client-group-${group.key}`}>
+                    {/* Client Field Section Banner */}
+                    <tr
+                      onClick={() => toggleClientGroupExpansion(group.key)}
+                      className={cn(
+                        "hover:bg-custom-blue/15 border-b border-border cursor-pointer transition-colors group",
+                        groupIndex % 2 === 0 ? "bg-custom-blue/[0.07]" : "bg-custom-blue/[0.11]"
+                      )}
+                    >
+                      <td
+                        style={{ left: 0 }}
+                        className="sticky z-20 bg-custom-blue/[0.13] group-hover:bg-custom-blue/20 border-r border-b border-border px-3 py-3 text-center font-bold text-xs text-custom-blue"
+                      >
+                        {group.type === "platform" ? "P" : "F"}
+                      </td>
+                      <td
+                        style={{ left: COL_INDEX_WIDTH }}
+                        className="sticky z-20 bg-custom-blue/[0.13] group-hover:bg-custom-blue/20 border-r border-b border-border px-4 py-3 font-bold text-sm text-foreground shadow-[2px_0_6px_rgba(0,0,0,0.06)]"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="flex items-center gap-2.5 uppercase tracking-wider text-xs text-custom-blue font-bold truncate">
+                            {group.type === "platform" ? <Users className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                            {group.title}
+                          </span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Badge variant="secondary" className="h-6 px-2 text-xs font-bold bg-custom-blue text-white border shadow-none">
+                              {group.fields.length} field{group.fields.length > 1 ? "s" : ""}
+                            </Badge>
+                            <div className="p-1 rounded text-muted-foreground group-hover:text-foreground">
+                              {isOpen ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td
+                        colSpan={flattenedColumns.length}
+                        className="bg-custom-blue/[0.03] group-hover:bg-custom-blue/[0.06] border-b border-border"
+                      />
+                    </tr>
+
+                    {/* Client Field Rows */}
+                    {isOpen && group.fields.map((field, fieldIndex) => {
+                      const isFieldEven = fieldIndex % 2 === 0
+                      const fieldRowBg = isFieldEven ? "bg-card" : "bg-accent"
+                      return (
+                        <tr
+                          key={`client-field-${group.key}-${field.name}`}
+                          className={cn(fieldRowBg, "hover:bg-accent/60 border-b border-border transition-colors")}
+                        >
+                          {/* Field Index */}
+                          <td
+                            style={{ left: 0 }}
+                            className={cn(
+                              "sticky z-10 border-r border-b border-border px-3 py-2.5 text-center text-muted-foreground font-mono text-xs font-medium",
+                              fieldRowBg
+                            )}
+                          >
+                            {`F${groupIndex + 1}.${fieldIndex + 1}`}
+                          </td>
+
+                          {/* Field Name */}
+                          <td
+                            style={{ left: COL_INDEX_WIDTH }}
+                            className={cn(
+                              "sticky z-10 border-r border-b border-border px-4 py-2.5 font-medium text-sm text-foreground truncate shadow-[2px_0_6px_rgba(0,0,0,0.06)]",
+                              fieldRowBg
+                            )}
+                            title={field.label || field.name}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="w-1.5 h-1.5 rounded-full bg-custom-blue/40 shrink-0" />
+                              <span className="truncate">{field.tableHeader || field.label || field.name}</span>
+                            </div>
+                          </td>
+
+                          {/* Client Field Checkbox Matrix */}
+                          {flattenedColumns.map(col => {
+                            const checked = getClientFieldAllocationStatus(field.allocationKey, col.subdept.id, col.clsIndex, col.subclsIndex, col.spec)
+                            return (
+                              <td
+                                key={`${field.allocationKey}-${col.uniqueKey}`}
+                                onClick={() => handleClientFieldToggle(field.allocationKey, col.subdept.id, col.clsIndex, col.subclsIndex, col.spec, !checked)}
+                                className="border-r border-b border-border p-0 text-center align-middle cursor-pointer hover:bg-custom-blue/10 transition-colors"
+                              >
+                                <div className="h-full w-full py-2.5 flex items-center justify-center">
+                                  <MemoizedCheckbox
+                                    checked={checked}
+                                    onCheckedChange={(c) => handleClientFieldToggle(field.allocationKey, col.subdept.id, col.clsIndex, col.subclsIndex, col.spec, !!c)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="h-4 w-4 data-checked:bg-custom-blue data-checked:border-custom-blue border-muted-foreground/60"
+                                  />
+                                </div>
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      )
+                    })}
+                  </React.Fragment>
+                )
+              })}
+              </>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

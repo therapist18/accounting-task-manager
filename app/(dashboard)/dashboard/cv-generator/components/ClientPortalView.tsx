@@ -199,7 +199,7 @@ export function ClientPortalView({
       try {
         const payload = JSON.stringify(submissionPayload);
         const blob = new Blob([payload], { type: 'application/json' });
-        await supabase.storage.from('kyc-documents').upload(`cv-drafts/${portalDraftId}/client-submission.json`, blob, { upsert: true, contentType: 'application/json' });
+        await supabase.storage.from('kyc-documents').upload(`cv-drafts/${portalDraftId}/client-submission.json`, blob, { upsert: true, contentType: 'text/plain' });
       } catch (e) { console.warn('Storage save failed:', e); }
     }
 

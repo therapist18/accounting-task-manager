@@ -996,13 +996,13 @@ export default function CVGeneratorPage() {
           try {
             await supabase.storage.from('kyc-documents').remove([`cv-builder/${applicantId}/draft.json`]);
           } catch { /* ignore if file doesn't exist */ }
-          await supabase.storage.from('kyc-documents').upload(`cv-builder/${applicantId}/draft.json`, blob, { contentType: 'application/json' });
+          await supabase.storage.from('kyc-documents').upload(`cv-builder/${applicantId}/draft.json`, blob, { contentType: 'text/plain' });
         } else {
           // Fallback to cv-drafts/{id}/draft.json for portal drafts / standalone use
           try {
             await supabase.storage.from('kyc-documents').remove([`cv-drafts/${id}/draft.json`]);
           } catch { /* ignore if file doesn't exist */ }
-          await supabase.storage.from('kyc-documents').upload(`cv-drafts/${id}/draft.json`, blob, { contentType: 'application/json' });
+          await supabase.storage.from('kyc-documents').upload(`cv-drafts/${id}/draft.json`, blob, { contentType: 'text/plain' });
         }
         console.log('[CV Builder] Draft saved to storage successfully');
       } catch (storageErr) {
@@ -1213,7 +1213,8 @@ export default function CVGeneratorPage() {
           setExtractionProgress("Saving to database...");
           try {
             const finalApplicantId = applicantId || crypto.randomUUID();
-            const filePath = `cv-builder/${finalApplicantId}/raw-cv-${Date.now()}-${file.name}`;
+            const safeFileName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
+            const filePath = `cv-builder/${finalApplicantId}/raw-cv-${Date.now()}-${safeFileName}`;
             const { error: uploadError } = await supabase.storage
               .from('kyc-documents')
               .upload(filePath, file, { upsert: true, contentType: file.type });
@@ -1545,7 +1546,7 @@ export default function CVGeneratorPage() {
         const filePath = `individual-documents/${selectedIndividual.id}/${CV_DOCUMENT_ID}/cv_${Date.now()}.json`;
         const { error: uploadError } = await supabase.storage
           .from('kyc-documents')
-          .upload(filePath, blob, { upsert: true, contentType: 'application/json' });
+          .upload(filePath, blob, { upsert: true, contentType: 'text/plain' });
         if (uploadError) throw uploadError;
         await supabase.from('acc_portal_directors_documents').upsert({
           director_id: selectedIndividual.id,
@@ -1591,7 +1592,7 @@ export default function CVGeneratorPage() {
           const registryPath = `individual-documents/${linkedIndividualId}/${CV_DOCUMENT_ID}/cv_${Date.now()}.json`;
           await supabase.storage
             .from('kyc-documents')
-            .upload(registryPath, blob, { upsert: true });
+            .upload(registryPath, blob, { upsert: true, contentType: 'text/plain' });
           await supabase.from('acc_portal_directors_documents').upsert({
             director_id: linkedIndividualId,
             document_id: CV_DOCUMENT_ID,

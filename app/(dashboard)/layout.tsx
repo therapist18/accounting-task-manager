@@ -18,6 +18,7 @@ export default async function DashboardLayout({
   const search = headerStore.get("x-search") ?? ""
 
   const isPublicCvGenerator = pathname.startsWith("/dashboard/cv-generator")
+  const hideNavbar = pathname.includes("/documents+fields")
   const session = await getServerAppSession()
 
   // Bypasses auth checks if it's the client portal (portal=true is in query parameters or there is no session at all)
@@ -45,7 +46,7 @@ export default async function DashboardLayout({
       <div className="flex h-screen w-screen overflow-hidden dark:bg-zinc-950">
         <AppSidebar />
         <SidebarInset className="flex flex-col w-full min-w-0 bg-transparent overflow-hidden">
-          <NavbarWrapper />
+          {!hideNavbar && <NavbarWrapper />}
           {/* Add margin and rounded corners to create the 'card' effect */}
           <main className="flex-1 relative dark:bg-zinc-900">
             {children}
