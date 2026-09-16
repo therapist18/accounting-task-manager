@@ -124,7 +124,7 @@ export function MasterFieldEditControl({ placeholder, masterFields, individualId
     return (
       <div className="flex items-center gap-1.5 flex-1 min-w-0">
         {loadingValue ? (
-          <div className="h-8 flex-1 flex items-center px-3 rounded-md border border-slate-200 bg-slate-50">
+          <div className="h-10 flex-1 flex items-center px-3.5 rounded-md border border-slate-200 bg-slate-50">
             <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />
           </div>
         ) : options.length > 0 ? (
@@ -145,22 +145,22 @@ export function MasterFieldEditControl({ placeholder, masterFields, individualId
             }}
             options={options}
             placeholder="Select..."
-            className="h-8 text-sm flex-1"
+            className="h-10 text-[15px] flex-1"
           />
         ) : (
           <Input
-            className="h-8 text-sm flex-1"
+            className="h-10 text-[15px] px-3.5 flex-1"
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
             placeholder={mf?.label || 'Value'}
             autoFocus
           />
         )}
-        <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-emerald-600 hover:bg-emerald-50" onClick={handleSave} disabled={saving || loadingValue} title="Save to source record">
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+        <Button type="button" size="icon" variant="ghost" className="h-9 w-9 text-emerald-600 hover:bg-emerald-50" onClick={handleSave} disabled={saving || loadingValue} title="Save to source record">
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
         </Button>
-        <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-slate-400 hover:text-red-500" onClick={cancelEdit} disabled={saving} title="Cancel">
-          <X className="h-3.5 w-3.5" />
+        <Button type="button" size="icon" variant="ghost" className="h-9 w-9 text-slate-400 hover:text-red-500" onClick={cancelEdit} disabled={saving} title="Cancel">
+          <X className="h-4 w-4" />
         </Button>
       </div>
     );
@@ -168,8 +168,8 @@ export function MasterFieldEditControl({ placeholder, masterFields, individualId
 
   if (editableIds.length === 1) {
     return (
-      <Button type="button" size="icon" variant="ghost" className="h-7 w-7 shrink-0 text-slate-400 hover:text-custom-blue" onClick={() => startEdit(editableIds[0])} title="Edit source value">
-        <Pencil className="h-3.5 w-3.5" />
+      <Button type="button" size="icon" variant="ghost" className="h-9 w-9 shrink-0 text-slate-400 hover:text-custom-blue" onClick={() => startEdit(editableIds[0])} title="Edit source value">
+        <Pencil className="h-4 w-4" />
       </Button>
     );
   }
@@ -181,8 +181,8 @@ export function MasterFieldEditControl({ placeholder, masterFields, individualId
   return (
     <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
       <PopoverTrigger asChild>
-        <Button type="button" size="icon" variant="ghost" className="h-7 w-7 shrink-0 text-slate-400 hover:text-custom-blue" title="Edit source value">
-          <Pencil className="h-3.5 w-3.5" />
+        <Button type="button" size="icon" variant="ghost" className="h-9 w-9 shrink-0 text-slate-400 hover:text-custom-blue" title="Edit source value">
+          <Pencil className="h-4 w-4" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-56 p-1.5" align="end">

@@ -149,7 +149,11 @@ export function buildStandardPlaceholderValues(
     // Aggregates - combine multiple settings/columns into one rendered value.
     applicable_benefits: buildApplicableBenefitsList(s),
     key_responsibilities: (jobProfile?.key_responsibilities || []).map((r) => `<li>${r}</li>`).join(''),
-    statutory_deductions_table: buildStatutoryDeductionsTable(grossSalary, payrollStatutoryLine),
+    // s.show_statutory_table is a per-contract settings_cascade toggle (see
+    // ContractPreview.tsx's toolbar button, which writes it into
+    // offer.settings_overrides) - defaults to shown, since that's the
+    // behavior every contract had before the toggle existed.
+    statutory_deductions_table: s.show_statutory_table === false ? '' : buildStatutoryDeductionsTable(grossSalary, payrollStatutoryLine),
   };
 
   const generic: Record<string, string> = {};

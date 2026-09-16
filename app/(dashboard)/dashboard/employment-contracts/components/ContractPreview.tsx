@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import supabase from '@/lib/supabase/client';
 import { replacePlaceholders } from '../../tasks-requirements/utils/templateFormatters';
 import { Button } from '@/components/ui/button';
 import {
   Download, Loader2, Save, FileText, FileWarning, Palette, FileDown,
-  ChevronDown, List, RefreshCw,
+  ChevronDown, List, RefreshCw, Receipt, CheckCircle2,
 } from 'lucide-react';
 import { DocumentViewer, type DocumentViewerHandle } from '@/components/contracts/DocumentViewer';
 import { downloadBlob, buildWordDocBlob, printElementAsPdf } from '@/lib/documentExport';
@@ -20,6 +19,7 @@ import {
 import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
 import { EcJobProfile } from '../utils/jobProfileData';
 import { EmploymentOffer, createEmploymentOffer, updateEmploymentOffer } from '../utils/employmentOfferData';
+import { saveContractToIndividual } from '../utils/registryDocumentUpload';
 import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
@@ -63,13 +63,21 @@ function buildHighlightedPreviewValues(
   selectedJobProfile: EcJobProfile | null,
   ecPlaceholders: EcPlaceholder[],
   signatoryName: string,
-  payrollStatutoryLine: StatutoryDeductionsBreakdown | null
+  payrollStatutoryLine: StatutoryDeductionsBreakdown | null,
+  // The exported document (PDF/Word/the saved copy) must never surface an
+  // internal placeholder name to whoever receives the contract - a missing
+  // fact there still renders as the blank-line MISSING_VALUE_PLACEHOLDER.
+  // The on-screen editing preview shows the placeholder's own label instead
+  // (e.g. "[Employee Address]"), so whoever is assembling the contract can
+  // see at a glance which field still needs a value instead of hunting for
+  // an unlabeled blank.
+  forExport: boolean
 ): Record<string, string> {
   const raw = employee
     ? buildStandardPlaceholderValues(employee, company, offer, effectiveSettings, offer?.placeholder_overrides, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName, payrollStatutoryLine)
     : {};
 
-  const wrap = (key: string, value: string, entity: string | undefined): string => {
+  const wrap = (key: string, value: string, entity: string | undefined, label: string | undefined): string => {
     // HTML list markup (<li>...</li> fragments) must never get wrapped in a
     // <span> - a <span> around <li> elements is invalid nesting (they're
     // only valid as a direct child of <ul>/<ol>), so the browser hoists the
@@ -80,7 +88,7 @@ function buildHighlightedPreviewValues(
     if (LIST_MARKUP_KEYS.has(key)) return value;
 
     const isMissing = !value;
-    const display = isMissing ? MISSING_VALUE_PLACEHOLDER : value;
+    const display = isMissing ? (forExport ? MISSING_VALUE_PLACEHOLDER : `[${label || key}]`) : value;
     const missingClass = isMissing ? ' ph-entity-missing' : '';
     if (entity === 'company') return `<span class="ph-entity-company${missingClass}">${display}</span>`;
     if (entity === 'employee') return `<span class="ph-entity-employee${missingClass}">${display}</span>`;
@@ -89,11 +97,11 @@ function buildHighlightedPreviewValues(
 
   const highlighted: Record<string, string> = {};
   for (const p of ecPlaceholders) {
-    highlighted[p.key] = wrap(p.key, raw[p.key] || '', p.entity_type?.[0]);
+    highlighted[p.key] = wrap(p.key, raw[p.key] || '', p.entity_type?.[0], p.label);
   }
   for (const [key, value] of Object.entries(raw)) {
     if (key in highlighted) continue;
-    highlighted[key] = wrap(key, value, undefined);
+    highlighted[key] = wrap(key, value, undefined, undefined);
   }
   return highlighted;
 }
@@ -151,6 +159,16 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const [showToc, setShowToc] = useState(true);
 
   const viewerRef = useRef<DocumentViewerHandle>(null);
+
+  // Tracks what was actually persisted by the last successful "Generate" -
+  // compared each render against the content that would be generated NOW,
+  // so the button reads "Saved" (and won't re-upload/re-file another copy
+  // of the same contract) right after a save, but flips back to
+  // "Generate" the moment the user changes something (salary, an override,
+  // the theme, the job profile) that would produce a different document.
+  // A ref rather than state: it's write-once-per-save and read-derived, no
+  // need to trigger its own re-render.
+  const savedSignatureRef = useRef<string | null>(null);
 
   // Load base context - companyId is optional (job profiles can be scoped
   // "General / No Company"), in which case company just stays null but
@@ -213,7 +231,17 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   }, [refreshMasterFieldValues, loadContext, loadSignatoryName, loadPayrollStatutoryLine]);
 
   const employeeValues = useMemo(
-    () => buildHighlightedPreviewValues(employee, company, offer as EmploymentOffer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName, payrollStatutoryLine),
+    () => buildHighlightedPreviewValues(employee, company, offer as EmploymentOffer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName, payrollStatutoryLine, false),
+    [employee, company, offer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName, payrollStatutoryLine]
+  );
+
+  // Same resolution, but with missing values rendered as the blank-line
+  // MISSING_VALUE_PLACEHOLDER instead of the preview's "[Field Label]" hint -
+  // used for everything that leaves the app (PDF, Word, the saved copy), so
+  // an internal placeholder name never ends up in a document someone else
+  // receives.
+  const exportEmployeeValues = useMemo(
+    () => buildHighlightedPreviewValues(employee, company, offer as EmploymentOffer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName, payrollStatutoryLine, true),
     [employee, company, offer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName, payrollStatutoryLine]
   );
 
@@ -244,14 +272,23 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
       clausesById,
       effectiveClauses,
       effectiveSettings,
-      employeePlaceholderValues: employeeValues,
+      employeePlaceholderValues: exportEmployeeValues,
       includeToc: showToc,
       hideMissingClauses: true,
     });
-  }, [clausesById, effectiveClauses, effectiveSettings, employeeValues, employee, showToc]);
+  }, [clausesById, effectiveClauses, effectiveSettings, exportEmployeeValues, employee, showToc]);
 
   const themeSettings: ContractThemeSettings = themeOverride || defaultTheme || { ...DEFAULT_CONTRACT_THEME, ...(selectedJobProfile?.theme_settings || {}) };
+
+  // Everything that actually feeds the generated document - if none of this
+  // has changed since the last successful save, generating again would
+  // produce an identical .doc and just re-file a duplicate copy against the
+  // employee's record for no reason.
+  const contentSignature = JSON.stringify({ employeeId: employee?.individualId, offer, jobProfileId: selectedJobProfile?.id, themeSettings });
+  const isSaved = savedSignatureRef.current !== null && savedSignatureRef.current === contentSignature;
+
   const mergedValues = { ...effectiveSettings, ...employeeValues };
+  const exportMergedValues = { ...effectiveSettings, ...exportEmployeeValues };
 
   const themedHtml = bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings), mergedValues) : '';
 
@@ -265,15 +302,31 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   // doesn't need this: it's a separate file with no shared DOM to collide
   // with, which is why its bookmarks (see buildOutput below) already worked.
   const exportThemedHtml = exportBodyHtml
-    ? replacePlaceholders(applyThemeToHtml(exportBodyHtml, themeSettings), mergedValues)
+    ? replacePlaceholders(applyThemeToHtml(exportBodyHtml, themeSettings), exportMergedValues)
         .replace(/id="section-/g, 'id="pdf-section-')
         .replace(/href="#section-/g, 'href="#pdf-section-')
     : '';
-  const wordSafeHtml = exportBodyHtml ? replacePlaceholders(applyThemeToHtml(exportBodyHtml, themeSettings, { wordSafe: true }), mergedValues) : '';
+  const wordSafeHtml = exportBodyHtml ? replacePlaceholders(applyThemeToHtml(exportBodyHtml, themeSettings, { wordSafe: true }), exportMergedValues) : '';
 
   const updateThemeSettings = (settings: ContractThemeSettings) => {
     setThemeOverride(settings);
     onThemeChange?.(settings);
+  };
+
+  // Persisted per-contract (offer.settings_overrides), not local UI state
+  // like showToc - whether the illustrative PAYE/SHIF/AHL/NSSF breakdown
+  // appears is a real document-content decision, not just a preview
+  // convenience, so it needs to survive a reload/reopen the same way the
+  // theme override does.
+  const showStatutoryTable = effectiveSettings.show_statutory_table !== false;
+  const toggleStatutoryTable = () => {
+    setContractData?.((prev: any) => ({
+      ...prev,
+      offer: {
+        ...(prev.offer || {}),
+        settings_overrides: { ...(prev.offer?.settings_overrides || {}), show_statutory_table: !showStatutoryTable },
+      },
+    }));
   };
 
   const buildOutput = (): { blob: Blob; fileName: string } | null => {
@@ -380,6 +433,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   };
 
   const handleSaveToDb = async () => {
+    if (isSaved) return; // already generated for this exact content - the button reads "Saved"
     const output = buildOutput();
     if (!output || !employee || !offer || !selectedJobProfile) return;
     setIsSaving(true);
@@ -391,33 +445,10 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
       if (!persistedOffer) throw new Error('Failed to save the employment offer');
       setContractData?.((prev: any) => ({ ...prev, offer: persistedOffer }));
 
-      const fileName = `generated/${employee.companyId}/${employee.individualId}/${Date.now()}_contract.doc`;
-      const { error: uploadError } = await supabase.storage.from("kyc-templates").upload(fileName, output.blob, { contentType: output.blob.type });
-      if (uploadError) throw new Error('Failed to upload generated document to storage');
+      const saveResult = await saveContractToIndividual(employee.individualId, output.blob, employee.fullName.replace(/\s+/g, '_'));
+      if (!saveResult.success) throw new Error(saveResult.error || 'Failed to file the generated contract');
 
-      const { data: { session } } = await supabase.auth.getSession();
-      const { data: insertData, error: insertError } = await supabase
-        .from('acc_employment_contracts')
-        .insert([{
-          contract_number: `CNT-${Date.now()}`,
-          employee_id: String(employee.individualId),
-          company_id: String(employee.companyId),
-          status: 'generated',
-          docx_path: fileName,
-          metadata: { jobProfileId: selectedJobProfile.id, employmentOfferId: persistedOffer.id, effectiveSettings, themeSettings },
-          generated_by: session?.user?.id || null
-        }])
-        .select()
-        .single();
-
-      if (insertError) throw new Error('Failed to save contract record');
-
-      if (insertData) {
-        await supabase.from('acc_employment_contracts_audit').insert([{
-          contract_id: insertData.id, action: 'generated', user_id: session?.user?.id || null, details: `Contract generated for ${employee.fullName}`
-        }]);
-      }
-
+      savedSignatureRef.current = JSON.stringify({ employeeId: employee.individualId, offer: persistedOffer, jobProfileId: selectedJobProfile.id, themeSettings });
       toast.success('Contract generated and saved successfully!');
     } catch (err: any) {
       toast.error(err.message || 'Error saving contract');
@@ -469,6 +500,18 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
             >
               <List className="w-4 h-4" />
             </button>
+            <button
+              onClick={toggleStatutoryTable}
+              title={showStatutoryTable ? 'Hide statutory deductions table' : 'Show statutory deductions table'}
+              className={cn(
+                "w-8 h-8 flex items-center justify-center rounded-lg transition-colors shrink-0",
+                showStatutoryTable
+                  ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
+                  : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+              )}
+            >
+              <Receipt className="w-4 h-4" />
+            </button>
             {/* Theme sidebar panel - shared by both modules so profile design
                 and per-contract customization stay synchronized. */}
             <button
@@ -511,16 +554,33 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Primary action */}
+            {/* Primary action - reads "Saved" (and stays disabled) once the
+                current content has been generated, so re-clicking it can't
+                file a duplicate copy against the employee's record. Flips
+                back to "Generate" the moment anything that feeds the
+                document changes (salary, an override, the theme, the job
+                profile) - see contentSignature/savedSignatureRef above. */}
             {!previewOnly && (
               <Button
                 size="sm"
-                className="h-8 px-4 text-xs font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md rounded-lg shrink-0"
+                className={cn(
+                  "h-8 px-4 text-xs font-medium shadow-md rounded-lg shrink-0",
+                  isSaved
+                    ? "bg-emerald-600 hover:bg-emerald-600 text-white cursor-default"
+                    : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white"
+                )}
                 onClick={handleSaveToDb}
-                disabled={!hasOutput || loadingContext || isSaving}
+                disabled={!hasOutput || loadingContext || isSaving || isSaved}
+                title={isSaved ? 'Already generated for the current contract details' : undefined}
               >
-                {isSaving ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-2" />}
-                Generate
+                {isSaving ? (
+                  <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
+                ) : isSaved ? (
+                  <CheckCircle2 className="w-3.5 h-3.5 mr-2" />
+                ) : (
+                  <Save className="w-3.5 h-3.5 mr-2" />
+                )}
+                {isSaved ? 'Saved' : 'Generate'}
               </Button>
             )}
           </>

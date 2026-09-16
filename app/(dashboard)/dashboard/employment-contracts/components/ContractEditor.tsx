@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, UserRound, RotateCcw, RefreshCw, AlertCircle, FileText, CheckCircle2 } from 'lucide-react';
+import { Loader2, UserRound, RotateCcw, RefreshCw, AlertCircle, FileText, CheckCircle2, Search, X, Wallet } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ENTITY_TYPES } from '@/lib/constants/entity-types';
 import { useToast } from '@/components/ui/use-toast';
@@ -69,6 +69,7 @@ export function ContractEditor({
   const [signatoryName, setSignatoryName] = useState('');
   const [payrollStatutoryLine, setPayrollStatutoryLine] = useState<StatutoryDeductionsBreakdown | null>(null);
   const [dataFilter, setDataFilter] = useState<'all' | 'with' | 'missing'>('all');
+  const [fieldSearch, setFieldSearch] = useState('');
   const { toast } = useToast();
 
   // Height of the sticky toolbar+column-header block, measured live so the
@@ -236,12 +237,24 @@ export function ContractEditor({
   const withDataCount = profileScopedPlaceholders.length - missingCount;
 
   const dataFilteredPlaceholders = useMemo(() => {
-    if (dataFilter === 'all') return profileScopedPlaceholders;
-    return profileScopedPlaceholders.filter((p) => {
-      const missing = !!placeholderIsMissing.get(p.id);
-      return dataFilter === 'missing' ? missing : !missing;
-    });
-  }, [profileScopedPlaceholders, dataFilter, placeholderIsMissing]);
+    let result = profileScopedPlaceholders;
+    if (dataFilter !== 'all') {
+      result = result.filter((p) => {
+        const missing = !!placeholderIsMissing.get(p.id);
+        return dataFilter === 'missing' ? missing : !missing;
+      });
+    }
+    const query = fieldSearch.trim().toLowerCase();
+    if (query) {
+      result = result.filter((p) =>
+        p.label?.toLowerCase().includes(query) ||
+        p.key?.toLowerCase().includes(query) ||
+        p.group_label?.toLowerCase().includes(query) ||
+        p.description?.toLowerCase().includes(query)
+      );
+    }
+    return result;
+  }, [profileScopedPlaceholders, dataFilter, placeholderIsMissing, fieldSearch]);
 
   if (!companyId || !employeeId) {
     return (
@@ -313,6 +326,47 @@ export function ContractEditor({
       <ScrollArea className="flex-1 [&>[data-radix-scroll-area-viewport]>div]:!block">
         <div className="max-w-[1000px] mx-auto p-6 pb-12">
 
+          {/* Compensation - Basic Salary & Currency get their own dedicated
+              inputs (writing straight to offer.basic_salary/offer.currency)
+              instead of the generic placeholder-override control below -
+              basic_salary is the one figure every salary-derived value reads
+              directly (the {{basic_salary}}/{{gross_salary}} tokens and the
+              statutory_deductions_table PAYE/SHIF/AHL/NSSF breakdown all
+              compute off offer.basic_salary itself, see
+              standardPlaceholders.ts), so a placeholder_overrides string
+              would only patch the displayed text in one spot and leave those
+              other computations stale. See ec_placeholders' `editable`
+              column comment - these two rows are deliberately not editable
+              there so this card is the one place to change them. */}
+          <div className="mb-6 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200/60 dark:border-slate-800 p-5">
+            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wide mb-4 flex items-center gap-2">
+              <Wallet className="w-4 h-4 text-indigo-500" /> Compensation
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr] gap-4">
+              <div>
+                <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Basic Salary</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={offer.basic_salary ?? ''}
+                  onChange={(e) => updateOffer({ basic_salary: e.target.value === '' ? null : Number(e.target.value) })}
+                  placeholder="e.g. 120000"
+                  className="h-11 text-[15px] px-3.5"
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Currency</Label>
+                <select
+                  value={offer.currency || 'KES'}
+                  onChange={(e) => updateOffer({ currency: e.target.value })}
+                  className="h-11 w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 text-[15px] text-slate-900 dark:text-slate-100"
+                >
+                  {['KES', 'USD', 'GBP', 'EUR'].map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+
           {/* Sticky toolbar + column header block - pinned to the top of the
               ScrollArea's own scrollport while reviewing a long field list.
               Height is measured (see stickyHeaderRef) so the per-entity group
@@ -331,6 +385,26 @@ export function ContractEditor({
             </div>
 
             <div className="flex items-center gap-4">
+              {/* Field search */}
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Input
+                  value={fieldSearch}
+                  onChange={(e) => setFieldSearch(e.target.value)}
+                  placeholder="Search fields..."
+                  className="h-9 w-48 pl-9 pr-8 text-sm bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 shadow-sm"
+                />
+                {fieldSearch && (
+                  <button
+                    onClick={() => setFieldSearch('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                    title="Clear search"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
               {/* Modern Segmented Control */}
               <div className="p-1 bg-slate-200/50 dark:bg-slate-800/80 rounded-lg inline-flex items-center shadow-inner">
                 {([
@@ -399,7 +473,9 @@ export function ContractEditor({
               <CheckCircle2 className="w-12 h-12 text-emerald-400/50 mb-4" />
               <h4 className="text-slate-700 dark:text-slate-300 font-medium">You're All Set</h4>
               <p className="text-sm text-slate-500 mt-1">
-                {dataFilter === 'missing' ? 'Awesome! No fields are missing data.' : 'No matching fields found for this filter.'}
+                {fieldSearch.trim()
+                  ? `No fields match "${fieldSearch.trim()}".`
+                  : dataFilter === 'missing' ? 'Awesome! No fields are missing data.' : 'No matching fields found for this filter.'}
               </p>
             </div>
           ) : (
@@ -489,7 +565,7 @@ function PlaceholderRow({
 
   return (
     <div className={cn(
-      "grid grid-cols-1 md:grid-cols-[35%_20%_1fr] gap-4 p-4 items-center transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40 group relative overflow-hidden",
+      "grid grid-cols-1 md:grid-cols-[35%_20%_1fr] gap-4 p-5 items-center transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40 group relative overflow-hidden",
       isMissing && p.required ? "bg-rose-50/30 dark:bg-rose-900/10" : ""
     )}>
       
@@ -545,10 +621,10 @@ function PlaceholderRow({
         {p.editable ? (
           <Input
             className={cn(
-              "h-9 text-sm transition-all rounded-lg flex-1 border-transparent hover:border-slate-300 focus:border-indigo-500 shadow-none focus:shadow-sm bg-slate-50 dark:bg-slate-950 dark:hover:border-slate-700",
+              "h-11 text-[15px] px-3.5 transition-all rounded-lg flex-1 border-transparent hover:border-slate-300 focus:border-indigo-500 shadow-none focus:shadow-sm bg-slate-50 dark:bg-slate-950 dark:hover:border-slate-700",
               isOverridden && "border-indigo-200 bg-indigo-50/30 text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-900/10 dark:text-indigo-100",
-              isMissing && (p.required 
-                ? "border-rose-200 bg-rose-50/50 dark:border-rose-900/50 dark:bg-rose-900/10" 
+              isMissing && (p.required
+                ? "border-rose-200 bg-rose-50/50 dark:border-rose-900/50 dark:bg-rose-900/10"
                 : "border-amber-200 bg-amber-50/50 dark:border-amber-900/50 dark:bg-amber-900/10")
             )}
             value={effectiveVal}
@@ -557,12 +633,12 @@ function PlaceholderRow({
           />
         ) : (
           <div className={cn(
-            "flex-1 min-h-[36px] flex items-center px-3 rounded-lg",
-            isMissing 
-              ? (p.required ? "bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400" : "bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400") 
+            "flex-1 min-h-[44px] flex items-center px-3.5 rounded-lg",
+            isMissing
+              ? (p.required ? "bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400" : "bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400")
               : "bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200"
           )}>
-            <span className="text-sm truncate">
+            <span className="text-[15px] truncate">
               {effectiveVal || (
                 <span className="italic opacity-70">
                   {p.required ? 'Missing (Required)' : 'No value computed'}
@@ -573,7 +649,7 @@ function PlaceholderRow({
         )}
 
         {/* Supplementary Actions */}
-        <div className="flex items-center justify-end shrink-0 w-[72px] gap-1">
+        <div className="flex items-center justify-end shrink-0 w-[80px] gap-1">
           {p.source_kind === 'master_field' && (
             <MasterFieldEditControl
               placeholder={p}
@@ -590,12 +666,12 @@ function PlaceholderRow({
               type="button"
               title="Revert to computed default"
               onClick={() => onOverride(undefined)}
-              className="w-8 h-8 flex items-center justify-center rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-900/30 dark:hover:border-rose-900/50 transition-colors shadow-sm"
+              className="w-9 h-9 flex items-center justify-center rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-900/30 dark:hover:border-rose-900/50 transition-colors shadow-sm"
             >
               <RotateCcw className="w-4 h-4" />
             </button>
           ) : (
-            <div className="w-8 h-8" /> // Spacer for alignment consistency
+            <div className="w-9 h-9" /> // Spacer for alignment consistency
           )}
         </div>
       </div>
