@@ -563,7 +563,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
               <TableRow><TableCell colSpan={100} className="h-48 text-center text-slate-500">No records found matching criteria.</TableCell></TableRow>
             ) : (
               taskRows.map((row, rowIndex) => (
-                <TableRow key={row.key} className={cn("group border-0 transition-colors", row.type === 'dependant' ? "bg-orange-50/40" : (rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/50"), "hover:bg-blue-50/50")}>
+                <TableRow key={row.key} className={cn("group border-0 transition-colors", row.task.status === 'cancel' ? "bg-red-50 hover:bg-red-100" : cn(row.type === 'dependant' ? "bg-orange-50/40" : (rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/50"), "hover:bg-blue-50/50"))}>
                   {flatColumns.map((col, idx) => {
                     const colWidth = col.type === 'case' ? (col.header.width || DEFAULT_COL_WIDTH) : col.type === 'actions' ? ACTION_WIDTH : col.type === 'delta' ? DELTA_COL_WIDTH : DEFAULT_COL_WIDTH;
 

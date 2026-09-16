@@ -261,7 +261,7 @@ const MemoizedTableRow = React.memo(({
 }) => {
   const rowBg = row.isSubSubRow ? 'bg-slate-100/50' : row.isSubRow ? 'bg-slate-50/60' : 'bg-white';
   const hoverBg = 'hover:bg-blue-50/50';
-
+  
   if (row.type === 'section_header') {
     const Icon = row.icon;
     // The Actions section header is pulled to the end of the table (see EnhancedTable's render)
@@ -326,10 +326,11 @@ const MemoizedTableRow = React.memo(({
           const isJobLevelApplicable = item.task.report_doc_defaults?.some((d: any) => d.documentId === doc?.documentId);
           const isEntityApplicable = doc?.appliesTo?.includes(item.type === 'principal' ? (doc?.docType === 'company' ? 'company' : 'principal') : 'dependant');
           const isApplicable = isJobLevelApplicable && isEntityApplicable;
+          const isCancelled = item.task?.status === 'cancel';
 
           if (!isApplicable) {
             return (
-              <TableCell key={`${row.key}-${colIndex}`} colSpan={4} className={cn("text-center text-sm py-1 px-2 align-middle border-l-2 border-l-gray-300 border-t border-b border-gray-100 bg-slate-50/50 text-gray-400 italic text-[11px] w-[365px] min-w-[365px] max-w-[365px]", item.type === 'dependant' ? 'bg-orange-50/20' : '')}>
+              <TableCell key={`${row.key}-${colIndex}`} colSpan={4} className={cn("text-center text-sm py-1 px-2 align-middle border-l-2 border-l-gray-300 border-t border-b border-gray-100 bg-slate-50/50 text-gray-400 italic text-[11px] w-[365px] min-w-[365px] max-w-[365px]", isCancelled ? 'bg-red-50' : item.type === 'dependant' ? 'bg-orange-50/20' : '')}>
                 N/A
               </TableCell>
             );
@@ -374,7 +375,7 @@ const MemoizedTableRow = React.memo(({
             colRecords
           };
 
-          const cellBg = cn("bg-emerald-50/10", item.type === 'dependant' ? 'bg-orange-50/30' : '');
+          const cellBg = isCancelled ? 'bg-red-50' : cn("bg-emerald-50/10", item.type === 'dependant' ? 'bg-orange-50/30' : '');
           // One light, uniform divider between Date/Status/Upload/Other — enough that an empty
           // cell (a blank Date, no document to view/upload) still reads as its own column
           // instead of blending into its neighbor, without the old per-side-colored borders
@@ -442,7 +443,8 @@ const MemoizedTableRow = React.memo(({
       </TableCell>
 
       {paginatedHeaderStructure.map((item, colIndex) => {
-        const depBg = item.type === 'dependant' ? 'bg-orange-50/50' : '';
+        const isCancelled = item.task?.status === 'cancel';
+        const depBg = isCancelled ? 'bg-red-50' : item.type === 'dependant' ? 'bg-orange-50/50' : '';
 
         // Stage rows get the full 4-way split: Date | Status | Upload/View | Other Actions —
         // everything else (document/field/delta/actions-row/etc.) renders identically for
@@ -853,7 +855,7 @@ export const EnhancedTable = forwardRef<any, EnhancedTableProps>(({
 
                 {paginatedHeaderStructure.map((item, colIndex) => (
                   <React.Fragment key={`header-${header.id}-${item.key}`}>
-                    <TableCell colSpan={4} className={`text-center text-sm py-1 px-2 align-middle bg-blue-500 text-white border border-gray-100 w-[365px] ${item.type === 'dependant' ? 'bg-orange-500' : ''}`}>
+                    <TableCell colSpan={4} className={`text-center text-sm py-1 px-2 align-middle bg-blue-500 text-white border border-gray-100 w-[365px] ${item.task?.status === 'cancel' ? 'bg-red-600' : item.type === 'dependant' ? 'bg-orange-500' : ''}`}>
                       <div className="flex flex-col items-center gap-1">
                         <TableHeaderCell item={item} header={header} getCellContent={getCellContentWithCancel} />
                       </div>
