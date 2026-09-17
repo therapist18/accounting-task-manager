@@ -2585,6 +2585,15 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   }
 
   const handleUncancelTask = async (task: any) => {
+    if (!currentUser?.isSuperAdmin) {
+      toast({
+        title: "Not authorized",
+        description: "Only a SuperAdmin can reactivate a cancelled task.",
+        variant: "destructive"
+      });
+      return;
+    }
+
     try {
       const previousStatus = task.cancellation_details?.previous_status || 'pending';
       const uncancelledBy = auditActor(currentUser);
@@ -2982,6 +2991,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
 
   const renderReportDocCell = (row: any, task: any, renderMode: 'date' | 'actions' | 'combined' | 'status' | 'upload' | 'other' = 'combined') => {
     const { reportDoc, entityType, entityId, entityName, colRecords = [] } = row;
+    const isLocked = isReadOnly || task.status === 'cancel';
 
     // Synthetic "stage" so EditableStageCell can render report docs identically to task stages
     const reportDocStage = {
@@ -2999,7 +3009,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         task={task}
         value={colRecords.length > 0 ? 'uploaded' : ''}
         onSave={async () => { }}
-        onDocumentUpload={isReadOnly ? undefined : () => handleReportDocUpload(task, reportDoc, entityType, entityId, entityName)}
+        onDocumentUpload={isLocked ? undefined : () => handleReportDocUpload(task, reportDoc, entityType, entityId, entityName)}
         departments={departments}
         getKycFields={getKycFields}
         linkedDocuments={colRecords}
@@ -3007,7 +3017,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         taskName={task.applicant_name}
         clientName={task.client_name || task.clientName}
         onFetchData={() => loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true)}
-        readOnly={isReadOnly}
+        readOnly={isLocked}
       />
     );
   };
@@ -3017,6 +3027,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     const linkedDocs = getDocumentForTaskStage(task, row.stage);
     const stageData = task.stages?.[row.stage.id];
     const cellValue = stageData?.date || stageData?.status || null;
+    const isLocked = isReadOnly || task.status === 'cancel';
 
     return (
       <EditableStageCell
@@ -3025,13 +3036,13 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         stages={stages}
         task={task}
         value={cellValue}
-        onSave={isReadOnly ? undefined : enhancedHandleStageStatusSave}
-        onDocumentUpload={isReadOnly ? undefined : handleStageDocumentUpload}
+        onSave={isLocked ? undefined : enhancedHandleStageStatusSave}
+        onDocumentUpload={isLocked ? undefined : handleStageDocumentUpload}
         onShowDocuments={handleViewDocument}
         requiresUpload={requiresUpload}
         departments={departments}
         enhancedTaskData={enhancedTasksData.get(task.id?.toString())}
-        onAutomationClick={isReadOnly ? undefined : (e) => handleAutomationClick(e, row.stage, task.id)}
+        onAutomationClick={isLocked ? undefined : (e) => handleAutomationClick(e, row.stage, task.id)}
         getKycFields={getKycFields}
         kycDocuments={kycDocuments}
         linkedDocuments={linkedDocs}
@@ -3041,8 +3052,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         onFetchData={() => loadTasksData(activeDepartmentTab, activeSubdepartmentTab, true, true)}
         onDocumentTypeFixed={refreshDocumentsAndTasks}
         officers={realOfficers}
-        onOfficerChange={isReadOnly ? undefined : updateTaskOfficer}
-        readOnly={isReadOnly}
+        onOfficerChange={isLocked ? undefined : updateTaskOfficer}
+        readOnly={isLocked}
         onOpenRequirements={handleOpenRequirements}
         showTime={showTime}
         enforceStageOrder={enforceStageOrder}
@@ -3085,6 +3096,9 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
   };
 
   const renderActionButtons = (row: any, task: any) => {
+    const isCancelled = task.status === 'cancel';
+    const isSuperAdmin = !!currentUser?.isSuperAdmin;
+
     if (isReadOnly) {
       return (
         <div className="flex items-center justify-center gap-1">
@@ -3106,9 +3120,10 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => { setLinkingTask(task); setIsLinkDialogOpen(true); }}
-          className="h-8 w-8 text-blue-600 hover:bg-blue-100"
-          title="Link source documents"
+          onClick={() => { if (!isCancelled) { setLinkingTask(task); setIsLinkDialogOpen(true); } }}
+          disabled={isCancelled}
+          className="h-8 w-8 text-blue-600 hover:bg-blue-100 disabled:opacity-40 disabled:pointer-events-none"
+          title={isCancelled ? "Locked: task is cancelled" : "Link source documents"}
         >
           <LinkIcon className="h-4 w-4" />
         </Button>
@@ -3119,9 +3134,9 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 text-emerald-600 hover:bg-emerald-100"
-                title="Push case to another department"
-                disabled={isPushingCase}
+                className="h-8 w-8 text-emerald-600 hover:bg-emerald-100 disabled:opacity-40 disabled:pointer-events-none"
+                title={isCancelled ? "Locked: task is cancelled" : "Push case to another department"}
+                disabled={isPushingCase || isCancelled}
               >
                 {isPushingCase ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               </Button>
@@ -3145,12 +3160,14 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
           variant="ghost"
           size="icon"
           onClick={() => {
+            if (isCancelled) return;
             setSelectedTaskForOfficers(task);
             setSelectedStageForOfficers(determineCurrentStage(task, stages));
             setAssignOfficersDialogOpen(true);
           }}
-          className="h-8 w-8 text-purple-600 hover:bg-purple-100"
-          title="Assign officers"
+          disabled={isCancelled}
+          className="h-8 w-8 text-purple-600 hover:bg-purple-100 disabled:opacity-40 disabled:pointer-events-none"
+          title={isCancelled ? "Locked: task is cancelled" : "Assign officers"}
         >
           <UserPlus className="h-4 w-4" />
         </Button>
@@ -3159,11 +3176,12 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => { setTaskToUncancel(task); setUncancelDialogOpen(true); }}
-            className="h-8 w-8 text-green-600 hover:bg-green-100"
-            title="Reactivate task"
+            onClick={() => { if (isSuperAdmin) { setTaskToUncancel(task); setUncancelDialogOpen(true); } }}
+            disabled={!isSuperAdmin}
+            className="h-8 w-8 text-green-600 hover:bg-green-100 disabled:opacity-40 disabled:pointer-events-none"
+            title={isSuperAdmin ? "Reactivate task" : "Only a SuperAdmin can reactivate a cancelled task"}
           >
-            <RefreshCw className="h-4 w-4" />
+            {isSuperAdmin ? <RefreshCw className="h-4 w-4" /> : <LockIcon className="h-4 w-4" />}
           </Button>
         ) : (
           <Button
@@ -3180,9 +3198,10 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => handleTaskEdit(task)}
-          className="h-8 w-8 text-slate-600 hover:bg-slate-100"
-          title="Edit Task"
+          onClick={() => { if (!isCancelled) handleTaskEdit(task); }}
+          disabled={isCancelled}
+          className="h-8 w-8 text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:pointer-events-none"
+          title={isCancelled ? "Locked: task is cancelled" : "Edit Task"}
         >
           <Edit className="h-4 w-4" />
         </Button>

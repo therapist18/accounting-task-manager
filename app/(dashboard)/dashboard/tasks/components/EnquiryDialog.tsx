@@ -282,6 +282,7 @@ export function EnquiryDialog({
         duration: '',
         renewal_status: 'New',
         passport_handling_mode: null as 'bcl' | 'client' | null,
+        eta_traveler_intent: null as 'visitor' | 'extend_or_change_status' | null,
         job_level: {
             level: 1,
             department_id: null,
@@ -598,6 +599,7 @@ export function EnquiryDialog({
             duration: '',
             renewal_status: 'New',
             passport_handling_mode: null as 'bcl' | 'client' | null,
+            eta_traveler_intent: null as 'visitor' | 'extend_or_change_status' | null,
             job_level: {
                 level: 1,
                 department_id: null,
@@ -739,6 +741,7 @@ export function EnquiryDialog({
             duration: taskToEdit.duration || '',
             renewal_status: taskToEdit.renewal_status || 'New',
             passport_handling_mode: taskToEdit.passport_handling_mode || null,
+            eta_traveler_intent: taskToEdit.eta_traveler_intent || null,
             // Participants extracted below
             officer_id: taskToEdit.participants_details?.find(p => p.role?.includes('officer'))?.id?.toString() || '',
             task_manager_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_manager'))?.id?.toString() || '',
@@ -1704,6 +1707,7 @@ export function EnquiryDialog({
                 duration: syncedDuration,
                 renewal_status: syncedRenewalStatus,
                 passport_handling_mode: formData.passport_handling_mode || null,
+                eta_traveler_intent: formData.eta_traveler_intent || null,
                 officer_id: toAssignedId(formData.officer_id),
                 task_manager_id: toAssignedId(formData.task_manager_id),
                 task_assistant_id: toAssignedId(formData.task_assistant_id),
@@ -2566,6 +2570,26 @@ export function EnquiryDialog({
                                                 </Select>
                                                 <p className="text-xs text-slate-400 mt-1.5">
                                                     Whether BCL staff will carry the passport to Nyayo House for stamping, or the client handles that themselves. Tracked in Passport Endorsement Tracking once this job reaches Write-up Completed.
+                                                </p>
+                                            </TableRow>
+                                        )}
+
+                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && (
+                                            <TableRow label="Traveler Intent" hasValue={!!formData.eta_traveler_intent}>
+                                                <Select
+                                                    value={formData.eta_traveler_intent || ''}
+                                                    onValueChange={(v: any) => setFormData(prev => ({ ...prev, eta_traveler_intent: v }))}
+                                                >
+                                                    <SelectTrigger className="h-11 border-slate-200 bg-white max-w-sm">
+                                                        <SelectValue placeholder="Select whether they're visiting or staying..." />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="visitor">Just visiting — leaving before/at ETA expiry</SelectItem>
+                                                        <SelectItem value="extend_or_change_status">Staying — will need an extension or change of status</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                                <p className="text-xs text-slate-400 mt-1.5">
+                                                    Whether this person intends to leave the country before/when their ETA expires, or stay on and need a follow-on extension or change of status. Drives which workflow the Individual Document Manager's Visa/ETA tracker follows for this person.
                                                 </p>
                                             </TableRow>
                                         )}

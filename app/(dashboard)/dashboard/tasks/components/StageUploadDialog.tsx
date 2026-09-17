@@ -18,13 +18,7 @@ import { performExtraction } from "@/lib/extractionUtils"
 import supabase from "@/lib/supabase/client";
 import { useCurrentUser } from "@/lib/hooks/use-current-user";
 import { auditActor } from "../utils/audit";
-import {
-  updateDocumentWorkflow,
-  shouldTriggerWorkflowUpdate,
-  WORKFLOW_OUTCOME_LABELS,
-  TASK_STAGE_WORKFLOW_MAPPING,
-  getWorkflowLogsForIndividual
-} from "../utils/workflowSyncService";
+import { getWorkflowLogsForIndividual } from "../utils/workflowSyncService";
 
 // Same resolution order RequirementsTab.tsx's resolveTemplateEntityForReq uses — task.company_id
 // itself is a separate "sponsor company" association and is frequently null even when the
@@ -1688,8 +1682,7 @@ export function StageUploadDialog({
 
       const isWriteUpStage = stage.id === '072b9710-45df-4a05-ba65-01b4ef29d61d';
 
-      // Always execute if it's WriteUp stage, otherwise rely on the workflow trigger map check.
-      if (isWriteUpStage || shouldTriggerWorkflowUpdate(stage.id)) {
+      if (isWriteUpStage) {
         try {
           const workflowTargetDocument =
             uploadedDocumentsForWorkflow.find(doc => doc.document_id === task.linked_document_type_id) ||
@@ -1701,45 +1694,13 @@ export function StageUploadDialog({
           // this renewal-chain concept is individual-specific (document_workflow_logs is keyed
           // by individual_id, with no company equivalent), so skip it for company tasks rather
           // than querying with an undefined individual_id.
-          if (isWriteUpStage && finalDocId && !isCompanyTask) {
+          if (finalDocId && !isCompanyTask) {
             const resolvedDocumentTypeId =
               workflowTargetDocument?.document_id ||
               task.linked_document_type_id;
 
             if (resolvedDocumentTypeId) {
               await resolveOriginalDocumentWorkflow(finalDocId, resolvedDocumentTypeId);
-            }
-          }
-
-          // Also execute the standard Document Workflow action mapped to this stage
-          if (shouldTriggerWorkflowUpdate(stage.id)) {
-            const existingWorkflowDoc = Object.values(workflowDocuments).find(
-              (doc: any) => {
-                return doc.document_type_id === task.linked_document_type_id &&
-                  doc.isCompleted === true &&
-                  ['renewed_by_client', 'renewed', 'task_completed', 'task_endorsed'].includes(doc.workflowOutcome)
-              }
-            );
-
-            let workflowOutcome = WORKFLOW_OUTCOME_LABELS[TASK_STAGE_WORKFLOW_MAPPING[stage.id]];
-
-            if (existingWorkflowDoc && isWriteUpStage) {
-              workflowOutcome = 'Document Write-up Updated';
-            }
-
-            const workflowResult = await updateDocumentWorkflow(
-              task.id,
-              stage.id,
-              finalDocId,
-              workflowOutcome
-            );
-
-            if (workflowResult.success) {
-              toast({
-                title: 'Workflow Updated',
-                description: `Document workflow updated: ${workflowResult.data.outcome}`,
-                variant: 'default'
-              });
             }
           }
         } catch (workflowError) {
@@ -1758,7 +1719,7 @@ export function StageUploadDialog({
     } finally {
       setIsSaving(false);
     }
-  }, [stage, task, pendingDocuments, linkedDocuments, selectedSourceDocs, onTaskAction, onOpenChange, applicableDocumentsById, docFieldsMap, workflowDocuments]);
+  }, [stage, task, pendingDocuments, linkedDocuments, selectedSourceDocs, onTaskAction, onOpenChange, applicableDocumentsById, docFieldsMap]);
 
   const handleUploadSuccess = useCallback((newDocument: any, originatingDoc: any) => {
     if (!originatingDoc?.id) return;
