@@ -335,9 +335,11 @@ const AppSidebar = () => {
     return (
         <TooltipProvider delayDuration={100}>
             <aside
+                onClick={() => { if (!isMobile && isCollapsed) setIsCollapsed(false); }}
                 className={cn(
                     "fixed inset-y-0 left-0 z-40 flex h-screen flex-col bg-gradient-to-b from-[#376bae] to-[#1a365d] text-white transition-all duration-300 ease-in-out md:sticky md:top-0 shadow-xl border-r border-[#1a365d]/50",
                     isCollapsed ? "w-[70px]" : "w-[240px]",
+                    isCollapsed && "cursor-pointer",
                     openMobile ? "translate-x-0" : "-translate-x-full md:translate-x-0"
                 )}
             >

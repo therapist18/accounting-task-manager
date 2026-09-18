@@ -173,7 +173,7 @@ const TableRow = ({ label, children, required = false, hasValue, error }: { labe
                     title={error ? error : hasValue ? "Filled" : "Not set yet"}
                 />
             )}
-            <Label className={cn("text-xs font-semibold", error ? "text-red-700" : hasValue === false ? "text-amber-700" : "text-slate-700")}>
+            <Label className={cn("text-sm font-semibold", error ? "text-red-700" : hasValue === false ? "text-amber-700" : "text-slate-700")}>
                 {label}
                 {required && <span className="text-red-500 ml-1">*</span>}
             </Label>
@@ -181,7 +181,7 @@ const TableRow = ({ label, children, required = false, hasValue, error }: { labe
         <div className="col-span-8">
             {children}
             {error && (
-                <p className="mt-1.5 flex items-center gap-1 text-xs font-medium text-red-600">
+                <p className="mt-1.5 flex items-center gap-1 text-sm font-medium text-red-600">
                     <AlertCircle className="h-3 w-3 shrink-0" />
                     {error}
                 </p>
@@ -1672,6 +1672,10 @@ export function EnquiryDialog({
                 const manager = managersData.find(m => m.id.toString() === formData.task_manager_id);
                 if (manager) participants.push({ id: manager.id, name: manager.full_name || manager.name, role: ['task_manager'], type: "individual" });
             }
+            if (formData.task_assistant_id) {
+                const assistant = assistantsData.find(a => a.id.toString() === formData.task_assistant_id);
+                if (assistant) participants.push({ id: assistant.id, name: assistant.full_name || assistant.name, role: ['task_assistant'], type: "individual" });
+            }
             if (formData.subdepartment_id === SPONSOR_SUBDEPT_ID && selectedSponsor) {
                 participants.push({ id: selectedSponsor.id, name: selectedSponsor.full_name, role: ['sponsor'], type: "individual" })
             }
@@ -1695,11 +1699,8 @@ export function EnquiryDialog({
                 }
             });
 
-            // 'none' is the explicit "Unallocated" choice for each of these three — same as an
-            // actually-empty selection, both mean "no one assigned", so both collapse to null
-            // rather than the literal string 'none' or (for company) NaN from Number('unallocated').
-            const toAssignedId = (v: string) => (v && v !== 'none') ? Number(v) : null;
-
+            // Officer / manager / assistant assignments are persisted only inside
+            // participants_details (see below) — tm_tasks has no per-role id columns.
             const payload: any = {
                 job_description: formData.job_description,
                 individual_id: selectedIndividual.id,
@@ -1708,9 +1709,6 @@ export function EnquiryDialog({
                 renewal_status: syncedRenewalStatus,
                 passport_handling_mode: formData.passport_handling_mode || null,
                 eta_traveler_intent: formData.eta_traveler_intent || null,
-                officer_id: toAssignedId(formData.officer_id),
-                task_manager_id: toAssignedId(formData.task_manager_id),
-                task_assistant_id: toAssignedId(formData.task_assistant_id),
                 applicant_details: {
                     id: selectedIndividual.id,
                     name: selectedIndividual.full_name,
@@ -1884,7 +1882,7 @@ export function EnquiryDialog({
                                     </DialogDescription>
                                     {taskToEdit && jobLevelLabel && (
                                         <div className="mt-1">
-                                            <Badge className="bg-white/20 text-white border-white/20 text-xs font-semibold px-2 py-0.5">
+                                            <Badge className="bg-white/20 text-white border-white/20 text-sm font-semibold px-2 py-0.5">
                                                 {jobLevelLabel}
                                             </Badge>
                                         </div>
@@ -1912,7 +1910,7 @@ export function EnquiryDialog({
                                                 {['principal', 'dependant'].map(t => (
                                                     <div key={t} className="relative">
                                                         <RadioGroupItem value={t} id={t} className="sr-only" />
-                                                        <Label htmlFor={t} className={cn("flex items-center justify-center py-2 rounded-md cursor-pointer text-xs font-bold transition-all", applicantType === t ? "bg-white text-blue-600 shadow-sm" : "text-slate-500")}>
+                                                        <Label htmlFor={t} className={cn("flex items-center justify-center py-2 rounded-md cursor-pointer text-sm font-bold transition-all", applicantType === t ? "bg-white text-blue-600 shadow-sm" : "text-slate-500")}>
                                                             {t.charAt(0).toUpperCase() + t.slice(1)}
                                                         </Label>
                                                     </div>
@@ -2010,21 +2008,21 @@ export function EnquiryDialog({
                                                             <div className="flex items-center gap-2 min-w-0">
                                                                 <AlertCircle className={cn("h-4 w-4 shrink-0", suggested.status === 'expired' ? "text-red-600" : "text-amber-600")} />
                                                                 <div className="min-w-0">
-                                                                    <div className="text-xs font-bold text-slate-800 truncate">
+                                                                    <div className="text-sm font-bold text-slate-800 truncate">
                                                                         Current Immigration Status: {suggested.documentTypeName}
                                                                         {suggested.status === 'expired' && <span className="ml-1.5 text-red-600">(Expired)</span>}
                                                                     </div>
-                                                                    <div className="text-xs text-slate-500">
+                                                                    <div className="text-sm text-slate-500">
                                                                         {suggested.expiryDate ? `Expires ${format(new Date(suggested.expiryDate), 'dd/MM/yyyy')}` : 'No expiry on file'} — tap to link this task to it
                                                                     </div>
                                                                     {suggested.existingWorkflowLabel && (
-                                                                        <div className="text-xs text-orange-600 font-medium mt-0.5">
+                                                                        <div className="text-sm text-orange-600 font-medium mt-0.5">
                                                                             ⚠ {suggested.existingWorkflowLabel} — check before adding another task
                                                                         </div>
                                                                     )}
                                                                 </div>
                                                             </div>
-                                                            <span className="shrink-0 flex items-center gap-1 text-xs font-semibold text-blue-600">
+                                                            <span className="shrink-0 flex items-center gap-1 text-sm font-semibold text-blue-600">
                                                                 <Link2 className="h-3.5 w-3.5" /> Link
                                                             </span>
                                                         </button>
@@ -2037,14 +2035,14 @@ export function EnquiryDialog({
                                                     return (
                                                         <div className={cn("rounded-lg border px-3 py-2", linked.existingWorkflowLabel ? "border-orange-200 bg-orange-50" : "border-emerald-200 bg-emerald-50")}>
                                                             <div className="flex items-center justify-between">
-                                                                <span className={cn("text-xs font-medium flex items-center gap-1.5 truncate", linked.existingWorkflowLabel ? "text-orange-700" : "text-emerald-700")}>
+                                                                <span className={cn("text-sm font-medium flex items-center gap-1.5 truncate", linked.existingWorkflowLabel ? "text-orange-700" : "text-emerald-700")}>
                                                                     <Check className="h-3.5 w-3.5 shrink-0" />
                                                                     Linked: {linked.documentTypeName}{linked.isCurrentImmigrationStatus ? ' (current status)' : ''}
                                                                 </span>
-                                                                <button type="button" className="shrink-0 text-xs text-slate-400 hover:text-red-600" onClick={() => setSelectedRelatedDocumentId('')}>Unlink</button>
+                                                                <button type="button" className="shrink-0 text-sm text-slate-400 hover:text-red-600" onClick={() => setSelectedRelatedDocumentId('')}>Unlink</button>
                                                             </div>
                                                             {linked.existingWorkflowLabel && (
-                                                                <p className="text-xs text-orange-600 mt-1">
+                                                                <p className="text-sm text-orange-600 mt-1">
                                                                     ⚠ {linked.existingWorkflowLabel} — this task will be added alongside it, not replace it.
                                                                 </p>
                                                             )}
@@ -2053,7 +2051,7 @@ export function EnquiryDialog({
                                                 })()}
 
                                                 <details className="group">
-                                                    <summary className="text-xs text-slate-400 hover:text-slate-600 cursor-pointer list-none flex items-center gap-1 select-none">
+                                                    <summary className="text-sm text-slate-400 hover:text-slate-600 cursor-pointer list-none flex items-center gap-1 select-none">
                                                         <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
                                                         {selectedRelatedDocumentId ? 'Link a different document instead' : 'Link a different document'}
                                                     </summary>
@@ -2073,7 +2071,7 @@ export function EnquiryDialog({
                                                     </div>
                                                 </details>
 
-                                                <p className="text-xs text-slate-400">
+                                                <p className="text-sm text-slate-400">
                                                     Optional — link this task to a specific document so its status updates automatically in the Document Manager.
                                                 </p>
                                             </div>
@@ -2122,7 +2120,7 @@ export function EnquiryDialog({
                                             </div>
                                             {/* Show no company message */}
                                             {selectedCompany === 'unallocated' && (
-                                                <div className="mt-2 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">
+                                                <div className="mt-2 text-sm text-amber-600 bg-amber-50 px-2 py-1 rounded">
                                                     This individual is unallocated. Click "Associate" to link them to a company.
                                                 </div>
                                             )}
@@ -2132,7 +2130,7 @@ export function EnquiryDialog({
                                         {selectedIndividual && applicantType === 'principal' && (
                                             <TableRow label="Include Dependants">
                                                 {loadingRelations ? (
-                                                    <div className="flex items-center gap-2 text-slate-400 text-xs italic"><Loader2 className="h-3 w-3 animate-spin" /> Loading dependants...</div>
+                                                    <div className="flex items-center gap-2 text-slate-400 text-sm italic"><Loader2 className="h-3 w-3 animate-spin" /> Loading dependants...</div>
                                                 ) : availableDependants.length > 0 ? (
                                                     <div className="space-y-2">
                                                         <Popover open={isDependantsPopoverOpen} onOpenChange={setIsDependantsPopoverOpen}>
@@ -2164,7 +2162,7 @@ export function EnquiryDialog({
                                                                                     >
                                                                                         <Check className={cn("mr-2 h-4 w-4 text-blue-600", isSelected ? "opacity-100" : "opacity-0")} />
                                                                                         {dep.full_name}
-                                                                                        <span className="text-[10px] text-slate-400 uppercase ml-1.5">({dep.relationship_type})</span>
+                                                                                        <span className="text-sm text-slate-400 uppercase ml-1.5">({dep.relationship_type})</span>
                                                                                     </CommandItem>
                                                                                 );
                                                                             })}
@@ -2179,7 +2177,7 @@ export function EnquiryDialog({
                                                                     const dep = availableDependants.find(d => d.id.toString() === depId);
                                                                     if (!dep) return null;
                                                                     return (
-                                                                        <Badge key={depId} variant="secondary" className="text-xs py-1 px-2 bg-blue-50 text-blue-600 border-blue-100 flex items-center gap-1">
+                                                                        <Badge key={depId} variant="secondary" className="text-sm py-1 px-2 bg-blue-50 text-blue-600 border-blue-100 flex items-center gap-1">
                                                                             {dep.full_name}
                                                                             <X
                                                                                 className="h-3 w-3 cursor-pointer hover:text-blue-800"
@@ -2192,7 +2190,7 @@ export function EnquiryDialog({
                                                         )}
                                                     </div>
                                                 ) : (
-                                                    <div className="text-xs text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100 italic">
+                                                    <div className="text-sm text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100 italic">
                                                         No dependants associated with this principal.
                                                     </div>
                                                 )}
@@ -2202,7 +2200,7 @@ export function EnquiryDialog({
                                         {selectedIndividual && applicantType === 'dependant' && (
                                             <TableRow label="Linked Principal" required hasValue={!!principalForDependant} error={submitAttempted ? clientIdentificationErrors.linked_principal : undefined}>
                                                 {loadingRelations ? (
-                                                    <div className="flex items-center gap-2 text-slate-400 text-xs italic"><Loader2 className="h-3 w-3 animate-spin" /> Loading principal...</div>
+                                                    <div className="flex items-center gap-2 text-slate-400 text-sm italic"><Loader2 className="h-3 w-3 animate-spin" /> Loading principal...</div>
                                                 ) : principalForDependant ? (
                                                     <div className="flex items-center gap-2">
                                                         <Badge variant="outline" className="py-2 px-3 border-blue-200 bg-blue-50 text-blue-700 flex items-center gap-2">
@@ -2223,7 +2221,7 @@ export function EnquiryDialog({
                                                         </Button>
                                                     </div>
                                                 ) : (
-                                                    <div className="text-xs text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100 italic">
+                                                    <div className="text-sm text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100 italic">
                                                         No principal associated (or selected) with this dependant.
                                                     </div>
                                                 )}
@@ -2234,7 +2232,7 @@ export function EnquiryDialog({
                                             <TableRow label="Workflow Check">
                                                 <div className="space-y-2">
                                                     {checkingWorkflow ? (
-                                                        <div className="flex items-center gap-2 text-slate-400 text-xs italic">
+                                                        <div className="flex items-center gap-2 text-slate-400 text-sm italic">
                                                             <Loader2 className="h-3 w-3 animate-spin" />
                                                             Checking existing workflows and active tasks...
                                                         </div>
@@ -2242,7 +2240,7 @@ export function EnquiryDialog({
                                                         <div className="rounded-lg border border-red-200 bg-red-50 p-3">
                                                             <div className="flex items-start gap-2">
                                                                 <AlertCircle className="mt-0.5 h-4 w-4 text-red-600" />
-                                                                <div className="space-y-1 text-xs text-red-700">
+                                                                <div className="space-y-1 text-sm text-red-700">
                                                                     <p className="font-semibold">Active task already exists for this job level.</p>
                                                                     {duplicateTaskConflicts.slice(0, 3).map((conflict: any) => (
                                                                         <p key={conflict.id}>
@@ -2253,17 +2251,17 @@ export function EnquiryDialog({
                                                             </div>
                                                         </div>
                                                     ) : duplicateTaskConflicts.length === 0 && workflowRestrictionSummary?.hasBlockingWorkflow ? (
-                                                        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                                                        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                                                             Workflow restriction detected for this selected job level.
                                                             {` Blocking state(s): ${(workflowRestrictionSummary.blockingReasons || []).map(formatWorkflowRestrictionReason).join(", ")}.`}
                                                         </div>
                                                     ) : formData.department_id && selectedJobLevelBundle && workflowRestrictionSummary?.matchedDocumentTypes?.length > 0 ? (
-                                                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+                                                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
                                                             Workflow history exists for this selected job level.
                                                             {` ${workflowRestrictionSummary.matchedDocumentTypes.length} related workflow target(s) detected for the matched bundle, including pushed-only task workflow states.`}
                                                         </div>
                                                     ) : (
-                                                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
+                                                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
                                                             {formData.department_id
                                                                 ? "No workflow or active task conflict detected for the selected job level."
                                                                 : "Select a job level to run the workflow check."}
@@ -2276,7 +2274,7 @@ export function EnquiryDialog({
                                         {formData.class_id === CLASS_D_ID && (
                                             <TableRow label="Related Understudy" required hasValue={!!selectedUnderstudy} error={submitAttempted ? clientIdentificationErrors.understudy : undefined}>
                                                 {loadingRelations ? (
-                                                    <div className="flex items-center gap-2 text-slate-400 text-xs italic"><Loader2 className="h-3 w-3 animate-spin" /> Loading available understudies...</div>
+                                                    <div className="flex items-center gap-2 text-slate-400 text-sm italic"><Loader2 className="h-3 w-3 animate-spin" /> Loading available understudies...</div>
                                                 ) : understudies.length > 0 ? (
                                                     <SearchableSelect
                                                         value={selectedUnderstudy}
@@ -2291,7 +2289,7 @@ export function EnquiryDialog({
                                                         allowClear={true}
                                                     />
                                                 ) : (
-                                                    <div className="text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-100 italic">
+                                                    <div className="text-sm text-amber-600 bg-amber-50 p-2 rounded border border-amber-100 italic">
                                                         No understudies linked to the selected company.
                                                     </div>
                                                 )}
@@ -2413,7 +2411,7 @@ export function EnquiryDialog({
                                                         allowClear={true}
                                                     />
                                                     {formData.officer_id && formData.subdepartment_id && (
-                                                        <div className="flex items-center gap-2 text-xs text-amber-600">
+                                                        <div className="flex items-center gap-2 text-sm text-amber-600">
                                                             <Shield className="h-3 w-3" />
                                                             <span>Officer inherited from department hierarchy</span>
                                                         </div>
@@ -2487,7 +2485,7 @@ export function EnquiryDialog({
                                                 </Popover>
                                             </div>
                                             {formData.enquiry_date && !isEnquiryDateValid && (
-                                                <p className="text-xs text-red-500 mt-1">Enter a valid date as DD/MM/YYYY, or pick one from the calendar.</p>
+                                                <p className="text-sm text-red-500 mt-1">Enter a valid date as DD/MM/YYYY, or pick one from the calendar.</p>
                                             )}
                                         </TableRow>
 
@@ -2520,7 +2518,7 @@ export function EnquiryDialog({
                                                 )}
                                             </div>
                                             {!taskToEdit && selectedIndividual && !formData.passport_number && (
-                                                <div className="mt-2 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-md">
+                                                <div className="mt-2 flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-md">
                                                     <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                                                     No passport found. Upload the passport document using the button above — the number will populate once it's processed.
                                                 </div>
@@ -2547,7 +2545,7 @@ export function EnquiryDialog({
                                                             if (checked) setEditableRNumber('');
                                                         }}
                                                     />
-                                                    <Label htmlFor="r-number-unallocated" className="text-xs font-medium text-slate-500 cursor-pointer whitespace-nowrap">
+                                                    <Label htmlFor="r-number-unallocated" className="text-sm font-medium text-slate-500 cursor-pointer whitespace-nowrap">
                                                         Unallocated
                                                     </Label>
                                                 </div>
@@ -2568,7 +2566,7 @@ export function EnquiryDialog({
                                                         <SelectItem value="client">Client Handles It</SelectItem>
                                                     </SelectContent>
                                                 </Select>
-                                                <p className="text-xs text-slate-400 mt-1.5">
+                                                <p className="text-sm text-slate-400 mt-1.5">
                                                     Whether BCL staff will carry the passport to Nyayo House for stamping, or the client handles that themselves. Tracked in Passport Endorsement Tracking once this job reaches Write-up Completed.
                                                 </p>
                                             </TableRow>
@@ -2588,7 +2586,7 @@ export function EnquiryDialog({
                                                         <SelectItem value="extend_or_change_status">Staying — will need an extension or change of status</SelectItem>
                                                     </SelectContent>
                                                 </Select>
-                                                <p className="text-xs text-slate-400 mt-1.5">
+                                                <p className="text-sm text-slate-400 mt-1.5">
                                                     Whether this person intends to leave the country before/when their ETA expires, or stay on and need a follow-on extension or change of status. Drives which workflow the Individual Document Manager's Visa/ETA tracker follows for this person.
                                                 </p>
                                             </TableRow>
@@ -2657,7 +2655,7 @@ export function EnquiryDialog({
 
                                                                         {q.third_party_role && jobAnswers[q.id] === true && (
                                                                             <div className="mt-3 space-y-1">
-                                                                                <Label className="text-[10px] font-bold uppercase text-amber-600 flex items-center gap-1">
+                                                                                <Label className="text-sm font-bold uppercase text-amber-600 flex items-center gap-1">
                                                                                     <User className="h-3 w-3" /> Select {q.third_party_role}
                                                                                 </Label>
                                                                                 <SearchableSelect
@@ -2675,12 +2673,12 @@ export function EnquiryDialog({
                                                                                     disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}
                                                                                 />
                                                                                 {thirdPartySelections[q.id] && (
-                                                                                    <p className="text-[9px] text-amber-600 italic">
+                                                                                    <p className="text-sm text-amber-600 italic">
                                                                                         Selected {q.third_party_role} will be stored in participants for document generation.
                                                                                     </p>
                                                                                 )}
                                                                                 {!companyIndividuals.length && selectedCompany && (
-                                                                                    <p className="text-[9px] text-slate-400 italic">
+                                                                                    <p className="text-sm text-slate-400 italic">
                                                                                         No individuals found for the selected company.
                                                                                     </p>
                                                                                 )}
@@ -2736,7 +2734,7 @@ export function EnquiryDialog({
                                                                             {q.type === 'multiselect' && jobAnswers[q.id]?.length > 0 && (
                                                                                 <div className="flex flex-wrap gap-1.5">
                                                                                     {jobAnswers[q.id].map(val => (
-                                                                                        <Badge key={val} variant="secondary" className="text-xs py-1 px-2 bg-blue-50 text-blue-600 border-blue-100 flex items-center gap-1">
+                                                                                        <Badge key={val} variant="secondary" className="text-sm py-1 px-2 bg-blue-50 text-blue-600 border-blue-100 flex items-center gap-1">
                                                                                             {val}
                                                                                             <X
                                                                                                 className="h-3 w-3 cursor-pointer hover:text-blue-800"
@@ -2761,7 +2759,7 @@ export function EnquiryDialog({
                                                 </div>
                                                 <h3 className="text-lg font-semibold text-slate-700 mb-2">Job Questions Not Loaded</h3>
                                                 <p className="text-sm text-slate-500 mb-4">Please select a job level to load requirement-specific questions</p>
-                                                <div className="text-xs text-slate-400 bg-slate-50 rounded-lg p-3 max-w-md mx-auto">
+                                                <div className="text-sm text-slate-400 bg-slate-50 rounded-lg p-3 max-w-md mx-auto">
                                                     <p>Select a Department, Sub-Department, and Service Class to load the relevant job questions for this enquiry.</p>
                                                 </div>
                                             </div>
@@ -2795,7 +2793,7 @@ export function EnquiryDialog({
                     <DialogFooter className="p-6 bg-white border-t border-blue-100 shrink-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.03)]">
                         <div className="flex items-center justify-between w-full">
                             <div className="flex flex-col">
-                                <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">Enquiry Ready</span>
+                                <span className="text-sm text-slate-400 font-semibold uppercase tracking-wide">Enquiry Ready</span>
                                 <span className="text-sm text-blue-600 font-bold truncate max-w-[400px]">
                                     {selectedIndividual?.full_name || "Awaiting Selection"}
                                 </span>
@@ -2805,14 +2803,14 @@ export function EnquiryDialog({
                                     variant="ghost"
                                     onClick={() => onOpenChange(false)}
                                     disabled={loading}
-                                    className="px-6 font-semibold uppercase text-xs tracking-wide text-slate-500 hover:text-slate-700"
+                                    className="px-6 font-semibold uppercase text-sm tracking-wide text-slate-500 hover:text-slate-700"
                                 >
                                     Cancel
                                 </Button>
                                 <Button
                                     onClick={handleSubmit}
                                     disabled={loading || !selectedIndividual || !formData.department_id || (workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit)}
-                                    className="px-10 bg-blue-600 hover:bg-blue-700 h-11 text-white font-bold uppercase text-xs tracking-wide transition-all"
+                                    className="px-10 bg-blue-600 hover:bg-blue-700 h-11 text-white font-bold uppercase text-sm tracking-wide transition-all"
                                 >
                                     {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
                                     {taskToEdit ? 'Update Enquiry' : 'Finalize Enquiry'}
@@ -2912,7 +2910,7 @@ export function EnquiryDialog({
                                                 >
                                                     <Building2 className="h-4 w-4 text-slate-500" />
                                                     <span className="text-sm">Un-allocated Company</span>
-                                                    <Badge variant="secondary" className="ml-auto text-xs">Special</Badge>
+                                                    <Badge variant="secondary" className="ml-auto text-sm">Special</Badge>
                                                 </button>
 
                                                 {filteredAssociationCompanies.map(company => (
@@ -2927,7 +2925,7 @@ export function EnquiryDialog({
                                                     >
                                                         <Building2 className="h-4 w-4 text-gray-500" />
                                                         <span className="text-sm">{company.company_name}</span>
-                                                        <Badge variant="secondary" className="ml-auto text-xs">Existing</Badge>
+                                                        <Badge variant="secondary" className="ml-auto text-sm">Existing</Badge>
                                                     </button>
                                                 ))}
 
@@ -2941,7 +2939,7 @@ export function EnquiryDialog({
                                                         >
                                                             <PlusCircle className="h-4 w-4 text-blue-600" />
                                                             <span className="text-sm font-medium text-blue-800">Create "{companySearchTerm.trim()}"</span>
-                                                            <Badge variant="default" className="ml-auto bg-blue-600 text-xs">New</Badge>
+                                                            <Badge variant="default" className="ml-auto bg-blue-600 text-sm">New</Badge>
                                                         </button>
                                                     )}
                                             </div>
@@ -2960,7 +2958,7 @@ export function EnquiryDialog({
                                                     </span>
                                                 </div>
                                                 <div className="flex items-center gap-2">
-                                                    <Badge variant="default" className="bg-green-600 text-xs">Selected</Badge>
+                                                    <Badge variant="default" className="bg-green-600 text-sm">Selected</Badge>
                                                     <Button
                                                         type="button"
                                                         variant="ghost"
@@ -3100,7 +3098,7 @@ export function EnquiryDialog({
 
                                         <div className="mt-3 grid grid-cols-2 gap-3">
                                             <div className="space-y-1">
-                                                <Label className="text-xs text-slate-500">Effective From</Label>
+                                                <Label className="text-sm text-slate-500">Effective From</Label>
                                                 <Input
                                                     type="date"
                                                     value={companyCategories[category]?.wef || ''}
@@ -3109,7 +3107,7 @@ export function EnquiryDialog({
                                                 />
                                             </div>
                                             <div className="space-y-1">
-                                                <Label className="text-xs text-slate-500">Effective To</Label>
+                                                <Label className="text-sm text-slate-500">Effective To</Label>
                                                 <Input
                                                     type="date"
                                                     value={companyCategories[category]?.to || ''}
