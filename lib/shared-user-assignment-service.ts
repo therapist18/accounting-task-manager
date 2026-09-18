@@ -233,10 +233,16 @@ export async function fetchUserAssignmentData(options: UserAssignmentOptions = {
 class UnifiedUserService {
   private static instance: UnifiedUserService;
   private cache: Map<string, { data: any; timestamp: number }>;
+  // Tracks requests still in flight per cacheKey so callers that invoke getAllUserData
+  // near-simultaneously (e.g. multiple components mounting at once) share one network
+  // round trip instead of all missing the cache and firing their own — the cache above is
+  // only populated once a request resolves, so it can't prevent that on its own.
+  private pending: Map<string, Promise<FilteredUserData>>;
   private CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
   private constructor() {
     this.cache = new Map();
+    this.pending = new Map();
   }
 
   static getInstance(): UnifiedUserService {
@@ -361,29 +367,42 @@ class UnifiedUserService {
       // (cache hit, wrong shape). getCache() unwraps it correctly.
       return this.getCache(cacheKey);
     }
-    // Use existing fetchUserAssignmentData to get raw data
-    const rawData = await fetchUserAssignmentData(options);
 
-    // Transform all users to display format
-    const allDisplayUsers = [
-      ...rawData.officers.map(user => this.transformUserToDisplayFormat(user, departments || [])),
-      ...rawData.taskManagers.map(user => this.transformUserToDisplayFormat(user, departments || [])),
-      ...rawData.taskAssistants.map(user => this.transformUserToDisplayFormat(user, departments || []))
-    ];
+    const inFlight = this.pending.get(cacheKey);
+    if (inFlight) return inFlight;
 
-    const uniqueUsers = Array.from(
-      new Map(allDisplayUsers.map(user => [user.id, user])).values()
-    );
+    const fetchPromise = (async () => {
+      try {
+        // Use existing fetchUserAssignmentData to get raw data
+        const rawData = await fetchUserAssignmentData(options);
 
-    const result: FilteredUserData = {
-      officers: uniqueUsers.filter(user => user.assignments.some(a => a.role === 'officer')),
-      managers: uniqueUsers.filter(user => user.assignments.some(a => a.role === 'manager')),
-      assistants: uniqueUsers.filter(user => user.assignments.some(a => a.role === 'assistant')),
-      allUsers: uniqueUsers
-    };
+        // Transform all users to display format
+        const allDisplayUsers = [
+          ...rawData.officers.map(user => this.transformUserToDisplayFormat(user, departments || [])),
+          ...rawData.taskManagers.map(user => this.transformUserToDisplayFormat(user, departments || [])),
+          ...rawData.taskAssistants.map(user => this.transformUserToDisplayFormat(user, departments || []))
+        ];
 
-    this.setCache(cacheKey, result);
-    return result;
+        const uniqueUsers = Array.from(
+          new Map(allDisplayUsers.map(user => [user.id, user])).values()
+        );
+
+        const result: FilteredUserData = {
+          officers: uniqueUsers.filter(user => user.assignments.some(a => a.role === 'officer')),
+          managers: uniqueUsers.filter(user => user.assignments.some(a => a.role === 'manager')),
+          assistants: uniqueUsers.filter(user => user.assignments.some(a => a.role === 'assistant')),
+          allUsers: uniqueUsers
+        };
+
+        this.setCache(cacheKey, result);
+        return result;
+      } finally {
+        this.pending.delete(cacheKey);
+      }
+    })();
+
+    this.pending.set(cacheKey, fetchPromise);
+    return fetchPromise;
   }
 
   /**

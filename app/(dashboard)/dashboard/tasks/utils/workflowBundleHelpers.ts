@@ -100,19 +100,47 @@ function isSameJobLevel(a: Partial<BundleJobLevel> | null | undefined, b: Partia
     && left.subclass_id === right.subclass_id;
 }
 
+// tm_task_bundles is read in full-per-department by both fetchForJobLevel (one exact-match
+// lookup) and DepartmentTasksManager's own "available bundles" listing — a short cache means
+// both share one network round trip instead of each issuing their own identical
+// `.contains("trigger_job_level", ...)` query for the same department.
+const bundlesCache = new Map<number, { promise: Promise<any[]>; timestamp: number }>();
+const BUNDLES_CACHE_MS = 30000;
+
+async function fetchBundlesForDepartment(departmentId: number): Promise<any[]> {
+  const now = Date.now();
+  const cached = bundlesCache.get(departmentId);
+  if (cached && now - cached.timestamp < BUNDLES_CACHE_MS) {
+    return cached.promise;
+  }
+  const promise = supabase
+    .from("tm_task_bundles")
+    .select("*")
+    .contains("trigger_job_level", { department_id: departmentId })
+    .then(({ data, error }) => {
+      if (error) {
+        console.error("Error fetching task bundles:", error);
+        return [];
+      }
+      return data || [];
+    });
+  bundlesCache.set(departmentId, { promise, timestamp: now });
+  return promise;
+}
+
 export const taskBundleService = {
   async fetchForJobLevel(jobLevel: BundleJobLevel): Promise<TaskBundleTemplate | null> {
     const normalized = normalizeJobLevel(jobLevel);
     if (!normalized?.department_id) return null;
 
-    const { data, error } = await supabase
-      .from("tm_task_bundles")
-      .select("*")
-      .contains("trigger_job_level", { department_id: normalized.department_id });
-
-    if (error || !data?.length) return null;
+    const data = await fetchBundlesForDepartment(normalized.department_id);
+    if (!data.length) return null;
     const exactMatch = data.find((bundle: any) => isSameJobLevel(bundle.trigger_job_level, normalized));
     return exactMatch ? ({ ...exactMatch, task_rules: exactMatch.task_rules || [] } as TaskBundleTemplate) : null;
+  },
+
+  fetchAllForDepartment(departmentId: number): Promise<any[]> {
+    return fetchBundlesForDepartment(departmentId);
   },
 };
 
@@ -364,8 +392,39 @@ export function evaluateWorkflowRestrictionsForBundle(workflowLogs: any[], bundl
   };
 }
 
+// detectExistingWorkflowForIndividual and detectTaskConflictsForJobLevel both need this
+// individual's tm_tasks rows (the latter just needs job_level on top) — EnquiryDialog fires
+// both close together whenever an individual is selected with a department already chosen, so
+// a short shared cache means they don't each issue their own identical `.eq("individual_id", ...)`
+// query.
+const individualTasksCache = new Map<number, { promise: Promise<any[]>; timestamp: number }>();
+const INDIVIDUAL_TASKS_CACHE_MS = 10000;
+
+function fetchTasksForIndividual(individualId: number): Promise<any[]> {
+  const now = Date.now();
+  const cached = individualTasksCache.get(individualId);
+  if (cached && now - cached.timestamp < INDIVIDUAL_TASKS_CACHE_MS) {
+    return cached.promise;
+  }
+  const promise = supabase
+    .from("tm_tasks")
+    .select("id, status, job_description, job_level, individual_id, registry_metadata, created_at")
+    .eq("individual_id", individualId)
+    .order("created_at", { ascending: false })
+    .limit(200)
+    .then(({ data, error }) => {
+      if (error) {
+        console.error("[fetchTasksForIndividual]", error);
+        return [];
+      }
+      return data || [];
+    });
+  individualTasksCache.set(individualId, { promise, timestamp: now });
+  return promise;
+}
+
 export async function detectExistingWorkflowForIndividual(individualId: number) {
-  const [workflowResult, taskResult] = await Promise.all([
+  const [workflowResult, tasks] = await Promise.all([
     supabase
       .from("document_workflow_logs")
       .select("id, individual_id, document_type_id, uploaded_doc_id, action_type, payload, holds, comments, reminders, tasks, resolutions, created_at, updated_at")
@@ -373,16 +432,11 @@ export async function detectExistingWorkflowForIndividual(individualId: number) 
       .in("action_type", ["hold", "comment", "reminder_sent", "reminder_response", "task_pushed", "task_created", "resolution", "deactivation"])
       .order("updated_at", { ascending: false })
       .limit(200),
-    supabase
-      .from("tm_tasks")
-      .select("id, status, job_description, individual_id, registry_metadata, created_at")
-      .eq("individual_id", individualId)
-      .order("created_at", { ascending: false })
-      .limit(200),
+    fetchTasksForIndividual(individualId),
   ]);
 
   const workflowLogs = workflowResult.data || [];
-  const activeTasks = (taskResult.data || []).filter((task: any) =>
+  const activeTasks = tasks.filter((task: any) =>
     ACTIVE_TASK_STATUSES.has(String(task.status || "").toLowerCase())
   );
 
@@ -562,6 +616,12 @@ export async function linkTaskToDocumentWorkflow(params: {
   const newTaskEntry = { taskIds: [taskId], createdAt: nowIso, actionType: "task_created" };
 
   if (existing) {
+    // EnquiryDialog now calls this on every save (not just once at task creation), so a task
+    // left linked to the same document across repeat edits would otherwise append a fresh,
+    // identical `tasks` entry each time — skip the write once this taskId is already recorded.
+    const alreadyLinked = (existing.tasks || []).some((t: any) => (t.taskIds || []).some((id: any) => String(id) === String(taskId)));
+    if (alreadyLinked) return { success: true };
+
     const { error: updateError } = await supabase
       .from("document_workflow_logs")
       .update({
@@ -612,19 +672,9 @@ export async function detectTaskConflictsForJobLevel(individualId: number, jobLe
   const normalized = normalizeJobLevel(jobLevel);
   if (!normalized?.department_id) return [];
 
-  const { data, error } = await supabase
-    .from("tm_tasks")
-    .select("id, status, job_description, job_level, individual_id, created_at, registry_metadata")
-    .eq("individual_id", individualId)
-    .order("created_at", { ascending: false })
-    .limit(200);
+  const tasks = await fetchTasksForIndividual(individualId);
 
-  if (error) {
-    console.error("[detectTaskConflictsForJobLevel]", error);
-    return [];
-  }
-
-  return (data || []).filter((task: any) => {
+  return tasks.filter((task: any) => {
     if (!ACTIVE_TASK_STATUSES.has(String(task.status || "").toLowerCase())) return false;
     return isSameJobLevel(task.job_level, normalized);
   });

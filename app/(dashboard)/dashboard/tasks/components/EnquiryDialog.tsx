@@ -34,11 +34,6 @@ import { auditActor } from "../utils/audit"
 const CLASS_D_ID = '1750687058159';
 const SPONSOR_SUBDEPT_ID = '26';
 const CLIENT_CATEGORIES = ['ACC', 'IMM', 'Sheria', 'Audit'];
-// Same "registered" milestone stage summary-reports/stageColumnConfig.ts and ReportsPage read
-// task.stages[...] .date/.completedAt off for their "Enquiry Date" / "Registered" column — the
-// Enquiry Date field here needs to read from and write to this exact stage so what the user
-// edits here is what those tables actually display, not a separate date_initiated field that
-// can silently drift from it.
 const ENQUIRY_STAGE_ID = '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa';
 
 // Photo document IDs
@@ -111,10 +106,6 @@ const normalizeEnquiryDateForStorage = (dateValue?: string) => {
         };
     }
 
-    // dd/mm/yyyy — the format the Enquiry Date field now actually displays/edits in. Handled
-    // explicitly rather than falling through to `new Date(dateValue)` below, since JS's Date
-    // parser treats slash-separated dates as ambiguous (commonly mm/dd/yyyy) and would silently
-    // swap day and month, or return an Invalid Date that quietly falls back to "today".
     if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateValue)) {
         const [day, month, year] = dateValue.split('/');
         return {
@@ -138,10 +129,6 @@ const normalizeEnquiryDateForStorage = (dateValue?: string) => {
     };
 };
 
-// Populates the Enquiry Date field from the SAME source the "Enquiry Date" / "Registered"
-// column reads in Summary Reports and ReportsPage (task.stages[ENQUIRY_STAGE_ID].date, falling
-// back to .completedAt) — not task.date_initiated, which is a separate column that can drift
-// out of sync with the stage (e.g. it was never written back on edit, see handleSubmit below).
 const resolveEnquiryDateForEdit = (task: any): string => {
     const stageData = task?.stages?.[ENQUIRY_STAGE_ID];
     const raw = stageData?.date || stageData?.completedAt || task?.date_initiated;
@@ -151,15 +138,6 @@ const resolveEnquiryDateForEdit = (task: any): string => {
     return isNaN(parsed.getTime()) ? format(new Date(), 'dd/MM/yyyy') : format(parsed, 'dd/MM/yyyy');
 };
 
-// Moved TableRow outside to prevent re-rendering/focus loss.
-// `hasValue` is opt-in per field (omit it for fields where "empty" isn't meaningful, like
-// toggles that always have a value) — when passed, it renders a small filled/empty dot next to
-// the label plus a tinted row background, so the user can tell at a glance which fields still
-// need attention versus which are already set, instead of having to read every value.
-// `error` is only ever passed once the user has tried to save (see `submitAttempted` in the
-// main component) — it overrides the amber "not set yet" styling with a red one and renders the
-// message under the field, so validation only becomes visible after a real save attempt instead
-// of greeting the user with a wall of red the moment the dialog opens.
 const TableRow = ({ label, children, required = false, hasValue, error }: { label: string; children: React.ReactNode; required?: boolean; hasValue?: boolean; error?: string }) => (
     <div className={cn(
         "grid grid-cols-12 gap-4 py-3 border-b transition-colors",
@@ -196,6 +174,7 @@ export function EnquiryDialog({
     onEnquiryCreated,
     departments = [],
     userData,
+    kycDocuments,
     taskToEdit = null
 }: any) {
     const { user: currentUser } = useCurrentUser();
@@ -209,25 +188,13 @@ export function EnquiryDialog({
     const [loadingPhoto, setLoadingPhoto] = useState(false)
     const [checkingWorkflow, setCheckingWorkflow] = useState(false)
     const [editableRNumber, setEditableRNumber] = useState('')
-    // Whether the R Number is explicitly marked "Unallocated" rather than just left blank —
-    // mirrors the Officer/Manager/Assistant "Unallocated" option so an empty field always reads
-    // as "not looked at yet" and Unallocated always reads as "looked at, deliberately none".
     const [rNumberUnallocated, setRNumberUnallocated] = useState(false)
-    // Only render validation errors once the user has actually tried to save — see TableRow's
-    // own `error` prop comment.
     const [submitAttempted, setSubmitAttempted] = useState(false)
     const [isDependantsPopoverOpen, setIsDependantsPopoverOpen] = useState(false)
-    // Passport upload — lets the user attach the passport document inline instead of hitting a
-    // dead disabled field with no way forward. `passportKycDoc` is the KYC document-type
-    // definition (extraction fields + display name) for PASSPORT_DOCUMENT_ID, fetched once via
-    // fetchAllKycFields() (same cached helper summary-reports/RequirementsTab already use) so
-    // UploadModal gets the same field spec the rest of the app extracts against.
     const [showPassportUpload, setShowPassportUpload] = useState(false)
     const [passportKycDoc, setPassportKycDoc] = useState<any>(null)
-
-    // Data lists
     const [individuals, setIndividuals] = useState<Individual[]>([])
-    const [sponsors, setSponsors] = useState<any[]>([]) // List for sponsors
+    const [sponsors, setSponsors] = useState<any[]>([])
     const [jobQuestions, setJobQuestions] = useState<JobQuestion[]>([])
     const [jobAnswers, setJobAnswers] = useState<Record<string, any>>({})
     const [masterFieldsData, setMasterFieldsData] = useState<Record<string, any[]>>({})
@@ -235,34 +202,21 @@ export function EnquiryDialog({
     const [duplicateTaskConflicts, setDuplicateTaskConflicts] = useState<any[]>([])
     const [selectedJobLevelBundle, setSelectedJobLevelBundle] = useState<any | null>(null)
     const [workflowRestrictionSummary, setWorkflowRestrictionSummary] = useState<any | null>(null)
-
-    // Ref to track if edit data has been loaded
     const editDataLoadedRef = useRef(false)
-
-    // Third-party selection state
-    const [thirdPartySelections, setThirdPartySelections] = useState<Record<string, string>>({}) // questionId -> individual id
+    const [thirdPartySelections, setThirdPartySelections] = useState<Record<string, string>>({})
     const [companyIndividuals, setCompanyIndividuals] = useState<any[]>([])
-
-    // Selection State
     const [applicantType, setApplicantType] = useState<'principal' | 'dependant'>('principal')
     const [selectedIndividual, setSelectedIndividual] = useState<Individual | null>(null)
-    const [selectedSponsor, setSelectedSponsor] = useState<any | null>(null) // State for Sponsor
+    const [selectedSponsor, setSelectedSponsor] = useState<any | null>(null)
     const [principalForDependant, setPrincipalForDependant] = useState<Individual | null>(null)
     const [companies, setCompanies] = useState<any[]>([])
     const [allCompanies, setAllCompanies] = useState<any[]>([])
     const [selectedCompany, setSelectedCompany] = useState<string>('')
     const [understudies, setUnderstudies] = useState<any[]>([])
     const [selectedUnderstudy, setSelectedUnderstudy] = useState<string>('')
-
-    // Related Document — lets this task be tagged with the specific document it's meant to
-    // resolve (e.g. an expired permit), so bcl-registry's document workflow status picks it up
-    // automatically instead of showing "no workflow" forever because nobody went back to flag
-    // it there separately. Optional — most tasks aren't about a specific document.
     const [availableRelatedDocuments, setAvailableRelatedDocuments] = useState<LinkableDocument[]>([])
     const [selectedRelatedDocumentId, setSelectedRelatedDocumentId] = useState<string>('')
     const [loadingRelatedDocuments, setLoadingRelatedDocuments] = useState(false)
-
-    // Multi-select relations
     const [includeDependants, setIncludeDependants] = useState(false)
     const [availableDependants, setAvailableDependants] = useState<any[]>([])
     const [selectedDependants, setSelectedDependants] = useState<string[]>([])
@@ -291,8 +245,6 @@ export function EnquiryDialog({
             subclass_id: null
         }
     });
-
-    // State for available staff (matching regisry structure)
     const [allOfficers, setAllOfficers] = useState<any[]>([]);
     const [availableOfficers, setAvailableOfficers] = useState<any[]>([]);
     const [managersData, setManagersData] = useState<any[]>([]);
@@ -504,7 +456,6 @@ export function EnquiryDialog({
 
         if (error) throw error;
         const all = data || [];
-        // Classify via employment_data instead of the non-existent individual_type column
         const filtered = type === 'principal'
             ? all.filter(ind => isPrincipalIndividual(ind))
             : all.filter(ind => !isPrincipalIndividual(ind));
@@ -512,49 +463,55 @@ export function EnquiryDialog({
         return filtered;
     }, []);
 
+    const understudiesFetchRef = useRef<{ companyId: string; promise: Promise<void> } | null>(null);
     const fetchUnderstudies = useCallback(async (companyId: string) => {
         if (!companyId || companyId === 'unallocated') { setUnderstudies([]); return }
-        const { data: companyData } = await supabase.from('acc_portal_company_duplicate').select('understudy').eq('id', companyId).single()
-        const understudyList = companyData?.understudy || []
-        if (understudyList.length) {
-            const { data: inds } = await supabase.from('registry_individuals').select('id, full_name').in('id', understudyList.map((u: any) => u.individual_id))
-            setUnderstudies(inds || [])
+        if (understudiesFetchRef.current?.companyId === companyId) {
+            return understudiesFetchRef.current.promise;
+        }
+        const fetchPromise = (async () => {
+            const { data: companyData } = await supabase.from('acc_portal_company_duplicate').select('understudy').eq('id', companyId).single()
+            const understudyList = companyData?.understudy || []
+            const understudyIds = understudyList.map((u: any) => u.individual_id).filter((id: any) => id != null && /^\d+$/.test(String(id)))
+            if (understudyIds.length) {
+                const { data: inds } = await supabase.from('registry_individuals').select('id, full_name').in('id', understudyIds)
+                setUnderstudies(inds || [])
+            } else {
+                setUnderstudies([])
+            }
+        })();
+        understudiesFetchRef.current = { companyId, promise: fetchPromise };
+        try {
+            await fetchPromise;
+        } finally {
+            if (understudiesFetchRef.current?.promise === fetchPromise) {
+                understudiesFetchRef.current = null;
+            }
         }
     }, [])
 
-    // Fetch applicant photo — both queries run in parallel, passport photo takes priority
-    const fetchApplicantPhoto = useCallback(async (individualId: number) => {
+    const fetchApplicantPhotoAndPassport = useCallback(async (individualId: number) => {
         setLoadingPhoto(true);
         setApplicantPhoto(null);
         try {
-            const [passportResult, clearResult] = await Promise.all([
-                supabase.from('acc_portal_directors_documents').select('file_path')
-                    .eq('director_id', individualId).eq('document_id', PASSPORT_PHOTO_ID).maybeSingle(),
-                supabase.from('acc_portal_directors_documents').select('file_path')
-                    .eq('director_id', individualId).eq('document_id', CLEAR_PHOTO_ID).maybeSingle()
-            ]);
-            const photoDoc = passportResult.data || clearResult.data;
+            const { data: docs, error } = await supabase
+                .from('acc_portal_directors_documents')
+                .select('document_id, file_path, extracted_details')
+                .eq('director_id', individualId)
+                .in('document_id', [PASSPORT_PHOTO_ID, CLEAR_PHOTO_ID, PASSPORT_DOCUMENT_ID]);
+
+            if (error) throw error;
+
+            const passportPhotoDoc = docs?.find(d => d.document_id === PASSPORT_PHOTO_ID);
+            const clearPhotoDoc = docs?.find(d => d.document_id === CLEAR_PHOTO_ID);
+            const photoDoc = passportPhotoDoc || clearPhotoDoc;
             if (photoDoc?.file_path) {
                 const imageUrl = getSupabaseImageUrl(photoDoc.file_path);
                 if (imageUrl) setApplicantPhoto(imageUrl);
             }
-        } catch (error) {
-            console.error('Error fetching applicant photo:', error);
-        } finally {
-            setLoadingPhoto(false);
-        }
-    }, [getSupabaseImageUrl]);
 
-    // Fetch passport number from document
-    const fetchPassportNumber = useCallback(async (individualId: number) => {
-        try {
-            const { data: passportDocs } = await supabase
-                .from('acc_portal_directors_documents')
-                .select('extracted_details')
-                .eq('director_id', individualId)
-                .eq('document_id', PASSPORT_DOCUMENT_ID);
-
-            if (passportDocs && passportDocs.length > 0) {
+            const passportDocs = (docs || []).filter(d => d.document_id === PASSPORT_DOCUMENT_ID);
+            if (passportDocs.length > 0) {
                 // Helper function to get date_of_expiry in various formats
                 const getExpiryDate = (details: any) => {
                     if (!details) return null;
@@ -581,9 +538,11 @@ export function EnquiryDialog({
                 }
             }
         } catch (error) {
-            console.error('Error fetching passport number:', error);
+            console.error('Error fetching applicant photo/passport number:', error);
+        } finally {
+            setLoadingPhoto(false);
         }
-    }, []);
+    }, [getSupabaseImageUrl]);
 
     const resetForm = useCallback(() => {
         setFormData({
@@ -630,34 +589,29 @@ export function EnquiryDialog({
         setCompanyIndividuals([])
     }, [])
 
-    // Fresh validation state per dialog open, and the Passport KYC document-type definition
-    // (extraction fields + display name) UploadModal needs — fetched once via the shared cached
-    // helper rather than re-querying every time the upload button is clicked.
+    const normalizePassportKycDoc = (doc: any) => doc ? {
+        ...doc,
+        fields: (doc.fields || []).map((f: any) => ({
+            ...f,
+            name: f.name ?? f.fieldName,
+            type: f.type ?? f.fieldType,
+            required: f.required ?? f.isRequired,
+        })),
+    } : null;
+
     useEffect(() => {
         if (!open) return;
         setSubmitAttempted(false);
+        if (kycDocuments instanceof Map) {
+            setPassportKycDoc(normalizePassportKycDoc(kycDocuments.get(PASSPORT_DOCUMENT_ID) || null));
+            return;
+        }
         fetchAllKycFields().then(({ kycDocsMap }) => {
-            const doc = kycDocsMap.get(PASSPORT_DOCUMENT_ID) || null;
-            // The Passport KYC row stores its fields in an older shape — { fieldName, fieldType,
-            // isRequired } — than the { name, type, required } shape UploadModal/ExtractionPreview
-            // are written against everywhere (both silently no-op on any field missing `.name`,
-            // which is exactly why the extraction succeeded but "Extracted Details" rendered
-            // empty). Normalize here, once, the same way transformKycFields (departments/stages/
-            // page.tsx) already reconciles this same two-shape split for its own callers.
-            setPassportKycDoc(doc ? {
-                ...doc,
-                fields: (doc.fields || []).map((f: any) => ({
-                    ...f,
-                    name: f.name ?? f.fieldName,
-                    type: f.type ?? f.fieldType,
-                    required: f.required ?? f.isRequired,
-                })),
-            } : null);
+            setPassportKycDoc(normalizePassportKycDoc(kycDocsMap.get(PASSPORT_DOCUMENT_ID) || null));
         }).catch(err => console.error('Error loading passport document type:', err));
-    }, [open]);
+    }, [open, kycDocuments]);
 
     useEffect(() => {
-        // Reset ref when dialog closes or task changes
         if (!open || !taskToEdit) {
             editDataLoadedRef.current = false;
             if (open && !taskToEdit) {
@@ -665,8 +619,6 @@ export function EnquiryDialog({
             }
             return;
         }
-
-        // Only load edit data once per task opening
         if (editDataLoadedRef.current || loadingStaff) {
             console.log('[EnquiryDialog] Skipping edit load — already loaded or staff still loading', { editDataLoaded: editDataLoadedRef.current, loadingStaff });
             return;
@@ -742,24 +694,16 @@ export function EnquiryDialog({
             renewal_status: taskToEdit.renewal_status || 'New',
             passport_handling_mode: taskToEdit.passport_handling_mode || null,
             eta_traveler_intent: taskToEdit.eta_traveler_intent || null,
-            // Participants extracted below
             officer_id: taskToEdit.participants_details?.find(p => p.role?.includes('officer'))?.id?.toString() || '',
             task_manager_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_manager'))?.id?.toString() || '',
             task_assistant_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_assistant'))?.id?.toString() || '',
         };
         console.log('[EnquiryDialog] Step 1 - setFormData:', formPayload);
         setFormData(formPayload);
-
-        // 2. Job Specific Answers
         console.log('[EnquiryDialog] Step 2 - setJobAnswers:', taskToEdit.job_specific_answers);
         setJobAnswers(taskToEdit.job_specific_answers || {});
-
-        // 3. Resolve Applicant Type
         console.log('[EnquiryDialog] Step 3 - setApplicantType:', taskToEdit.applicant_details?.role || 'principal');
         setApplicantType(taskToEdit.applicant_details?.role || 'principal');
-
-        // 4. Load individual, then re-apply company + understudy AFTER handleIndividualSelect
-        // (handleIndividualSelect resets selectedCompany/selectedUnderstudy at the top of its body)
         if (taskToEdit.individual_id) {
             const companyParticipant = taskToEdit.participants_details?.find(p => p.type === 'company');
             const companyId = companyParticipant ? String(companyParticipant.id) : null;
@@ -771,8 +715,6 @@ export function EnquiryDialog({
                     if (!indData) return;
 
                     await handleIndividualSelect(indData);
-
-                    // Re-apply company and understudy — handleIndividualSelect clears them unconditionally
                     if (companyId) {
                         setSelectedCompany(companyId);
                         await fetchUnderstudies(companyId);
@@ -782,22 +724,14 @@ export function EnquiryDialog({
                     }
                 });
         }
-
-        // 5. Handle Sponsor if applicable
         const sponsorPart = taskToEdit.participants_details?.find(p => p.role?.includes('sponsor'));
         console.log('[EnquiryDialog] Step 5 - sponsor participant:', sponsorPart);
         if (sponsorPart) {
             setSelectedSponsor({ id: sponsorPart.id, full_name: sponsorPart.name });
         }
-
-        // Mark as loaded
         editDataLoadedRef.current = true;
     }, [open, taskToEdit, loadingStaff]);
 
-    // Same "filled vs empty" signal the static fields above get via TableRow's hasValue —
-    // boolean questions count as filled once answered either way (false is a real answer, not
-    // an empty one), multiselect needs at least one selection, everything else just needs a
-    // non-empty value.
     const isJobAnswerFilled = useCallback((q: JobQuestion): boolean => {
         const val = jobAnswers[q.id];
         if (q.type === 'boolean') return val === true || val === false;
@@ -1110,8 +1044,15 @@ export function EnquiryDialog({
         });
     }, [open, fetchAllCompanies])
 
+    // New-enquiry reset only — deliberately skipped while editing an existing task. Without
+    // the `!taskToEdit` guard this fired on the SAME open as the edit-load effect above (both
+    // are keyed on `open`, and this one is declared later, so it always ran after) — and since
+    // the edit-load effect's own Step 3 (`setApplicantType`) changes `applicantType` on every
+    // edit whose applicant isn't already 'principal', this effect's dependency array picked
+    // that up too, re-firing it and wiping the Designated Sponsor / Related Understudy (and
+    // selectedIndividual/selectedCompany) the edit-load effect had just restored.
     useEffect(() => {
-        if (open) {
+        if (open && !taskToEdit) {
             setSelectedIndividual(null)
             setSelectedCompany('')
             setSelectedUnderstudy('')
@@ -1129,7 +1070,7 @@ export function EnquiryDialog({
             setSelectedRelatedDocumentId('')
             setAvailableRelatedDocuments([])
         }
-    }, [applicantType, open])
+    }, [applicantType, open, taskToEdit])
 
     const handleIndividualSelect = useCallback(async (ind: Individual) => {
         setLoadingRelations(true)
@@ -1142,8 +1083,7 @@ export function EnquiryDialog({
         setAvailableReferences([]); setSelectedReferences([]); setIncludeReferences(false)
         setPrincipalForDependant(null)
         setSelectedRelatedDocumentId(''); setAvailableRelatedDocuments([])
-        fetchApplicantPhoto(ind.id);
-        fetchPassportNumber(ind.id);
+        fetchApplicantPhotoAndPassport(ind.id);
 
         setLoadingRelatedDocuments(true)
         fetchIndividualDocumentsForLinking(ind.id)
@@ -1154,8 +1094,9 @@ export function EnquiryDialog({
         promises.push(
             supabase.from('registry_individuals').select('references').eq('id', ind.id).single()
                 .then(({ data }) => {
-                    // Strip any 'ref_' prefix that may be stored in the references array
-                    const refIds = data?.references?.map((r: any) => String(r.id || '').replace(/^ref_/, '')).filter(Boolean) || []
+                    const refIds = (data?.references || [])
+                        .map((r: any) => String(r.id || '').replace(/^ref_/, ''))
+                        .filter((id: string) => id !== '' && /^\d+$/.test(id))
                     return refIds.length ? supabase.from('registry_individuals').select('id, full_name').in('id', refIds) : { data: [] }
                 })
         )
@@ -1177,8 +1118,10 @@ export function EnquiryDialog({
         if (isPrincipalIndividual(ind)) {
             promises.push(getCompaniesForInd(ind).then(res => ({ type: 'companies', data: res.data })))
             if (ind.relationships?.length) {
-                const familyIds = ind.relationships.map(r => r.individual_id)
-                promises.push(supabase.from('registry_individuals').select('id, full_name').in('id', familyIds).then(res => ({ type: 'family', data: res.data })))
+                const familyIds = ind.relationships.map(r => r.individual_id).filter((id: any) => id != null && /^\d+$/.test(String(id)))
+                if (familyIds.length) {
+                    promises.push(supabase.from('registry_individuals').select('id, full_name').in('id', familyIds).then(res => ({ type: 'family', data: res.data })))
+                }
             }
         } else {
             const principalRel = ind.relationships?.find(r => r.is_principal === true || r.isPrincipal === 'Yes' || ['principal', 'husband', 'wife', 'father', 'mother'].includes(r.relationship?.toLowerCase()))
@@ -1231,7 +1174,7 @@ export function EnquiryDialog({
             setLoadingRelations(false)
             setIsIndividualPopoverOpen(false)
         }
-    }, [fetchApplicantPhoto])
+    }, [fetchApplicantPhotoAndPassport])
 
     const handleCompanyChange = (value: string) => {
         setSelectedCompany(value)
@@ -1241,9 +1184,30 @@ export function EnquiryDialog({
     useEffect(() => {
         let cancelled = false;
 
-        const checkWorkflowState = async () => {
-            if (!open || !selectedIndividual?.id) {
-                setExistingWorkflowSummary(null);
+        if (!open || !selectedIndividual?.id) {
+            setExistingWorkflowSummary(null);
+            return;
+        }
+
+        detectExistingWorkflowForIndividual(selectedIndividual.id)
+            .then((workflowSummary) => {
+                if (!cancelled) setExistingWorkflowSummary(workflowSummary);
+            })
+            .catch((error) => {
+                console.error("[EnquiryDialog] workflow summary check failed", error);
+                if (!cancelled) setExistingWorkflowSummary(null);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [open, selectedIndividual?.id]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const checkJobLevelState = async () => {
+            if (!open || !selectedIndividual?.id || !formData.department_id) {
                 setDuplicateTaskConflicts([]);
                 setSelectedJobLevelBundle(null);
                 setWorkflowRestrictionSummary(null);
@@ -1252,20 +1216,6 @@ export function EnquiryDialog({
 
             setCheckingWorkflow(true);
             try {
-                const workflowSummary = await detectExistingWorkflowForIndividual(selectedIndividual.id);
-                if (!cancelled) {
-                    setExistingWorkflowSummary(workflowSummary);
-                }
-
-                if (!formData.department_id) {
-                    if (!cancelled) {
-                        setDuplicateTaskConflicts([]);
-                        setSelectedJobLevelBundle(null);
-                        setWorkflowRestrictionSummary(null);
-                    }
-                    return;
-                }
-
                 const selectedJobLevel = {
                     level: formData.class_id ? 3 : formData.subdepartment_id ? 2 : 1,
                     department_id: formData.department_id ? Number(formData.department_id) : null,
@@ -1275,7 +1225,7 @@ export function EnquiryDialog({
                 };
 
                 const bundle = await taskBundleService.fetchForJobLevel(selectedJobLevel);
-                const restrictionSummary = evaluateWorkflowRestrictionsForBundle(workflowSummary?.workflowLogs || [], bundle);
+                const restrictionSummary = evaluateWorkflowRestrictionsForBundle(existingWorkflowSummary?.workflowLogs || [], bundle);
 
                 const conflicts = await detectTaskConflictsForJobLevel(selectedIndividual.id, {
                     ...selectedJobLevel,
@@ -1292,7 +1242,6 @@ export function EnquiryDialog({
             } catch (error) {
                 console.error("[EnquiryDialog] workflow/task conflict check failed", error);
                 if (!cancelled) {
-                    setExistingWorkflowSummary(null);
                     setDuplicateTaskConflicts([]);
                     setSelectedJobLevelBundle(null);
                     setWorkflowRestrictionSummary(null);
@@ -1302,11 +1251,11 @@ export function EnquiryDialog({
             }
         };
 
-        checkWorkflowState();
+        checkJobLevelState();
         return () => {
             cancelled = true;
         };
-    }, [open, selectedIndividual?.id, formData.department_id, formData.subdepartment_id, formData.class_id, taskToEdit?.id]);
+    }, [open, selectedIndividual?.id, formData.department_id, formData.subdepartment_id, formData.class_id, taskToEdit?.id, existingWorkflowSummary]);
 
     useEffect(() => {
         if (!open) return;
@@ -1347,10 +1296,15 @@ export function EnquiryDialog({
                 event: '*',
                 schema: 'public',
                 table: 'acc_portal_company_duplicate'
-            }, async () => {
+            }, async (payload) => {
                 await fetchAllCompanies();
 
-                if (selectedIndividual) {
+                const changedCompanyId = payload.new?.id || payload.old?.id;
+                const isRelevantCompany = selectedIndividual && (
+                    String(changedCompanyId) === String(selectedCompany) ||
+                    companies.some(c => String(c.id) === String(changedCompanyId))
+                );
+                if (isRelevantCompany) {
                     await reloadSelectedIndividual(selectedIndividual.id);
                 }
             })
@@ -1360,7 +1314,7 @@ export function EnquiryDialog({
             supabase.removeChannel(individualChannel);
             supabase.removeChannel(companyChannel);
         };
-    }, [open, applicantType, selectedIndividual, fetchIndividualsByType, fetchAllCompanies, handleIndividualSelect]);
+    }, [open, applicantType, selectedIndividual, selectedCompany, companies, fetchIndividualsByType, fetchAllCompanies, handleIndividualSelect]);
 
     // --- New Handler: Clear Company Selection ---
     const handleClearCompany = () => {
@@ -1545,10 +1499,6 @@ export function EnquiryDialog({
         }
     }
 
-    // Every mandatory Client Identification field EXCEPT Include Dependants (explicitly left
-    // optional — see the section's own TableRow). Recomputed live off current state rather than
-    // stored separately, so an error clears itself the instant the user fixes it with no manual
-    // clearing logic needed; TableRow only actually renders these once submitAttempted is true.
     const clientIdentificationErrors = useMemo(() => {
         const errors: Record<string, string> = {};
         if (!selectedIndividual) errors.primary_applicant = "Select the primary applicant.";
@@ -1561,11 +1511,6 @@ export function EnquiryDialog({
 
     const handleSubmit = async () => {
         setSubmitAttempted(true);
-        // Client Identification completeness is only enforced when creating a new task — an
-        // existing task being edited may predate one of these fields becoming required (e.g. an
-        // old record with no Company/Understudy/Sponsor set), and that shouldn't block fixing an
-        // unrelated field elsewhere in the dialog. The errors still compute and show inline (the
-        // red asterisk/error text) so the gap stays visible — they just don't hard-block saving.
         if (!taskToEdit && Object.keys(clientIdentificationErrors).length > 0) {
             toast({
                 title: "Missing required fields",
@@ -1575,10 +1520,6 @@ export function EnquiryDialog({
             return;
         }
 
-        // Unlike the Client Identification fields above, individual/department are dereferenced
-        // unguarded further down (selectedIndividual.id, Number(formData.department_id)) when
-        // building the save payload — always required, in both create and edit mode, to avoid
-        // corrupting the record rather than genuinely gating a valid edit.
         if (!selectedIndividual || !formData.department_id) return
 
         if (!taskToEdit && duplicateTaskConflicts.length > 0) {
@@ -1664,15 +1605,25 @@ export function EnquiryDialog({
                     type: "individual"
                 });
             }
-            if (formData.officer_id) {
+            // Explicitly persisting 'none' as an "Unallocated" participant (same convention as
+            // the company block above) — otherwise the .find() below never matches 'none',
+            // nothing gets pushed, and the next edit-load can't tell "explicitly Unallocated"
+            // apart from "never assigned" (both read back as officer_id === '').
+            if (formData.officer_id === 'none') {
+                participants.push({ id: 'none', name: 'Unallocated', role: ['officer'], type: "individual" });
+            } else if (formData.officer_id) {
                 const officer = availableOfficers.find(o => o.id.toString() === formData.officer_id);
                 if (officer) participants.push({ id: officer.id, name: officer.full_name || officer.name, role: ['officer'], type: "individual" });
             }
-            if (formData.task_manager_id) {
+            if (formData.task_manager_id === 'none') {
+                participants.push({ id: 'none', name: 'Unallocated', role: ['task_manager'], type: "individual" });
+            } else if (formData.task_manager_id) {
                 const manager = managersData.find(m => m.id.toString() === formData.task_manager_id);
                 if (manager) participants.push({ id: manager.id, name: manager.full_name || manager.name, role: ['task_manager'], type: "individual" });
             }
-            if (formData.task_assistant_id) {
+            if (formData.task_assistant_id === 'none') {
+                participants.push({ id: 'none', name: 'Unallocated', role: ['task_assistant'], type: "individual" });
+            } else if (formData.task_assistant_id) {
                 const assistant = assistantsData.find(a => a.id.toString() === formData.task_assistant_id);
                 if (assistant) participants.push({ id: assistant.id, name: assistant.full_name || assistant.name, role: ['task_assistant'], type: "individual" });
             }
@@ -1680,7 +1631,6 @@ export function EnquiryDialog({
                 participants.push({ id: selectedSponsor.id, name: selectedSponsor.full_name, role: ['sponsor'], type: "individual" })
             }
 
-            // 7. Third-party selections from job questions
             jobQuestions.forEach(q => {
                 if (q.third_party_role && thirdPartySelections[q.id]) {
                     const selectedInd = companyIndividuals.find(ind => String(ind.id) === String(thirdPartySelections[q.id]));
@@ -1699,8 +1649,6 @@ export function EnquiryDialog({
                 }
             });
 
-            // Officer / manager / assistant assignments are persisted only inside
-            // participants_details (see below) — tm_tasks has no per-role id columns.
             const payload: any = {
                 job_description: formData.job_description,
                 individual_id: selectedIndividual.id,
@@ -1726,11 +1674,6 @@ export function EnquiryDialog({
             }
 
             if (taskToEdit) {
-                // Keep date_initiated AND the Enquiry stage's own date in sync with whatever the
-                // user set in the Enquiry Date field — previously an edit only updated
-                // formData.enquiry_date locally and neither of these ever got written back, so
-                // changing the date here silently had no effect on save. Merge into the existing
-                // stages object rather than replacing it outright, so no other stage's data is lost.
                 payload.date_initiated = normalizedEnquiryDate.isoDateTime;
                 payload.stages = {
                     ...taskToEdit.stages,
@@ -1793,11 +1736,12 @@ export function EnquiryDialog({
             const [{ data: taskData, error: taskError }] = await Promise.all([taskPromise, rNumberPromise]);
             if (taskError) throw taskError;
 
-            // Flag this document's workflow as "Task Created" over on the Document Manager side
-            // instead of leaving it at "no workflow" until someone remembers to go do it there
-            // separately. Best-effort — the task itself is already saved at this point, so a
-            // failure here surfaces as a warning rather than rolling back the task creation.
-            if (!taskToEdit && selectedRelatedDocumentId) {
+            // Was previously gated on `!taskToEdit` — the Related Document picker renders and
+            // is editable in edit mode too, but that guard meant selecting/changing a link
+            // while editing an existing task silently never wrote anything to
+            // document_workflow_logs. linkTaskToDocumentWorkflow itself is safe to call on
+            // every save (it's a dedupe-by-taskId find-or-update/insert, not a bare append).
+            if (selectedRelatedDocumentId) {
                 const linkedDoc = availableRelatedDocuments.find((doc) => doc.uploadedDocId === selectedRelatedDocumentId);
                 if (linkedDoc) {
                     const linkResult = await linkTaskToDocumentWorkflow({
@@ -1810,7 +1754,7 @@ export function EnquiryDialog({
                         createdBy: taskData.created_by ?? null,
                     });
                     if (!linkResult.success) {
-                        toast({ title: "Task created, but document link failed", description: "The task was saved — you may need to link it to the document manually.", variant: "destructive" });
+                        toast({ title: taskToEdit ? "Task updated, but document link failed" : "Task created, but document link failed", description: "The task was saved — you may need to link it to the document manually.", variant: "destructive" });
                     }
                 }
             }
@@ -1846,9 +1790,6 @@ export function EnquiryDialog({
         return [dept?.name, sub?.name, cls?.name].filter(Boolean).join(' › ') || null;
     }, [taskToEdit, formData.department_id, formData.subdepartment_id, formData.class_id, departments, availableSubdepartments, availableClasses]);
 
-    // Enquiry Date is edited as dd/mm/yyyy text (matching the "Enquiry Date" column everywhere
-    // else in the app) with a calendar picker for convenience — derive the parsed Date (for the
-    // calendar's selection) and validity (to gate the picker/submit) off that same string.
     const isEnquiryDateValid = /^\d{2}\/\d{2}\/\d{4}$/.test(formData.enquiry_date || '');
     const enquiryDateAsDate = useMemo(() => {
         if (!isEnquiryDateValid) return undefined;
@@ -2831,8 +2772,7 @@ export function EnquiryDialog({
                     onClose={() => setShowPassportUpload(false)}
                     onSuccess={() => {
                         setShowPassportUpload(false);
-                        fetchPassportNumber(selectedIndividual.id);
-                        fetchApplicantPhoto(selectedIndividual.id);
+                        fetchApplicantPhotoAndPassport(selectedIndividual.id);
                         toast({ title: "Passport Uploaded", description: "The passport number will populate automatically once it's processed." });
                     }}
                     documentName={passportKycDoc?.display_name || passportKycDoc?.name || "Passport"}

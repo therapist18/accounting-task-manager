@@ -141,6 +141,10 @@ const CLASS_REQUIREMENTS_CACHE_MS = 5000;
 let allDocumentsCache: { promise: Promise<DirectorDocument[]>; timestamp: number } | null = null;
 let allKycFieldsCache: { promise: Promise<{ fieldsMap: Record<string, any[]>; kycDocsMap: Map<string, KycDocument> }>; timestamp: number } | null = null;
 const BULK_LOOKUP_CACHE_MS = 15000;
+// fetchAllDocuments pulls every row of acc_portal_directors_documents (hundreds of KB — it's
+// the single largest request this module makes), so it gets a longer cache window than the
+// other bulk lookups above to actually cut network volume instead of just deduping bursts.
+const ALL_DOCUMENTS_CACHE_MS = 60000;
 
 export const fetchClassRequirements = (): Promise<any[]> => {
   const now = Date.now();
@@ -943,7 +947,7 @@ export const invalidateAllDocumentsCache = () => {
  */
 export const fetchAllDocuments = (): Promise<DirectorDocument[]> => {
   const now = Date.now();
-  if (allDocumentsCache && now - allDocumentsCache.timestamp < BULK_LOOKUP_CACHE_MS) {
+  if (allDocumentsCache && now - allDocumentsCache.timestamp < ALL_DOCUMENTS_CACHE_MS) {
     return allDocumentsCache.promise;
   }
   const promise = supabase
