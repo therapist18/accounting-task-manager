@@ -236,7 +236,13 @@ export function EnquiryDialog({
         duration: '',
         renewal_status: 'New',
         passport_handling_mode: null as 'bcl' | 'client' | null,
+        eta_purpose: null as 'tourism' | 'fresh_settlement' | 'resettlement' | null,
         eta_traveler_intent: null as 'visitor' | 'extend_or_change_status' | null,
+        eta_ticket_confirmed: null as boolean | null,
+        eta_tentative_arrival_date: '',
+        eta_tentative_departure_date: '',
+        eta_confirmed_ticket_expected_date: '',
+        eta_return_ticket_is_real: null as boolean | null,
         job_level: {
             level: 1,
             department_id: null,
@@ -558,7 +564,13 @@ export function EnquiryDialog({
             duration: '',
             renewal_status: 'New',
             passport_handling_mode: null as 'bcl' | 'client' | null,
+            eta_purpose: null as 'tourism' | 'fresh_settlement' | 'resettlement' | null,
             eta_traveler_intent: null as 'visitor' | 'extend_or_change_status' | null,
+            eta_ticket_confirmed: null as boolean | null,
+            eta_tentative_arrival_date: '',
+            eta_tentative_departure_date: '',
+            eta_confirmed_ticket_expected_date: '',
+            eta_return_ticket_is_real: null as boolean | null,
             job_level: {
                 level: 1,
                 department_id: null,
@@ -693,7 +705,13 @@ export function EnquiryDialog({
             duration: taskToEdit.duration || '',
             renewal_status: taskToEdit.renewal_status || 'New',
             passport_handling_mode: taskToEdit.passport_handling_mode || null,
+            eta_purpose: taskToEdit.eta_purpose || null,
             eta_traveler_intent: taskToEdit.eta_traveler_intent || null,
+            eta_ticket_confirmed: taskToEdit.eta_ticket_confirmed ?? null,
+            eta_tentative_arrival_date: taskToEdit.eta_tentative_arrival_date || '',
+            eta_tentative_departure_date: taskToEdit.eta_tentative_departure_date || '',
+            eta_confirmed_ticket_expected_date: taskToEdit.eta_confirmed_ticket_expected_date || '',
+            eta_return_ticket_is_real: taskToEdit.eta_return_ticket_is_real ?? null,
             officer_id: taskToEdit.participants_details?.find(p => p.role?.includes('officer'))?.id?.toString() || '',
             task_manager_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_manager'))?.id?.toString() || '',
             task_assistant_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_assistant'))?.id?.toString() || '',
@@ -1087,7 +1105,15 @@ export function EnquiryDialog({
 
         setLoadingRelatedDocuments(true)
         fetchIndividualDocumentsForLinking(ind.id)
-            .then(setAvailableRelatedDocuments)
+            .then((docs) => {
+                setAvailableRelatedDocuments(docs)
+                // Resettlement is the one ETA purpose with prior immigration-status history to
+                // detect — Tourism/Fresh Settlement never have any, so those stay a manual pick.
+                // Skipped in edit mode so it doesn't clobber a previously saved purpose.
+                if (!taskToEdit) {
+                    setFormData(prev => ({ ...prev, eta_purpose: docs.length > 0 ? 'resettlement' : null }))
+                }
+            })
             .finally(() => setLoadingRelatedDocuments(false))
 
         const promises = []
@@ -1174,7 +1200,7 @@ export function EnquiryDialog({
             setLoadingRelations(false)
             setIsIndividualPopoverOpen(false)
         }
-    }, [fetchApplicantPhotoAndPassport])
+    }, [fetchApplicantPhotoAndPassport, taskToEdit])
 
     const handleCompanyChange = (value: string) => {
         setSelectedCompany(value)
@@ -1656,7 +1682,13 @@ export function EnquiryDialog({
                 duration: syncedDuration,
                 renewal_status: syncedRenewalStatus,
                 passport_handling_mode: formData.passport_handling_mode || null,
-                eta_traveler_intent: formData.eta_traveler_intent || null,
+                eta_purpose: formData.eta_purpose || null,
+                eta_traveler_intent: formData.eta_purpose === 'tourism' ? 'visitor' : (formData.eta_traveler_intent || null),
+                eta_ticket_confirmed: formData.eta_ticket_confirmed,
+                eta_tentative_arrival_date: formData.eta_ticket_confirmed ? null : (formData.eta_tentative_arrival_date || null),
+                eta_tentative_departure_date: formData.eta_ticket_confirmed ? null : (formData.eta_tentative_departure_date || null),
+                eta_confirmed_ticket_expected_date: formData.eta_ticket_confirmed ? null : (formData.eta_confirmed_ticket_expected_date || null),
+                eta_return_ticket_is_real: formData.eta_ticket_confirmed ? formData.eta_return_ticket_is_real : null,
                 applicant_details: {
                     id: selectedIndividual.id,
                     name: selectedIndividual.full_name,
@@ -2514,6 +2546,33 @@ export function EnquiryDialog({
                                         )}
 
                                         {formData.department_id === '1' && formData.subdepartment_id === '26' && (
+                                            <TableRow label="ETA Purpose" hasValue={!!formData.eta_purpose}>
+                                                <Select
+                                                    value={formData.eta_purpose || ''}
+                                                    onValueChange={(v: any) => setFormData(prev => ({
+                                                        ...prev,
+                                                        eta_purpose: v,
+                                                        eta_traveler_intent: v === 'tourism' ? 'visitor' : prev.eta_traveler_intent,
+                                                    }))}
+                                                >
+                                                    <SelectTrigger className="h-11 border-slate-200 bg-white max-w-sm">
+                                                        <SelectValue placeholder="Select the purpose of this ETA..." />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="tourism">Tourism</SelectItem>
+                                                        <SelectItem value="fresh_settlement">Fresh Settlement</SelectItem>
+                                                        <SelectItem value="resettlement">Resettlement</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                                <p className="text-sm text-slate-400 mt-1.5">
+                                                    {formData.eta_purpose === 'resettlement'
+                                                        ? "Auto-selected — this applicant has prior immigration-status documents on file."
+                                                        : "Tourism and Fresh Settlement have no prior status to detect from, so this is a manual pick. Resettlement auto-selects when the applicant already has a linkable prior document."}
+                                                </p>
+                                            </TableRow>
+                                        )}
+
+                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && formData.eta_purpose !== 'tourism' && (
                                             <TableRow label="Traveler Intent" hasValue={!!formData.eta_traveler_intent}>
                                                 <Select
                                                     value={formData.eta_traveler_intent || ''}
@@ -2529,6 +2588,99 @@ export function EnquiryDialog({
                                                 </Select>
                                                 <p className="text-sm text-slate-400 mt-1.5">
                                                     Whether this person intends to leave the country before/when their ETA expires, or stay on and need a follow-on extension or change of status. Drives which workflow the Individual Document Manager's Visa/ETA tracker follows for this person.
+                                                </p>
+                                            </TableRow>
+                                        )}
+
+                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && formData.eta_purpose === 'tourism' && (
+                                            <TableRow label="Traveler Intent" hasValue>
+                                                <p className="text-sm text-slate-500 pt-2">
+                                                    Just visiting — leaving before/at ETA expiry. Tourism enquiries never need an extension or change of status, so this is fixed automatically.
+                                                </p>
+                                            </TableRow>
+                                        )}
+
+                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && (
+                                            <TableRow label="Confirmed Ticket?" hasValue={formData.eta_ticket_confirmed !== null}>
+                                                <Select
+                                                    value={formData.eta_ticket_confirmed === null ? '' : (formData.eta_ticket_confirmed ? 'yes' : 'no')}
+                                                    onValueChange={(v: any) => setFormData(prev => ({
+                                                        ...prev,
+                                                        eta_ticket_confirmed: v === 'yes',
+                                                        // Clear whichever side no longer applies rather than leaving stale
+                                                        // values behind when the client switches their answer.
+                                                        eta_tentative_arrival_date: v === 'yes' ? '' : prev.eta_tentative_arrival_date,
+                                                        eta_tentative_departure_date: v === 'yes' ? '' : prev.eta_tentative_departure_date,
+                                                        eta_confirmed_ticket_expected_date: v === 'yes' ? '' : prev.eta_confirmed_ticket_expected_date,
+                                                        eta_return_ticket_is_real: v === 'no' ? null : prev.eta_return_ticket_is_real,
+                                                    }))}
+                                                >
+                                                    <SelectTrigger className="h-11 border-slate-200 bg-white max-w-sm">
+                                                        <SelectValue placeholder="Do they have a confirmed arrival ticket?" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="yes">Yes — confirmed arrival ticket</SelectItem>
+                                                        <SelectItem value="no">No — tentative booking only</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                                <p className="text-sm text-slate-400 mt-1.5">
+                                                    {formData.eta_ticket_confirmed === true
+                                                        ? "Upload the Airline/Cruise Ticket in the Individual Document Manager — its Arrival/Departure dates become authoritative."
+                                                        : "If not confirmed yet, record the tentative dates below and when the client expects to get the real ticket."}
+                                                </p>
+                                            </TableRow>
+                                        )}
+
+                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && formData.eta_ticket_confirmed === false && (
+                                            <>
+                                                <TableRow label="Tentative Arrival Date" hasValue={!!formData.eta_tentative_arrival_date}>
+                                                    <Input
+                                                        type="date"
+                                                        value={formData.eta_tentative_arrival_date}
+                                                        onChange={(e) => setFormData(prev => ({ ...prev, eta_tentative_arrival_date: e.target.value }))}
+                                                        className="h-11 border-slate-200 bg-white max-w-sm"
+                                                    />
+                                                </TableRow>
+                                                <TableRow label="Tentative Departure Date" hasValue={!!formData.eta_tentative_departure_date}>
+                                                    <Input
+                                                        type="date"
+                                                        value={formData.eta_tentative_departure_date}
+                                                        onChange={(e) => setFormData(prev => ({ ...prev, eta_tentative_departure_date: e.target.value }))}
+                                                        className="h-11 border-slate-200 bg-white max-w-sm"
+                                                    />
+                                                </TableRow>
+                                                <TableRow label="Confirmed Ticket Expected By" hasValue={!!formData.eta_confirmed_ticket_expected_date}>
+                                                    <Input
+                                                        type="date"
+                                                        value={formData.eta_confirmed_ticket_expected_date}
+                                                        onChange={(e) => setFormData(prev => ({ ...prev, eta_confirmed_ticket_expected_date: e.target.value }))}
+                                                        className="h-11 border-slate-200 bg-white max-w-sm"
+                                                    />
+                                                    <p className="text-sm text-slate-400 mt-1.5">
+                                                        When the client expects to have a confirmed ticket in hand. The Visa/ETA tracker counts down to this date.
+                                                    </p>
+                                                </TableRow>
+                                            </>
+                                        )}
+
+                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && formData.eta_ticket_confirmed === true && (
+                                            <TableRow label="Return Ticket" hasValue={formData.eta_return_ticket_is_real !== null}>
+                                                <Select
+                                                    value={formData.eta_return_ticket_is_real === null ? '' : (formData.eta_return_ticket_is_real ? 'real' : 'dummy')}
+                                                    onValueChange={(v: any) => setFormData(prev => ({ ...prev, eta_return_ticket_is_real: v === 'real' }))}
+                                                >
+                                                    <SelectTrigger className="h-11 border-slate-200 bg-white max-w-sm">
+                                                        <SelectValue placeholder="Is the return ticket real or a dummy booking?" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="real">Real — trust its return date</SelectItem>
+                                                        <SelectItem value="dummy">Dummy — ignore its return date for now</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                                <p className="text-sm text-slate-400 mt-1.5">
+                                                    {formData.eta_return_ticket_is_real === false
+                                                        ? "Return date will be left blank until a genuine return ticket is uploaded later, from the Visa/ETA tracker."
+                                                        : "Whether the ticket's return/departure leg is genuine or a dummy booking used to satisfy visa requirements. Only a real one is trusted for the return-date countdown."}
                                                 </p>
                                             </TableRow>
                                         )}
