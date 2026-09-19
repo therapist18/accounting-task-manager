@@ -394,7 +394,6 @@ export function HandlingWizardDialog({
   bclUsers,
   couriers,
   currentUserId,
-  isSuperAdmin = false,
   onSaved,
   onModeSaved,
 }: {
@@ -405,17 +404,12 @@ export function HandlingWizardDialog({
   bclUsers: { id: string; name: string }[];
   couriers: Courier[];
   currentUserId: string | null;
-  isSuperAdmin?: boolean;
   onSaved: (record: PassportHandlingRecord) => void;
   onModeSaved: (taskId: number, mode: "bcl" | "client") => void;
 }) {
-  // Only SuperAdmin picks who did a step from the full staff list — everyone else can only
-  // attribute a step to themselves, so the picker just shows their own name (still searchable
-  // by others' names does nothing useful for them, and hides who else is on the roster).
-  const visibleStaffUsers = useMemo(
-    () => (isSuperAdmin ? bclUsers : bclUsers.filter((u) => u.id === currentUserId)),
-    [bclUsers, isSuperAdmin, currentUserId]
-  );
+  // Everyone can attribute a step to any staff member on the roster — the dropdown shows all
+  // users, defaulting to the current user as the most likely pick.
+  const visibleStaffUsers = bclUsers;
 
   const [mode, setMode] = useState<"bcl" | "client" | null>(null);
   const [savingMode, setSavingMode] = useState(false);

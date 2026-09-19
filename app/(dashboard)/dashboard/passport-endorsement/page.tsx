@@ -752,7 +752,6 @@ export default function PassportEndorsementPage() {
         bclUsers={bclUsers}
         couriers={couriers.filter((c) => c.is_active)}
         currentUserId={currentUserId}
-        isSuperAdmin={!!currentAuthUser?.isSuperAdmin}
         onSaved={handleSaved}
         onModeSaved={handleModeSaved}
       />
