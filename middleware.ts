@@ -17,6 +17,9 @@ const PUBLIC_PATHS = [
   // itself, see TASKS_REPORT_API_KEY), not the cookie-based session this middleware
   // otherwise enforces.
   "/api/tasks-report",
+  // Called by Google Pub/Sub, which has no session cookie. The route authenticates itself with
+  // ?token=PUBSUB_WEBHOOK_SECRET and rejects the request when the secret is unset.
+  "/api/gmail/webhook",
 ];
 
 function isPublicPath(pathname: string): boolean {

@@ -25,19 +25,21 @@ export async function POST(req: NextRequest) {
     try {
       const tokenData = typeof account.token === 'string' ? JSON.parse(account.token) : account.token
       const gmail = getGmailClient(tokenData?.access_token, account.refresh_token, account.email)
+      // INBOX + SENT: sent mail is how BCL's replies to KRA are detected and attached to the case.
       const res = await gmail.users.watch({
         userId: 'me',
-        requestBody: { topicName, labelIds: ['INBOX'] },
+        requestBody: { topicName, labelIds: ['INBOX', 'SENT'] },
       })
 
       const expiry = res.data.expiration
         ? new Date(parseInt(res.data.expiration)).toISOString()
         : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
 
-      await sb.from('email_accounts').update({
-        history_id:  parseInt(res.data.historyId ?? '0'),
-        watch_expiry: expiry,
-      }).eq('id', account.id)
+      // Never overwrite an existing history_id: doing so would skip every message that arrived since
+      // the last sync. Only seed it for a mailbox that has none yet.
+      const update: Record<string, unknown> = { watch_expiry: expiry }
+      if (!account.history_id && res.data.historyId) update.history_id = parseInt(res.data.historyId)
+      await sb.from('email_accounts').update(update).eq('id', account.id)
 
       results.push({ email: account.email, status: 'ok', expiry })
     } catch (err: any) {

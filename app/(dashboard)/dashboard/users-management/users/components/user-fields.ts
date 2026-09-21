@@ -15,7 +15,6 @@ export interface DepartmentHistory {
 
 export interface User {
   id: string;
-  clerk_id?: string | null;
   name: string;
   email: string;
   role: 'user' | 'officer' | 'admin';

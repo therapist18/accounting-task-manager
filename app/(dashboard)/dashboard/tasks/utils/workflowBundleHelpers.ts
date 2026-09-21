@@ -1,5 +1,6 @@
 // @ts-nocheck
 import supabase from "@/lib/supabase/client";
+import { findDateInObject } from "./dateUtils";
 
 export interface BundleJobLevel {
   level: number;
@@ -474,35 +475,93 @@ export interface LinkableDocument {
   existingWorkflowLabel: string | null;
 }
 
+// Well-known expiry keys used as a fallback scan when a document type config doesn't yield an
+// isEffectiveTo field (or its value isn't where a field-level extraction put it).
+const EXPIRY_ALIASES = [
+  "expiry_date", "date_of_expiry", "date_expired", "effective_to", "valid_to",
+  "valid_until", "until", "till", "expiry", "expires",
+];
+
+// Resolves a Date from values produced by findDateInObject / extracted_details — accepts the
+// DD/MM/YYYY[ HH:mm] display format this codebase normalizes to, plus anything Date parses.
+export function parseDateValue(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const m = String(value).trim().match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  const iso = new Date(value);
+  return isNaN(iso.getTime()) ? null : iso;
+}
+
+// The "expiry date" of an uploaded document is the value of the field flagged
+// `isEffectiveTo: true` in the document type's config (acc_portal_kyc.fields), read out of the
+// uploaded row's `extracted_details` JSONB — exactly how bcl-registry's Individual Document
+// Manager derives it. acc_portal_directors_documents has no top-level `expiry_date` column, so
+// selecting one raises PGRST204/42703. Falls back to a case-insensitive scan of known aliases.
+function resolveDocumentExpiry(doc: any, docType: any): string | null {
+  if (!doc?.extracted_details) return null;
+  const details = doc.extracted_details;
+
+  const effectiveToFields = (docType?.fields || []).filter((f: any) => f.isEffectiveTo === true);
+
+  // 1. Direct key lookup on the isEffectiveTo field(s) — mirrors the registry's
+  //    extractedDetails[field.name] ?? extractedDetails[field.id], tolerant of alternate keys.
+  for (const f of effectiveToFields) {
+    const keys = [f.fieldName, f.name, f.id, f.key].filter(Boolean);
+    for (const k of keys) {
+      const v = details[k] ?? details[String(k).toLowerCase()] ?? details[String(k).toUpperCase()];
+      if (v != null && v !== "") return String(v);
+    }
+  }
+
+  // 2. Recursive, case-insensitive search for the configured field key(s) in the details JSON.
+  const effectiveToKeys = effectiveToFields
+    .map((f: any) => f.fieldName || f.name || f.key)
+    .filter(Boolean);
+  if (effectiveToKeys.length) {
+    const found = findDateInObject(details, effectiveToKeys);
+    if (found) return found;
+  }
+
+  // 3. Fallback alias scan (covers dateOfExpiry / "Date of Expiry" / expiry_date etc.).
+  return findDateInObject(details, EXPIRY_ALIASES);
+}
+
 // Same ranking bcl-registry's imm-status-manager uses to decide a person's single "current"
 // immigration document: prefer whichever of their Permanent/Temporary Immigration Status
 // documents expires latest (a master-class document, if any, wins outright within its own
-// category), then prefer Permanent over Temporary on a tie. Only the doc-manager's own field-
-// level extraction of issue/expiry dates is skipped — this works off the plain expiry_date
-// column instead, which is close enough for "which one should I suggest" purposes.
+// category), then prefer Permanent over Temporary on a tie.
+// Expiry here is resolved the same way as the document managers themselves: the value of the
+// KYC document type's `isEffectiveTo`-flagged field inside the uploaded row's
+// `extracted_details` JSONB (see resolveDocumentExpiry below) — NOT a top-level
+// `expiry_date` column, which acc_portal_directors_documents does not have.
 function pickCurrentImmigrationDocument(docs: any[], docTypesById: Map<string, any>): string | null {
   const withCategory = docs
     .map((doc) => ({ doc, docType: docTypesById.get(String(doc.document_id)) }))
     .filter((d) => d.docType);
 
+  const expiryMs = (entry: typeof withCategory[number]) =>
+    parseDateValue(resolveDocumentExpiry(entry.doc, entry.docType))?.getTime() ?? null;
+
   const rank = (list: typeof withCategory) => list.reduce((best, current) => {
     if (!best) return current;
     if (current.docType.is_master_class_imm_status && !best.docType.is_master_class_imm_status) return current;
     if (best.docType.is_master_class_imm_status && !current.docType.is_master_class_imm_status) return best;
-    if (!current.doc.expiry_date) return best;
-    if (!best.doc.expiry_date) return current;
-    return new Date(current.doc.expiry_date) > new Date(best.doc.expiry_date) ? current : best;
+    const ce = expiryMs(current);
+    const be = expiryMs(best);
+    if (ce == null) return best;
+    if (be == null) return current;
+    return ce > be ? current : best;
   }, null as typeof withCategory[number] | null);
 
   const bestPermanent = rank(withCategory.filter((d) => d.docType.sub_main_category === "Permanent Immigration Status"));
   const bestTemporary = rank(withCategory.filter((d) => d.docType.sub_main_category === "Temporary Immigration Status"));
 
   if (bestPermanent && bestTemporary) {
-    if (!bestPermanent.doc.expiry_date) return bestTemporary.doc.id;
-    if (!bestTemporary.doc.expiry_date) return bestPermanent.doc.id;
-    return new Date(bestTemporary.doc.expiry_date) > new Date(bestPermanent.doc.expiry_date)
-      ? bestTemporary.doc.id
-      : bestPermanent.doc.id;
+    const pe = expiryMs(bestPermanent);
+    const te = expiryMs(bestTemporary);
+    if (pe == null) return bestTemporary.doc.id;
+    if (te == null) return bestPermanent.doc.id;
+    return te > pe ? bestTemporary.doc.id : bestPermanent.doc.id;
   }
   return (bestPermanent || bestTemporary)?.doc.id ?? null;
 }
@@ -522,13 +581,12 @@ export async function fetchIndividualDocumentsForLinking(individualId: number): 
   const [{ data: docTypes, error: docTypesError }, { data: docs, error }, { data: workflowLogs, error: workflowError }] = await Promise.all([
     supabase
       .from("acc_portal_kyc")
-      .select("id, display_name, sub_main_category, is_master_class_imm_status")
+      .select("id, display_name, sub_main_category, is_master_class_imm_status, fields")
       .eq("main_category", "Immigration Status"),
     supabase
       .from("acc_portal_directors_documents")
-      .select("id, document_id, expiry_date")
-      .eq("director_id", individualId)
-      .order("expiry_date", { ascending: true }),
+      .select("id, document_id, extracted_details")
+      .eq("director_id", individualId),
     supabase
       .from("document_workflow_logs")
       .select("uploaded_doc_id, document_type_id, action_type, holds, comments, reminders, tasks, resolutions, payload")
@@ -561,22 +619,30 @@ export async function fetchIndividualDocumentsForLinking(individualId: number): 
   const now = new Date();
   const results: LinkableDocument[] = immigrationDocs.map((doc: any) => {
     const matchedLog = logByUploadedDoc.get(String(doc.id)) ?? logByDocType.get(String(doc.document_id)) ?? null;
+    const rawExpiry = resolveDocumentExpiry(doc, docTypesById.get(String(doc.document_id)));
+    const expiryMs = rawExpiry ? parseDateValue(rawExpiry)?.getTime() ?? null : null;
     return {
       uploadedDocId: String(doc.id),
       documentTypeId: String(doc.document_id),
       documentTypeName: docTypesById.get(String(doc.document_id))?.display_name || "Document",
-      expiryDate: doc.expiry_date || null,
+      expiryDate: rawExpiry || null,
       isCurrentImmigrationStatus: doc.id === currentImmDocId,
-      status: doc.expiry_date ? (new Date(doc.expiry_date) < now ? "expired" : "valid") : "unknown",
+      status: expiryMs != null ? (expiryMs < now.getTime() ? "expired" : "valid") : "unknown",
       existingWorkflowLabel: matchedLog ? summarizeWorkflowLogForDocument(matchedLog) : null,
     };
   });
 
   // Current status first (the one most tasks are actually about), then whatever's soonest to
-  // expire / most recently expired — matches the ascending expiry_date order already fetched.
+  // expire / most recently expired — expiry now derived from the isEffectiveTo field value,
+  // matching the document managers instead of (the nonexistent) expiry_date column ordering.
   return results.sort((a, b) => {
     if (a.isCurrentImmigrationStatus !== b.isCurrentImmigrationStatus) return a.isCurrentImmigrationStatus ? -1 : 1;
-    return 0;
+    const ea = parseDateValue(a.expiryDate)?.getTime() ?? null;
+    const eb = parseDateValue(b.expiryDate)?.getTime() ?? null;
+    if (ea == null && eb == null) return 0;
+    if (ea == null) return 1;
+    if (eb == null) return -1;
+    return ea - eb;
   });
 }
 

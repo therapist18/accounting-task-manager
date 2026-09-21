@@ -2,7 +2,6 @@ import { supabase } from '@/lib/supabase/client';
 
 export interface User {
   id: string;
-  clerk_id?: string | null;
   name: string;
   email: string;
   role: 'user' | 'officer' | 'admin';

@@ -39,7 +39,6 @@ export interface AppSession {
 }
 
 export interface ManagedAuthUser extends AuthUser {
-  clerkUserId: string | null;
   createdAt: string | null;
   updatedAt: string | null;
   lastLogin: string | null;

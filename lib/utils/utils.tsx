@@ -264,7 +264,7 @@ export const fetchUploadedDocuments = async (personIds) => {
 
         const { data, error } = await supabase
             .from('acc_portal_directors_documents')
-            .select('id, director_id, document_id, expiry_date, file_path, extracted_details, created_at')
+            .select('id, director_id, document_id, file_path, extracted_details, created_at')
             .in('director_id', numericIds);
 
         if (error) throw error;

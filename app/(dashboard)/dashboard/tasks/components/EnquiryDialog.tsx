@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { SearchableSelect } from "@/components/ui/searchable-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Check, ChevronsUpDown, ChevronRight, Loader2, User, Users, Building2, FileText, UserPlus, UserCheck, Shield, HelpCircle, Calendar, MessageSquare, ListTodo, Phone, Database, Folder, Search, HeartHandshake, Split, X, AlertCircle, Link2, PlusCircle, Upload } from "lucide-react"
+import { Check, ChevronsUpDown, ChevronRight, Loader2, User, Users, Building2, FileText, UserPlus, UserCheck, Shield, HelpCircle, Info, Calendar, MessageSquare, ListTodo, Phone, Database, Folder, Search, HeartHandshake, Split, X, AlertCircle, Link2, PlusCircle, Upload } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Textarea } from "@/components/ui/textarea"
@@ -22,7 +22,7 @@ import { toast } from "@/lib/hooks/use-toast"
 import { format, isValid } from "date-fns"
 import { Calendar as CalendarPicker } from "@/components/ui/calendar"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService, fetchIndividualDocumentsForLinking, linkTaskToDocumentWorkflow, type LinkableDocument } from "../utils/workflowBundleHelpers"
+import { detectExistingWorkflowForIndividual, detectTaskConflictsForJobLevel, evaluateWorkflowRestrictionsForBundle, formatWorkflowRestrictionReason, taskBundleService, fetchIndividualDocumentsForLinking, linkTaskToDocumentWorkflow, type LinkableDocument, parseDateValue } from "../utils/workflowBundleHelpers"
 import { getInheritedOfficer, getDepartmentOfficerIds, getSubdepartmentOfficerIds } from "../../departments/departments/database"
 import { fetchOfficers, fetchTaskManagers, fetchTaskAssistants, fetchAllUsers, hasJobLevelAccess, buildSelectOptions, FilteredUserData, userService, DisplayUser } from "@/lib/shared-user-assignment-service"
 import { parseDateWithMonthName } from "@/app/generic-functions/dateUtils"
@@ -138,7 +138,7 @@ const resolveEnquiryDateForEdit = (task: any): string => {
     return isNaN(parsed.getTime()) ? format(new Date(), 'dd/MM/yyyy') : format(parsed, 'dd/MM/yyyy');
 };
 
-const TableRow = ({ label, children, required = false, hasValue, error }: { label: string; children: React.ReactNode; required?: boolean; hasValue?: boolean; error?: string }) => (
+const TableRow = ({ label, children, required = false, hasValue, error, hint }: { label: string; children: React.ReactNode; required?: boolean; hasValue?: boolean; error?: string; hint?: React.ReactNode }) => (
     <div className={cn(
         "grid grid-cols-12 gap-4 py-3 border-b transition-colors",
         error ? "border-red-200 bg-red-50/40 hover:bg-red-50/60"
@@ -155,6 +155,22 @@ const TableRow = ({ label, children, required = false, hasValue, error }: { labe
                 {label}
                 {required && <span className="text-red-500 ml-1">*</span>}
             </Label>
+            {hint && (
+                <Popover>
+                    <PopoverTrigger asChild>
+                        <button
+                            type="button"
+                            className="rounded-full p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                            aria-label={`More info about ${label}`}
+                        >
+                            <Info className="h-3.5 w-3.5" />
+                        </button>
+                    </PopoverTrigger>
+                    <PopoverContent side="right" align="start" className="w-72 text-sm text-slate-600 leading-relaxed">
+                        {hint}
+                    </PopoverContent>
+                </Popover>
+            )}
         </div>
         <div className="col-span-8">
             {children}
@@ -167,6 +183,11 @@ const TableRow = ({ label, children, required = false, hasValue, error }: { labe
         </div>
     </div>
 );
+
+const formatExpiryDate = (raw: string | null | undefined): string | null => {
+    const d = parseDateValue(raw);
+    return d ? format(d, 'dd/MM/yyyy') : null;
+};
 
 export function EnquiryDialog({
     open,
@@ -705,13 +726,13 @@ export function EnquiryDialog({
             duration: taskToEdit.duration || '',
             renewal_status: taskToEdit.renewal_status || 'New',
             passport_handling_mode: taskToEdit.passport_handling_mode || null,
-            eta_purpose: taskToEdit.eta_purpose || null,
-            eta_traveler_intent: taskToEdit.eta_traveler_intent || null,
-            eta_ticket_confirmed: taskToEdit.eta_ticket_confirmed ?? null,
-            eta_tentative_arrival_date: taskToEdit.eta_tentative_arrival_date || '',
-            eta_tentative_departure_date: taskToEdit.eta_tentative_departure_date || '',
-            eta_confirmed_ticket_expected_date: taskToEdit.eta_confirmed_ticket_expected_date || '',
-            eta_return_ticket_is_real: taskToEdit.eta_return_ticket_is_real ?? null,
+            eta_purpose: taskToEdit.eta_details?.purpose || null,
+            eta_traveler_intent: taskToEdit.eta_details?.traveler_intent || null,
+            eta_ticket_confirmed: taskToEdit.eta_details?.ticket_confirmed ?? null,
+            eta_tentative_arrival_date: taskToEdit.eta_details?.tentative_arrival_date || '',
+            eta_tentative_departure_date: taskToEdit.eta_details?.tentative_departure_date || '',
+            eta_confirmed_ticket_expected_date: taskToEdit.eta_details?.confirmed_ticket_expected_date || '',
+            eta_return_ticket_is_real: taskToEdit.eta_details?.return_ticket_is_real ?? null,
             officer_id: taskToEdit.participants_details?.find(p => p.role?.includes('officer'))?.id?.toString() || '',
             task_manager_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_manager'))?.id?.toString() || '',
             task_assistant_id: taskToEdit.participants_details?.find(p => p.role?.includes('task_assistant'))?.id?.toString() || '',
@@ -1675,6 +1696,21 @@ export function EnquiryDialog({
                 }
             });
 
+            // All ETA-workflow answers live in one jsonb column (tm_tasks.eta_details) rather than
+            // a column per field. Stored as null when nothing was captured (non-ETA tasks).
+            const etaDetailsRaw = {
+                purpose: formData.eta_purpose || null,
+                traveler_intent: formData.eta_purpose === 'tourism' ? 'visitor' : (formData.eta_traveler_intent || null),
+                ticket_confirmed: formData.eta_ticket_confirmed,
+                tentative_arrival_date: formData.eta_ticket_confirmed ? null : (formData.eta_tentative_arrival_date || null),
+                tentative_departure_date: formData.eta_ticket_confirmed ? null : (formData.eta_tentative_departure_date || null),
+                confirmed_ticket_expected_date: formData.eta_ticket_confirmed ? null : (formData.eta_confirmed_ticket_expected_date || null),
+                return_ticket_is_real: formData.eta_ticket_confirmed ? formData.eta_return_ticket_is_real : null,
+            };
+            const etaDetails = Object.values(etaDetailsRaw).every(v => v === null || v === undefined)
+                ? null
+                : etaDetailsRaw;
+
             const payload: any = {
                 job_description: formData.job_description,
                 individual_id: selectedIndividual.id,
@@ -1682,13 +1718,7 @@ export function EnquiryDialog({
                 duration: syncedDuration,
                 renewal_status: syncedRenewalStatus,
                 passport_handling_mode: formData.passport_handling_mode || null,
-                eta_purpose: formData.eta_purpose || null,
-                eta_traveler_intent: formData.eta_purpose === 'tourism' ? 'visitor' : (formData.eta_traveler_intent || null),
-                eta_ticket_confirmed: formData.eta_ticket_confirmed,
-                eta_tentative_arrival_date: formData.eta_ticket_confirmed ? null : (formData.eta_tentative_arrival_date || null),
-                eta_tentative_departure_date: formData.eta_ticket_confirmed ? null : (formData.eta_tentative_departure_date || null),
-                eta_confirmed_ticket_expected_date: formData.eta_ticket_confirmed ? null : (formData.eta_confirmed_ticket_expected_date || null),
-                eta_return_ticket_is_real: formData.eta_ticket_confirmed ? formData.eta_return_ticket_is_real : null,
+                eta_details: etaDetails,
                 applicant_details: {
                     id: selectedIndividual.id,
                     name: selectedIndividual.full_name,
@@ -1869,13 +1899,14 @@ export function EnquiryDialog({
                     <div className="flex-1 w-full h-full bg-slate-50/50 overflow-auto">
                         <div className="p-6 space-y-4 grid grid-cols-2 gap-4">
                             <div className="col-span-1">
-                                {/* CLIENT IDENTIFICATION SECTION */}
-                                <Card className="border-blue-100 shadow-sm overflow-hidden bg-white mb-4">
+                                {/* CLIENT & IDENTITY SECTION */}
+                                <Card className={`border-blue-100 shadow-sm overflow-hidden bg-white mb-4`}>
                                     <CardHeader className="bg-blue-50/50 py-3 px-6 border-b border-blue-100">
                                         <CardTitle className="text-sm font-black text-blue-800 uppercase tracking-wider flex items-center gap-2">
                                             <User className="h-4 w-4" />
-                                            Client Identification
+                                            Client & Identity
                                         </CardTitle>
+                                        <p className="text-xs text-slate-400 font-medium mt-1">Who is this enquiry for?</p>
                                     </CardHeader>
                                     <CardContent className="p-6 space-y-0">
                                         <TableRow label="Applicant Type" required>
@@ -1958,95 +1989,66 @@ export function EnquiryDialog({
                                             </div>
                                         </TableRow>
 
-                                        <TableRow label="Related Document" hasValue={!!selectedRelatedDocumentId}>
-                                            <div className="flex-1 space-y-2">
-                                                {(() => {
-                                                    const suggested = availableRelatedDocuments.find((doc) => doc.isCurrentImmigrationStatus);
-                                                    const isSuggestedLinked = !!suggested && selectedRelatedDocumentId === suggested.uploadedDocId;
-                                                    if (!suggested || isSuggestedLinked) return null;
-                                                    // Deliberately loud — this is the one document most tasks actually need linked
-                                                    // (the person's current immigration status), so it shouldn't be just another
-                                                    // row in a dropdown the user can skim past.
-                                                    return (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setSelectedRelatedDocumentId(suggested.uploadedDocId)}
-                                                            className={cn(
-                                                                "w-full flex items-center justify-between gap-3 rounded-lg border-2 px-3 py-2.5 text-left transition-all animate-pulse hover:animate-none",
-                                                                suggested.status === 'expired'
-                                                                    ? "border-red-300 bg-red-50 hover:border-red-400 hover:bg-red-100"
-                                                                    : "border-amber-300 bg-amber-50 hover:border-amber-400 hover:bg-amber-100"
-                                                            )}
-                                                        >
-                                                            <div className="flex items-center gap-2 min-w-0">
-                                                                <AlertCircle className={cn("h-4 w-4 shrink-0", suggested.status === 'expired' ? "text-red-600" : "text-amber-600")} />
-                                                                <div className="min-w-0">
-                                                                    <div className="text-sm font-bold text-slate-800 truncate">
-                                                                        Current Immigration Status: {suggested.documentTypeName}
-                                                                        {suggested.status === 'expired' && <span className="ml-1.5 text-red-600">(Expired)</span>}
-                                                                    </div>
-                                                                    <div className="text-sm text-slate-500">
-                                                                        {suggested.expiryDate ? `Expires ${format(new Date(suggested.expiryDate), 'dd/MM/yyyy')}` : 'No expiry on file'} — tap to link this task to it
-                                                                    </div>
-                                                                    {suggested.existingWorkflowLabel && (
-                                                                        <div className="text-sm text-orange-600 font-medium mt-0.5">
-                                                                            ⚠ {suggested.existingWorkflowLabel} — check before adding another task
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                            <span className="shrink-0 flex items-center gap-1 text-sm font-semibold text-blue-600">
-                                                                <Link2 className="h-3.5 w-3.5" /> Link
-                                                            </span>
-                                                        </button>
-                                                    );
-                                                })()}
+                                        <TableRow label="Passport Number" hasValue={!!formData.passport_number}>
+                                            <div className="flex items-center gap-2">
+                                                <Input
+                                                    type="text"
+                                                    value={formData.passport_number}
+                                                    disabled={!taskToEdit}
+                                                    onChange={e => setFormData(prev => ({ ...prev, passport_number: e.target.value }))}
+                                                    placeholder="Enter passport number"
+                                                    className="h-11 border-slate-200 bg-white"
+                                                />
+                                                {/* No number yet, and the field is disabled until one exists (see above) — the
+                                                    only way forward is uploading the passport document itself, so surface that
+                                                    inline rather than leaving a dead, disabled input with just a warning. */}
+                                                {!formData.passport_number && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="icon"
+                                                        onClick={() => setShowPassportUpload(true)}
+                                                        disabled={!selectedIndividual}
+                                                        className="h-11 w-11 shrink-0 border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-40"
+                                                        title="Upload passport document"
+                                                    >
+                                                        <Upload className="h-4 w-4" />
+                                                        <span className="sr-only">Upload passport document</span>
+                                                    </Button>
+                                                )}
+                                            </div>
+                                            {!taskToEdit && selectedIndividual && !formData.passport_number && (
+                                                <div className="mt-2 flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-md">
+                                                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                                                    No passport found. Upload the passport document using the button above — the number will populate once it's processed.
+                                                </div>
+                                            )}
+                                        </TableRow>
 
-                                                {selectedRelatedDocumentId && (() => {
-                                                    const linked = availableRelatedDocuments.find((doc) => doc.uploadedDocId === selectedRelatedDocumentId);
-                                                    if (!linked) return null;
-                                                    return (
-                                                        <div className={cn("rounded-lg border px-3 py-2", linked.existingWorkflowLabel ? "border-orange-200 bg-orange-50" : "border-emerald-200 bg-emerald-50")}>
-                                                            <div className="flex items-center justify-between">
-                                                                <span className={cn("text-sm font-medium flex items-center gap-1.5 truncate", linked.existingWorkflowLabel ? "text-orange-700" : "text-emerald-700")}>
-                                                                    <Check className="h-3.5 w-3.5 shrink-0" />
-                                                                    Linked: {linked.documentTypeName}{linked.isCurrentImmigrationStatus ? ' (current status)' : ''}
-                                                                </span>
-                                                                <button type="button" className="shrink-0 text-sm text-slate-400 hover:text-red-600" onClick={() => setSelectedRelatedDocumentId('')}>Unlink</button>
-                                                            </div>
-                                                            {linked.existingWorkflowLabel && (
-                                                                <p className="text-sm text-orange-600 mt-1">
-                                                                    ⚠ {linked.existingWorkflowLabel} — this task will be added alongside it, not replace it.
-                                                                </p>
-                                                            )}
-                                                        </div>
-                                                    );
-                                                })()}
-
-                                                <details className="group">
-                                                    <summary className="text-sm text-slate-400 hover:text-slate-600 cursor-pointer list-none flex items-center gap-1 select-none">
-                                                        <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
-                                                        {selectedRelatedDocumentId ? 'Link a different document instead' : 'Link a different document'}
-                                                    </summary>
-                                                    <div className="mt-2">
-                                                        <SearchableSelect
-                                                            value={selectedRelatedDocumentId}
-                                                            onValueChange={setSelectedRelatedDocumentId}
-                                                            options={availableRelatedDocuments.map((doc) => ({
-                                                                value: doc.uploadedDocId,
-                                                                label: `${doc.isCurrentImmigrationStatus ? '⭐ ' : ''}${doc.documentTypeName}${doc.expiryDate ? ` — exp. ${format(new Date(doc.expiryDate), 'dd/MM/yyyy')}` : ''}${doc.status === 'expired' ? ' (Expired)' : ''}${doc.existingWorkflowLabel ? ` ⚠ ${doc.existingWorkflowLabel}` : ''}`,
-                                                            }))}
-                                                            placeholder={!selectedIndividual ? "Select applicant first" : loadingRelatedDocuments ? "Loading documents..." : "Not linked to a specific document"}
-                                                            disabled={!selectedIndividual || loadingRelatedDocuments || availableRelatedDocuments.length === 0}
-                                                            emptyMessage="No documents on file for this individual."
-                                                            searchPlaceholder="Search documents..."
-                                                        />
-                                                    </div>
-                                                </details>
-
-                                                <p className="text-sm text-slate-400">
-                                                    Optional — link this task to a specific document so its status updates automatically in the Document Manager.
-                                                </p>
+                                        <TableRow label="R Number" hasValue={!!editableRNumber || rNumberUnallocated}>
+                                            <div className="flex items-center gap-3">
+                                                <Input
+                                                    type="text"
+                                                    value={editableRNumber}
+                                                    onChange={e => setEditableRNumber(e.target.value)}
+                                                    disabled={!selectedIndividual || rNumberUnallocated}
+                                                    placeholder={rNumberUnallocated ? "Unallocated" : selectedIndividual ? "Enter R number" : "—"}
+                                                    className="h-11 border-slate-200 bg-white"
+                                                />
+                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                    <Checkbox
+                                                        id="r-number-unallocated"
+                                                        checked={rNumberUnallocated}
+                                                        disabled={!selectedIndividual}
+                                                        onCheckedChange={(checked) => {
+                                                            setRNumberUnallocated(checked === true);
+                                                            if (checked) setEditableRNumber('');
+                                                        }}
+                                                    />
+                                                    <Label htmlFor="r-number-unallocated" className="text-sm font-medium text-slate-500 cursor-pointer whitespace-nowrap">
+                                                        Unallocated
+                                                    </Label>
+                                                </div>
                                             </div>
                                         </TableRow>
 
@@ -2098,6 +2100,37 @@ export function EnquiryDialog({
                                                 </div>
                                             )}
                                         </TableRow>
+
+                                        {selectedIndividual && applicantType === 'dependant' && (
+                                            <TableRow label="Linked Principal" required hasValue={!!principalForDependant} error={submitAttempted ? clientIdentificationErrors.linked_principal : undefined}>
+                                                {loadingRelations ? (
+                                                    <div className="flex items-center gap-2 text-slate-400 text-sm italic"><Loader2 className="h-3 w-3 animate-spin" /> Loading principal...</div>
+                                                ) : principalForDependant ? (
+                                                    <div className="flex items-center gap-2">
+                                                        <Badge variant="outline" className="py-2 px-3 border-blue-200 bg-blue-50 text-blue-700 flex items-center gap-2">
+                                                            <UserCheck className="h-3 w-3" />
+                                                            {principalForDependant.full_name}
+                                                        </Badge>
+                                                        {/* CLEAR BUTTON FOR LINKED PRINCIPAL */}
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            onClick={() => setPrincipalForDependant(null)}
+                                                            className="h-8 w-8 rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50"
+                                                            type="button"
+                                                            title="Remove Linked Principal"
+                                                        >
+                                                            <X className="h-3 w-3" />
+                                                            <span className="sr-only">Remove Principal</span>
+                                                        </Button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-sm text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100 italic">
+                                                        No principal associated (or selected) with this dependant.
+                                                    </div>
+                                                )}
+                                            </TableRow>
+                                        )}
 
                                         {/* RELATIONSHIP LOGIC: Rendering Principal or Dependants */}
                                         {selectedIndividual && applicantType === 'principal' && (
@@ -2170,79 +2203,151 @@ export function EnquiryDialog({
                                             </TableRow>
                                         )}
 
-                                        {selectedIndividual && applicantType === 'dependant' && (
-                                            <TableRow label="Linked Principal" required hasValue={!!principalForDependant} error={submitAttempted ? clientIdentificationErrors.linked_principal : undefined}>
-                                                {loadingRelations ? (
-                                                    <div className="flex items-center gap-2 text-slate-400 text-sm italic"><Loader2 className="h-3 w-3 animate-spin" /> Loading principal...</div>
-                                                ) : principalForDependant ? (
-                                                    <div className="flex items-center gap-2">
-                                                        <Badge variant="outline" className="py-2 px-3 border-blue-200 bg-blue-50 text-blue-700 flex items-center gap-2">
-                                                            <UserCheck className="h-3 w-3" />
-                                                            {principalForDependant.full_name}
-                                                        </Badge>
-                                                        {/* CLEAR BUTTON FOR LINKED PRINCIPAL */}
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            onClick={() => setPrincipalForDependant(null)}
-                                                            className="h-8 w-8 rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50"
+                                        <TableRow label="Related Document" hasValue={!!selectedRelatedDocumentId} hint="Optional — link this task to a specific document so its status updates automatically in the Document Manager.">
+                                            <div className="flex-1 space-y-2">
+                                                {(() => {
+                                                    const suggested = availableRelatedDocuments.find((doc) => doc.isCurrentImmigrationStatus);
+                                                    const isSuggestedLinked = !!suggested && selectedRelatedDocumentId === suggested.uploadedDocId;
+                                                    if (!suggested || isSuggestedLinked) return null;
+                                                    // Deliberately loud — this is the one document most tasks actually need linked
+                                                    // (the person's current immigration status), so it shouldn't be just another
+                                                    // row in a dropdown the user can skim past.
+                                                    return (
+                                                        <button
                                                             type="button"
-                                                            title="Remove Linked Principal"
+                                                            onClick={() => setSelectedRelatedDocumentId(suggested.uploadedDocId)}
+                                                            className={cn(
+                                                                "w-full flex items-center justify-between gap-3 rounded-lg border-2 px-3 py-2.5 text-left transition-all animate-pulse hover:animate-none",
+                                                                suggested.status === 'expired'
+                                                                    ? "border-red-300 bg-red-50 hover:border-red-400 hover:bg-red-100"
+                                                                    : "border-amber-300 bg-amber-50 hover:border-amber-400 hover:bg-amber-100"
+                                                            )}
                                                         >
-                                                            <X className="h-3 w-3" />
-                                                            <span className="sr-only">Remove Principal</span>
-                                                        </Button>
-                                                    </div>
-                                                ) : (
-                                                    <div className="text-sm text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100 italic">
-                                                        No principal associated (or selected) with this dependant.
-                                                    </div>
-                                                )}
-                                            </TableRow>
-                                        )}
-
-                                        {selectedIndividual && (
-                                            <TableRow label="Workflow Check">
-                                                <div className="space-y-2">
-                                                    {checkingWorkflow ? (
-                                                        <div className="flex items-center gap-2 text-slate-400 text-sm italic">
-                                                            <Loader2 className="h-3 w-3 animate-spin" />
-                                                            Checking existing workflows and active tasks...
-                                                        </div>
-                                                    ) : duplicateTaskConflicts.length > 0 ? (
-                                                        <div className="rounded-lg border border-red-200 bg-red-50 p-3">
-                                                            <div className="flex items-start gap-2">
-                                                                <AlertCircle className="mt-0.5 h-4 w-4 text-red-600" />
-                                                                <div className="space-y-1 text-sm text-red-700">
-                                                                    <p className="font-semibold">Active task already exists for this job level.</p>
-                                                                    {duplicateTaskConflicts.slice(0, 3).map((conflict: any) => (
-                                                                        <p key={conflict.id}>
-                                                                            #{conflict.id} · {conflict.job_description || "Untitled task"} · {conflict.status}
-                                                                        </p>
-                                                                    ))}
+                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                <AlertCircle className={cn("h-4 w-4 shrink-0", suggested.status === 'expired' ? "text-red-600" : "text-amber-600")} />
+                                                                <div className="min-w-0">
+                                                                    <div className="text-sm font-bold text-slate-800 truncate">
+                                                                        Current Immigration Status: {suggested.documentTypeName}
+                                                                        {suggested.status === 'expired' && <span className="ml-1.5 text-red-600">(Expired)</span>}
+                                                                    </div>
+                                                                    <div className="text-sm text-slate-500">
+                                                                        {(() => { const e = formatExpiryDate(suggested.expiryDate); return e ? `Expires ${e}` : 'No expiry on file'; })()} — tap to link this task to it
+                                                                    </div>
+                                                                    {suggested.existingWorkflowLabel && (
+                                                                        <div className="text-sm text-orange-600 font-medium mt-0.5">
+                                                                            ⚠ {suggested.existingWorkflowLabel} — check before adding another task
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             </div>
+                                                            <span className="shrink-0 flex items-center gap-1 text-sm font-semibold text-blue-600">
+                                                                <Link2 className="h-3.5 w-3.5" /> Link
+                                                            </span>
+                                                        </button>
+                                                    );
+                                                })()}
+
+                                                {selectedRelatedDocumentId && (() => {
+                                                    const linked = availableRelatedDocuments.find((doc) => doc.uploadedDocId === selectedRelatedDocumentId);
+                                                    if (!linked) return null;
+                                                    return (
+                                                        <div className={cn("rounded-lg border px-3 py-2", linked.existingWorkflowLabel ? "border-orange-200 bg-orange-50" : "border-emerald-200 bg-emerald-50")}>
+                                                            <div className="flex items-center justify-between">
+                                                                <span className={cn("text-sm font-medium flex items-center gap-1.5 truncate", linked.existingWorkflowLabel ? "text-orange-700" : "text-emerald-700")}>
+                                                                    <Check className="h-3.5 w-3.5 shrink-0" />
+                                                                    Linked: {linked.documentTypeName}{linked.isCurrentImmigrationStatus ? ' (current status)' : ''}
+                                                                </span>
+                                                                <button type="button" className="shrink-0 text-sm text-slate-400 hover:text-red-600" onClick={() => setSelectedRelatedDocumentId('')}>Unlink</button>
+                                                            </div>
+                                                            {linked.existingWorkflowLabel && (
+                                                                <p className="text-sm text-orange-600 mt-1">
+                                                                    ⚠ {linked.existingWorkflowLabel} — this task will be added alongside it, not replace it.
+                                                                </p>
+                                                            )}
                                                         </div>
-                                                    ) : duplicateTaskConflicts.length === 0 && workflowRestrictionSummary?.hasBlockingWorkflow ? (
-                                                        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                                                            Workflow restriction detected for this selected job level.
-                                                            {` Blocking state(s): ${(workflowRestrictionSummary.blockingReasons || []).map(formatWorkflowRestrictionReason).join(", ")}.`}
-                                                        </div>
-                                                    ) : formData.department_id && selectedJobLevelBundle && workflowRestrictionSummary?.matchedDocumentTypes?.length > 0 ? (
-                                                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
-                                                            Workflow history exists for this selected job level.
-                                                            {` ${workflowRestrictionSummary.matchedDocumentTypes.length} related workflow target(s) detected for the matched bundle, including pushed-only task workflow states.`}
-                                                        </div>
-                                                    ) : (
-                                                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
-                                                            {formData.department_id
-                                                                ? "No workflow or active task conflict detected for the selected job level."
-                                                                : "Select a job level to run the workflow check."}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </TableRow>
-                                        )}
+                                                    );
+                                                })()}
+
+                                                <details className="group">
+                                                    <summary className="text-sm text-slate-400 hover:text-slate-600 cursor-pointer list-none flex items-center gap-1 select-none">
+                                                        <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
+                                                        {selectedRelatedDocumentId ? 'Link a different document instead' : 'Link a different document'}
+                                                    </summary>
+                                                    <div className="mt-2">
+                                                        <SearchableSelect
+                                                            value={selectedRelatedDocumentId}
+                                                            onValueChange={setSelectedRelatedDocumentId}
+                                                            options={availableRelatedDocuments.map((doc) => ({
+                                                                value: doc.uploadedDocId,
+                                                                label: `${doc.isCurrentImmigrationStatus ? '⭐ ' : ''}${doc.documentTypeName}${formatExpiryDate(doc.expiryDate) ? ` — exp. ${formatExpiryDate(doc.expiryDate)}` : ''}${doc.status === 'expired' ? ' (Expired)' : ''}${doc.existingWorkflowLabel ? ` ⚠ ${doc.existingWorkflowLabel}` : ''}`,
+                                                            }))}
+                                                            placeholder={!selectedIndividual ? "Select applicant first" : loadingRelatedDocuments ? "Loading documents..." : "Not linked to a specific document"}
+                                                            disabled={!selectedIndividual || loadingRelatedDocuments || availableRelatedDocuments.length === 0}
+                                                            emptyMessage="No documents on file for this individual."
+                                                            searchPlaceholder="Search documents..."
+                                                        />
+                                                    </div>
+                                                </details>
+                                            </div>
+                                        </TableRow>
+
+                                    </CardContent>
+                                </Card>
+
+                                {/* PROCESS CLASSIFICATION SECTION */}
+                                <Card className={`border-blue-100 shadow-sm overflow-hidden bg-white mb-4`}>
+                                    <CardHeader className="bg-blue-50/50 py-3 px-6 border-b border-blue-100">
+                                        <CardTitle className="text-sm font-black text-blue-800 uppercase tracking-wider flex items-center gap-2">
+                                            <Shield className="h-4 w-4" />
+                                            Process Classification
+                                        </CardTitle>
+                                        <p className="text-xs text-slate-400 font-medium mt-1">What service do they need?</p>
+                                    </CardHeader>
+                                    <CardContent className="p-6 space-y-0">
+                                        <TableRow label="Department" required hasValue={!!formData.department_id}>
+                                            <SearchableSelect
+                                                value={formData.department_id}
+                                                onValueChange={id => setFormData(prev => ({ ...prev, department_id: id, subdepartment_id: '', class_id: '' }))}
+                                                options={departmentOptions}
+                                                placeholder="Choose Department"
+                                                disabled={departmentOptions.length === 0}
+                                                emptyMessage="No departments found."
+                                                searchPlaceholder="Search department..."
+                                                buttonClassName="h-11 bg-white border-slate-200"
+                                                popoverClassName="w-[--radix-popover-trigger-width]"
+                                                allowClear={true}
+                                            />
+                                        </TableRow>
+
+                                        <TableRow label="Sub-Department" hasValue={!!formData.subdepartment_id}>
+                                            <SearchableSelect
+                                                value={formData.subdepartment_id}
+                                                onValueChange={id => setFormData(prev => ({ ...prev, subdepartment_id: id, class_id: '' }))}
+                                                options={subdepartmentOptions}
+                                                placeholder="Choose Sub-Department"
+                                                disabled={!formData.department_id || subdepartmentOptions.length === 0}
+                                                emptyMessage="No sub-departments found."
+                                                searchPlaceholder="Search sub-department..."
+                                                buttonClassName="h-11 bg-white border-slate-200"
+                                                popoverClassName="w-[--radix-popover-trigger-width]"
+                                                allowClear={true}
+                                            />
+                                        </TableRow>
+
+                                        <TableRow label="Service Class" hasValue={!!formData.class_id}>
+                                            <SearchableSelect
+                                                value={formData.class_id}
+                                                onValueChange={id => setFormData(prev => ({ ...prev, class_id: id }))}
+                                                options={classOptions}
+                                                placeholder="Choose Service Class"
+                                                disabled={!formData.subdepartment_id || classOptions.length === 0}
+                                                emptyMessage="No service classes found."
+                                                searchPlaceholder="Search service class..."
+                                                buttonClassName="h-11 bg-white border-slate-200"
+                                                popoverClassName="w-[--radix-popover-trigger-width]"
+                                                allowClear={true}
+                                            />
+                                        </TableRow>
 
                                         {formData.class_id === CLASS_D_ID && (
                                             <TableRow label="Related Understudy" required hasValue={!!selectedUnderstudy} error={submitAttempted ? clientIdentificationErrors.understudy : undefined}>
@@ -2300,74 +2405,258 @@ export function EnquiryDialog({
                                                 </Popover>
                                             </TableRow>
                                         )}
+
+                                        {selectedIndividual && (
+                                            <TableRow label="Workflow Check">
+                                                <div className="space-y-2">
+                                                    {checkingWorkflow ? (
+                                                        <div className="flex items-center gap-2 text-slate-400 text-sm italic">
+                                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                                            Checking existing workflows and active tasks...
+                                                        </div>
+                                                    ) : duplicateTaskConflicts.length > 0 ? (
+                                                        <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                                                            <div className="flex items-start gap-2">
+                                                                <AlertCircle className="mt-0.5 h-4 w-4 text-red-600" />
+                                                                <div className="space-y-1 text-sm text-red-700">
+                                                                    <p className="font-semibold">Active task already exists for this job level.</p>
+                                                                    {duplicateTaskConflicts.slice(0, 3).map((conflict: any) => (
+                                                                        <p key={conflict.id}>
+                                                                            #{conflict.id} · {conflict.job_description || "Untitled task"} · {conflict.status}
+                                                                        </p>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ) : duplicateTaskConflicts.length === 0 && workflowRestrictionSummary?.hasBlockingWorkflow ? (
+                                                        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                                            Workflow restriction detected for this selected job level.
+                                                            {` Blocking state(s): ${(workflowRestrictionSummary.blockingReasons || []).map(formatWorkflowRestrictionReason).join(", ")}.`}
+                                                        </div>
+                                                    ) : formData.department_id && selectedJobLevelBundle && workflowRestrictionSummary?.matchedDocumentTypes?.length > 0 ? (
+                                                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+                                                            Workflow history exists for this selected job level.
+                                                            {` ${workflowRestrictionSummary.matchedDocumentTypes.length} related workflow target(s) detected for the matched bundle, including pushed-only task workflow states.`}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+                                                            {formData.department_id
+                                                                ? "No workflow or active task conflict detected for the selected job level."
+                                                                : "Select a job level to run the workflow check."}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </TableRow>
+                                        )}
+
                                     </CardContent>
                                 </Card>
 
-                                {/* PROCESS CLASSIFICATION SECTION */}
-                                <Card className="border-blue-100 shadow-sm overflow-hidden bg-white mb-4">
+                                {/* OPERATIONAL & SERVICE SPECIFICS SECTION */}
+                                <Card className={`border-blue-100 shadow-sm overflow-hidden bg-white mb-4 ${workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit ? 'opacity-50 pointer-events-none' : ''}`}>
                                     <CardHeader className="bg-blue-50/50 py-3 px-6 border-b border-blue-100">
                                         <CardTitle className="text-sm font-black text-blue-800 uppercase tracking-wider flex items-center gap-2">
-                                            <Shield className="h-4 w-4" />
-                                            Process Classification
+                                            <ListTodo className="h-4 w-4" />
+                                            Operational & Service Specifics
                                         </CardTitle>
+                                        <p className="text-xs text-slate-400 font-medium mt-1">How will it be handled?</p>
                                     </CardHeader>
                                     <CardContent className="p-6 space-y-0">
-                                        <TableRow label="Department" required hasValue={!!formData.department_id}>
-                                            <SearchableSelect
-                                                value={formData.department_id}
-                                                onValueChange={id => setFormData(prev => ({ ...prev, department_id: id, subdepartment_id: '', class_id: '' }))}
-                                                options={departmentOptions}
-                                                placeholder="Choose Department"
-                                                disabled={departmentOptions.length === 0}
-                                                emptyMessage="No departments found."
-                                                searchPlaceholder="Search department..."
-                                                buttonClassName="h-11 bg-white border-slate-200"
-                                                popoverClassName="w-[--radix-popover-trigger-width]"
-                                                allowClear={true}
-                                            />
-                                        </TableRow>
+                                        {formData.department_id === '1' && (
+                                            <TableRow label="Passport Endorsement" hasValue={!!formData.passport_handling_mode} hint="Whether BCL staff will carry the passport to Nyayo House for stamping, or the client handles that themselves. Tracked in Passport Endorsement Tracking once this job reaches Write-up Completed.">
+                                                <Select
+                                                    value={formData.passport_handling_mode || ''}
+                                                    onValueChange={(v: any) => setFormData(prev => ({ ...prev, passport_handling_mode: v }))}
+                                                >
+                                                    <SelectTrigger className="h-11 border-slate-200 bg-white max-w-sm">
+                                                        <SelectValue placeholder="Select who handles endorsement..." />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="bcl">BCL Handles Stamping</SelectItem>
+                                                        <SelectItem value="client">Client Handles It</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </TableRow>
+                                        )}
 
-                                        <TableRow label="Sub-Department" hasValue={!!formData.subdepartment_id}>
-                                            <SearchableSelect
-                                                value={formData.subdepartment_id}
-                                                onValueChange={id => setFormData(prev => ({ ...prev, subdepartment_id: id, class_id: '' }))}
-                                                options={subdepartmentOptions}
-                                                placeholder="Choose Sub-Department"
-                                                disabled={!formData.department_id || subdepartmentOptions.length === 0}
-                                                emptyMessage="No sub-departments found."
-                                                searchPlaceholder="Search sub-department..."
-                                                buttonClassName="h-11 bg-white border-slate-200"
-                                                popoverClassName="w-[--radix-popover-trigger-width]"
-                                                allowClear={true}
-                                            />
-                                        </TableRow>
+                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && (
+                                            <TableRow label="ETA Purpose" hasValue={!!formData.eta_purpose} hint={formData.eta_purpose === 'resettlement'
+                                                        ? "Auto-selected — this applicant has prior immigration-status documents on file."
+                                                        : "Tourism and Fresh Settlement have no prior status to detect from, so this is a manual pick. Resettlement auto-selects when the applicant already has a linkable prior document."}>
+                                                <Select
+                                                    value={formData.eta_purpose || ''}
+                                                    onValueChange={(v: any) => setFormData(prev => ({
+                                                        ...prev,
+                                                        eta_purpose: v,
+                                                        eta_traveler_intent: v === 'tourism' ? 'visitor' : prev.eta_traveler_intent,
+                                                    }))}
+                                                >
+                                                    <SelectTrigger className="h-11 border-slate-200 bg-white max-w-sm">
+                                                        <SelectValue placeholder="Select the purpose of this ETA..." />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="tourism">Tourism</SelectItem>
+                                                        <SelectItem value="fresh_settlement">Fresh Settlement</SelectItem>
+                                                        <SelectItem value="resettlement">Resettlement</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </TableRow>
+                                        )}
 
-                                        <TableRow label="Service Class" hasValue={!!formData.class_id}>
-                                            <SearchableSelect
-                                                value={formData.class_id}
-                                                onValueChange={id => setFormData(prev => ({ ...prev, class_id: id }))}
-                                                options={classOptions}
-                                                placeholder="Choose Service Class"
-                                                disabled={!formData.subdepartment_id || classOptions.length === 0}
-                                                emptyMessage="No service classes found."
-                                                searchPlaceholder="Search service class..."
-                                                buttonClassName="h-11 bg-white border-slate-200"
-                                                popoverClassName="w-[--radix-popover-trigger-width]"
-                                                allowClear={true}
-                                            />
-                                        </TableRow>
+                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && formData.eta_purpose !== 'tourism' && (
+                                            <TableRow label="Traveler Intent" hasValue={!!formData.eta_traveler_intent} hint="Whether this person intends to leave the country before/when their ETA expires, or stay on and need a follow-on extension or change of status. Drives which workflow the Individual Document Manager's Visa/ETA tracker follows for this person.">
+                                                <Select
+                                                    value={formData.eta_traveler_intent || ''}
+                                                    onValueChange={(v: any) => setFormData(prev => ({ ...prev, eta_traveler_intent: v }))}
+                                                >
+                                                    <SelectTrigger className="h-11 border-slate-200 bg-white max-w-sm">
+                                                        <SelectValue placeholder="Select whether they're visiting or staying..." />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="visitor">Just visiting — leaving before/at ETA expiry</SelectItem>
+                                                        <SelectItem value="extend_or_change_status">Staying — will need an extension or change of status</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </TableRow>
+                                        )}
+
+                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && formData.eta_purpose === 'tourism' && (
+                                            <TableRow label="Traveler Intent" hasValue hint="Just visiting — leaving before/at ETA expiry. Tourism enquiries never need an extension or change of status, so this is fixed automatically.">
+                                            </TableRow>
+                                        )}
+
+                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && (
+                                            <TableRow label="Confirmed Ticket?" hasValue={formData.eta_ticket_confirmed !== null} hint={formData.eta_ticket_confirmed === true
+                                                        ? "Upload the Airline/Cruise Ticket in the Individual Document Manager — its Arrival/Departure dates become authoritative."
+                                                        : "If not confirmed yet, record the tentative dates below and when the client expects to get the real ticket."}>
+                                                <Select
+                                                    value={formData.eta_ticket_confirmed === null ? '' : (formData.eta_ticket_confirmed ? 'yes' : 'no')}
+                                                    onValueChange={(v: any) => setFormData(prev => ({
+                                                        ...prev,
+                                                        eta_ticket_confirmed: v === 'yes',
+                                                        // Clear whichever side no longer applies rather than leaving stale
+                                                        // values behind when the client switches their answer.
+                                                        eta_tentative_arrival_date: v === 'yes' ? '' : prev.eta_tentative_arrival_date,
+                                                        eta_tentative_departure_date: v === 'yes' ? '' : prev.eta_tentative_departure_date,
+                                                        eta_confirmed_ticket_expected_date: v === 'yes' ? '' : prev.eta_confirmed_ticket_expected_date,
+                                                        eta_return_ticket_is_real: v === 'no' ? null : prev.eta_return_ticket_is_real,
+                                                    }))}
+                                                >
+                                                    <SelectTrigger className="h-11 border-slate-200 bg-white max-w-sm">
+                                                        <SelectValue placeholder="Do they have a confirmed arrival ticket?" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="yes">Yes — confirmed arrival ticket</SelectItem>
+                                                        <SelectItem value="no">No — tentative booking only</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </TableRow>
+                                        )}
+
+                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && formData.eta_ticket_confirmed === false && (
+                                            <>
+                                                <TableRow label="Tentative Arrival Date" hasValue={!!formData.eta_tentative_arrival_date}>
+                                                    <Input
+                                                        type="date"
+                                                        value={formData.eta_tentative_arrival_date}
+                                                        onChange={(e) => setFormData(prev => ({ ...prev, eta_tentative_arrival_date: e.target.value }))}
+                                                        className="h-11 border-slate-200 bg-white max-w-sm"
+                                                    />
+                                                </TableRow>
+                                                <TableRow label="Tentative Departure Date" hasValue={!!formData.eta_tentative_departure_date}>
+                                                    <Input
+                                                        type="date"
+                                                        value={formData.eta_tentative_departure_date}
+                                                        onChange={(e) => setFormData(prev => ({ ...prev, eta_tentative_departure_date: e.target.value }))}
+                                                        className="h-11 border-slate-200 bg-white max-w-sm"
+                                                    />
+                                                </TableRow>
+                                                <TableRow label="Confirmed Ticket Expected By" hasValue={!!formData.eta_confirmed_ticket_expected_date} hint="When the client expects to have a confirmed ticket in hand. The Visa/ETA tracker counts down to this date.">
+                                                    <Input
+                                                        type="date"
+                                                        value={formData.eta_confirmed_ticket_expected_date}
+                                                        onChange={(e) => setFormData(prev => ({ ...prev, eta_confirmed_ticket_expected_date: e.target.value }))}
+                                                        className="h-11 border-slate-200 bg-white max-w-sm"
+                                                    />
+                                                </TableRow>
+                                            </>
+                                        )}
+
+                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && formData.eta_ticket_confirmed === true && (
+                                            <TableRow label="Return Ticket" hasValue={formData.eta_return_ticket_is_real !== null} hint={formData.eta_return_ticket_is_real === false
+                                                        ? "Return date will be left blank until a genuine return ticket is uploaded later, from the Visa/ETA tracker."
+                                                        : "Whether the ticket's return/departure leg is genuine or a dummy booking used to satisfy visa requirements. Only a real one is trusted for the return-date countdown."}>
+                                                <Select
+                                                    value={formData.eta_return_ticket_is_real === null ? '' : (formData.eta_return_ticket_is_real ? 'real' : 'dummy')}
+                                                    onValueChange={(v: any) => setFormData(prev => ({ ...prev, eta_return_ticket_is_real: v === 'real' }))}
+                                                >
+                                                    <SelectTrigger className="h-11 border-slate-200 bg-white max-w-sm">
+                                                        <SelectValue placeholder="Is the return ticket real or a dummy booking?" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="real">Real — trust its return date</SelectItem>
+                                                        <SelectItem value="dummy">Dummy — ignore its return date for now</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </TableRow>
+                                        )}
+
                                     </CardContent>
                                 </Card>
 
-                                {/* INTERNAL PROCESSING SECTION */}
+                                {/* INTERNAL ALLOCATION & BRIEFING SECTION */}
                                 <Card className={`border-blue-100 shadow-sm overflow-hidden bg-white mb-4 ${workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit ? 'opacity-50 pointer-events-none' : ''}`}>
                                     <CardHeader className="bg-blue-50/50 py-3 px-6 border-b border-blue-100">
                                         <CardTitle className="text-sm font-black text-blue-800 uppercase tracking-wider flex items-center gap-2">
                                             <UserCheck className="h-4 w-4" />
-                                            Internal Processing
+                                            Internal Allocation & Briefing
                                         </CardTitle>
+                                        <p className="text-xs text-slate-400 font-medium mt-1">Who is responsible & when?</p>
                                     </CardHeader>
                                     <CardContent className="p-6 space-y-0">
+                                        <TableRow label="Enquiry Date">
+                                            <div className="relative max-w-sm">
+                                                <Input
+                                                    type="text"
+                                                    placeholder="DD/MM/YYYY"
+                                                    value={formData.enquiry_date}
+                                                    onChange={e => setFormData(prev => ({ ...prev, enquiry_date: e.target.value }))}
+                                                    disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}
+                                                    className={cn(
+                                                        "pl-10 pr-10 h-11 border-slate-200 bg-white font-mono",
+                                                        formData.enquiry_date && !isEnquiryDateValid && "border-red-300 focus-visible:ring-red-300"
+                                                    )}
+                                                />
+                                                <Calendar className="absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
+                                                <Popover open={isEnquiryDatePickerOpen} onOpenChange={setIsEnquiryDatePickerOpen}>
+                                                    <PopoverTrigger asChild>
+                                                        <button
+                                                            type="button"
+                                                            className="absolute right-2 top-2 h-7 w-7 flex items-center justify-center rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                                            disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}
+                                                        >
+                                                            <ChevronsUpDown className="h-3.5 w-3.5" />
+                                                        </button>
+                                                    </PopoverTrigger>
+                                                    <PopoverContent className="w-auto p-0 z-[9999]" align="start">
+                                                        <CalendarPicker
+                                                            mode="single"
+                                                            selected={enquiryDateAsDate}
+                                                            onSelect={(d) => {
+                                                                if (!d) return;
+                                                                setFormData(prev => ({ ...prev, enquiry_date: format(d, 'dd/MM/yyyy') }));
+                                                                setIsEnquiryDatePickerOpen(false);
+                                                            }}
+                                                            initialFocus
+                                                        />
+                                                    </PopoverContent>
+                                                </Popover>
+                                            </div>
+                                            {formData.enquiry_date && !isEnquiryDateValid && (
+                                                <p className="text-sm text-red-500 mt-1">Enter a valid date as DD/MM/YYYY, or pick one from the calendar.</p>
+                                            )}
+                                        </TableRow>
+
                                         {formData.department_id !== '1' && (
                                             <TableRow label="Assigned Officer" hasValue={!!formData.officer_id}>
                                                 <div className="space-y-2">
@@ -2419,283 +2708,29 @@ export function EnquiryDialog({
                                             />
                                         </TableRow>
 
-                                        <TableRow label="Enquiry Date">
-                                            <div className="relative max-w-sm">
-                                                <Input
-                                                    type="text"
-                                                    placeholder="DD/MM/YYYY"
-                                                    value={formData.enquiry_date}
-                                                    onChange={e => setFormData(prev => ({ ...prev, enquiry_date: e.target.value }))}
-                                                    disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}
-                                                    className={cn(
-                                                        "pl-10 pr-10 h-11 border-slate-200 bg-white font-mono",
-                                                        formData.enquiry_date && !isEnquiryDateValid && "border-red-300 focus-visible:ring-red-300"
-                                                    )}
-                                                />
-                                                <Calendar className="absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
-                                                <Popover open={isEnquiryDatePickerOpen} onOpenChange={setIsEnquiryDatePickerOpen}>
-                                                    <PopoverTrigger asChild>
-                                                        <button
-                                                            type="button"
-                                                            className="absolute right-2 top-2 h-7 w-7 flex items-center justify-center rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                                                            disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}
-                                                        >
-                                                            <ChevronsUpDown className="h-3.5 w-3.5" />
-                                                        </button>
-                                                    </PopoverTrigger>
-                                                    <PopoverContent className="w-auto p-0 z-[9999]" align="start">
-                                                        <CalendarPicker
-                                                            mode="single"
-                                                            selected={enquiryDateAsDate}
-                                                            onSelect={(d) => {
-                                                                if (!d) return;
-                                                                setFormData(prev => ({ ...prev, enquiry_date: format(d, 'dd/MM/yyyy') }));
-                                                                setIsEnquiryDatePickerOpen(false);
-                                                            }}
-                                                            initialFocus
-                                                        />
-                                                    </PopoverContent>
-                                                </Popover>
-                                            </div>
-                                            {formData.enquiry_date && !isEnquiryDateValid && (
-                                                <p className="text-sm text-red-500 mt-1">Enter a valid date as DD/MM/YYYY, or pick one from the calendar.</p>
-                                            )}
+                                        <TableRow label="Additional Remarks" hasValue={!!formData.job_description}>
+                                            <Textarea
+                                                value={formData.job_description}
+                                                onChange={e => setFormData(prev => ({ ...prev, job_description: e.target.value }))}
+                                                disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}
+                                                placeholder="Capture additional client context here..."
+                                                className="min-h-[120px] bg-white border-slate-200 p-4"
+                                            />
                                         </TableRow>
 
-                                        <TableRow label="Passport Number" hasValue={!!formData.passport_number}>
-                                            <div className="flex items-center gap-2">
-                                                <Input
-                                                    type="text"
-                                                    value={formData.passport_number}
-                                                    disabled={!taskToEdit}
-                                                    onChange={e => setFormData(prev => ({ ...prev, passport_number: e.target.value }))}
-                                                    placeholder="Enter passport number"
-                                                    className="h-11 border-slate-200 bg-white"
-                                                />
-                                                {/* No number yet, and the field is disabled until one exists (see above) — the
-                                                    only way forward is uploading the passport document itself, so surface that
-                                                    inline rather than leaving a dead, disabled input with just a warning. */}
-                                                {!formData.passport_number && (
-                                                    <Button
-                                                        type="button"
-                                                        variant="outline"
-                                                        size="icon"
-                                                        onClick={() => setShowPassportUpload(true)}
-                                                        disabled={!selectedIndividual}
-                                                        className="h-11 w-11 shrink-0 border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-40"
-                                                        title="Upload passport document"
-                                                    >
-                                                        <Upload className="h-4 w-4" />
-                                                        <span className="sr-only">Upload passport document</span>
-                                                    </Button>
-                                                )}
-                                            </div>
-                                            {!taskToEdit && selectedIndividual && !formData.passport_number && (
-                                                <div className="mt-2 flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-md">
-                                                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                                                    No passport found. Upload the passport document using the button above — the number will populate once it's processed.
-                                                </div>
-                                            )}
-                                        </TableRow>
-
-                                        <TableRow label="R Number" hasValue={!!editableRNumber || rNumberUnallocated}>
-                                            <div className="flex items-center gap-3">
-                                                <Input
-                                                    type="text"
-                                                    value={editableRNumber}
-                                                    onChange={e => setEditableRNumber(e.target.value)}
-                                                    disabled={!selectedIndividual || rNumberUnallocated}
-                                                    placeholder={rNumberUnallocated ? "Unallocated" : selectedIndividual ? "Enter R number" : "—"}
-                                                    className="h-11 border-slate-200 bg-white"
-                                                />
-                                                <div className="flex items-center gap-1.5 shrink-0">
-                                                    <Checkbox
-                                                        id="r-number-unallocated"
-                                                        checked={rNumberUnallocated}
-                                                        disabled={!selectedIndividual}
-                                                        onCheckedChange={(checked) => {
-                                                            setRNumberUnallocated(checked === true);
-                                                            if (checked) setEditableRNumber('');
-                                                        }}
-                                                    />
-                                                    <Label htmlFor="r-number-unallocated" className="text-sm font-medium text-slate-500 cursor-pointer whitespace-nowrap">
-                                                        Unallocated
-                                                    </Label>
-                                                </div>
-                                            </div>
-                                        </TableRow>
-
-                                        {formData.department_id === '1' && (
-                                            <TableRow label="Passport Endorsement" hasValue={!!formData.passport_handling_mode}>
-                                                <Select
-                                                    value={formData.passport_handling_mode || ''}
-                                                    onValueChange={(v: any) => setFormData(prev => ({ ...prev, passport_handling_mode: v }))}
-                                                >
-                                                    <SelectTrigger className="h-11 border-slate-200 bg-white max-w-sm">
-                                                        <SelectValue placeholder="Select who handles endorsement..." />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="bcl">BCL Handles Stamping</SelectItem>
-                                                        <SelectItem value="client">Client Handles It</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                                <p className="text-sm text-slate-400 mt-1.5">
-                                                    Whether BCL staff will carry the passport to Nyayo House for stamping, or the client handles that themselves. Tracked in Passport Endorsement Tracking once this job reaches Write-up Completed.
-                                                </p>
-                                            </TableRow>
-                                        )}
-
-                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && (
-                                            <TableRow label="ETA Purpose" hasValue={!!formData.eta_purpose}>
-                                                <Select
-                                                    value={formData.eta_purpose || ''}
-                                                    onValueChange={(v: any) => setFormData(prev => ({
-                                                        ...prev,
-                                                        eta_purpose: v,
-                                                        eta_traveler_intent: v === 'tourism' ? 'visitor' : prev.eta_traveler_intent,
-                                                    }))}
-                                                >
-                                                    <SelectTrigger className="h-11 border-slate-200 bg-white max-w-sm">
-                                                        <SelectValue placeholder="Select the purpose of this ETA..." />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="tourism">Tourism</SelectItem>
-                                                        <SelectItem value="fresh_settlement">Fresh Settlement</SelectItem>
-                                                        <SelectItem value="resettlement">Resettlement</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                                <p className="text-sm text-slate-400 mt-1.5">
-                                                    {formData.eta_purpose === 'resettlement'
-                                                        ? "Auto-selected — this applicant has prior immigration-status documents on file."
-                                                        : "Tourism and Fresh Settlement have no prior status to detect from, so this is a manual pick. Resettlement auto-selects when the applicant already has a linkable prior document."}
-                                                </p>
-                                            </TableRow>
-                                        )}
-
-                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && formData.eta_purpose !== 'tourism' && (
-                                            <TableRow label="Traveler Intent" hasValue={!!formData.eta_traveler_intent}>
-                                                <Select
-                                                    value={formData.eta_traveler_intent || ''}
-                                                    onValueChange={(v: any) => setFormData(prev => ({ ...prev, eta_traveler_intent: v }))}
-                                                >
-                                                    <SelectTrigger className="h-11 border-slate-200 bg-white max-w-sm">
-                                                        <SelectValue placeholder="Select whether they're visiting or staying..." />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="visitor">Just visiting — leaving before/at ETA expiry</SelectItem>
-                                                        <SelectItem value="extend_or_change_status">Staying — will need an extension or change of status</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                                <p className="text-sm text-slate-400 mt-1.5">
-                                                    Whether this person intends to leave the country before/when their ETA expires, or stay on and need a follow-on extension or change of status. Drives which workflow the Individual Document Manager's Visa/ETA tracker follows for this person.
-                                                </p>
-                                            </TableRow>
-                                        )}
-
-                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && formData.eta_purpose === 'tourism' && (
-                                            <TableRow label="Traveler Intent" hasValue>
-                                                <p className="text-sm text-slate-500 pt-2">
-                                                    Just visiting — leaving before/at ETA expiry. Tourism enquiries never need an extension or change of status, so this is fixed automatically.
-                                                </p>
-                                            </TableRow>
-                                        )}
-
-                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && (
-                                            <TableRow label="Confirmed Ticket?" hasValue={formData.eta_ticket_confirmed !== null}>
-                                                <Select
-                                                    value={formData.eta_ticket_confirmed === null ? '' : (formData.eta_ticket_confirmed ? 'yes' : 'no')}
-                                                    onValueChange={(v: any) => setFormData(prev => ({
-                                                        ...prev,
-                                                        eta_ticket_confirmed: v === 'yes',
-                                                        // Clear whichever side no longer applies rather than leaving stale
-                                                        // values behind when the client switches their answer.
-                                                        eta_tentative_arrival_date: v === 'yes' ? '' : prev.eta_tentative_arrival_date,
-                                                        eta_tentative_departure_date: v === 'yes' ? '' : prev.eta_tentative_departure_date,
-                                                        eta_confirmed_ticket_expected_date: v === 'yes' ? '' : prev.eta_confirmed_ticket_expected_date,
-                                                        eta_return_ticket_is_real: v === 'no' ? null : prev.eta_return_ticket_is_real,
-                                                    }))}
-                                                >
-                                                    <SelectTrigger className="h-11 border-slate-200 bg-white max-w-sm">
-                                                        <SelectValue placeholder="Do they have a confirmed arrival ticket?" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="yes">Yes — confirmed arrival ticket</SelectItem>
-                                                        <SelectItem value="no">No — tentative booking only</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                                <p className="text-sm text-slate-400 mt-1.5">
-                                                    {formData.eta_ticket_confirmed === true
-                                                        ? "Upload the Airline/Cruise Ticket in the Individual Document Manager — its Arrival/Departure dates become authoritative."
-                                                        : "If not confirmed yet, record the tentative dates below and when the client expects to get the real ticket."}
-                                                </p>
-                                            </TableRow>
-                                        )}
-
-                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && formData.eta_ticket_confirmed === false && (
-                                            <>
-                                                <TableRow label="Tentative Arrival Date" hasValue={!!formData.eta_tentative_arrival_date}>
-                                                    <Input
-                                                        type="date"
-                                                        value={formData.eta_tentative_arrival_date}
-                                                        onChange={(e) => setFormData(prev => ({ ...prev, eta_tentative_arrival_date: e.target.value }))}
-                                                        className="h-11 border-slate-200 bg-white max-w-sm"
-                                                    />
-                                                </TableRow>
-                                                <TableRow label="Tentative Departure Date" hasValue={!!formData.eta_tentative_departure_date}>
-                                                    <Input
-                                                        type="date"
-                                                        value={formData.eta_tentative_departure_date}
-                                                        onChange={(e) => setFormData(prev => ({ ...prev, eta_tentative_departure_date: e.target.value }))}
-                                                        className="h-11 border-slate-200 bg-white max-w-sm"
-                                                    />
-                                                </TableRow>
-                                                <TableRow label="Confirmed Ticket Expected By" hasValue={!!formData.eta_confirmed_ticket_expected_date}>
-                                                    <Input
-                                                        type="date"
-                                                        value={formData.eta_confirmed_ticket_expected_date}
-                                                        onChange={(e) => setFormData(prev => ({ ...prev, eta_confirmed_ticket_expected_date: e.target.value }))}
-                                                        className="h-11 border-slate-200 bg-white max-w-sm"
-                                                    />
-                                                    <p className="text-sm text-slate-400 mt-1.5">
-                                                        When the client expects to have a confirmed ticket in hand. The Visa/ETA tracker counts down to this date.
-                                                    </p>
-                                                </TableRow>
-                                            </>
-                                        )}
-
-                                        {formData.department_id === '1' && formData.subdepartment_id === '26' && formData.eta_ticket_confirmed === true && (
-                                            <TableRow label="Return Ticket" hasValue={formData.eta_return_ticket_is_real !== null}>
-                                                <Select
-                                                    value={formData.eta_return_ticket_is_real === null ? '' : (formData.eta_return_ticket_is_real ? 'real' : 'dummy')}
-                                                    onValueChange={(v: any) => setFormData(prev => ({ ...prev, eta_return_ticket_is_real: v === 'real' }))}
-                                                >
-                                                    <SelectTrigger className="h-11 border-slate-200 bg-white max-w-sm">
-                                                        <SelectValue placeholder="Is the return ticket real or a dummy booking?" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="real">Real — trust its return date</SelectItem>
-                                                        <SelectItem value="dummy">Dummy — ignore its return date for now</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                                <p className="text-sm text-slate-400 mt-1.5">
-                                                    {formData.eta_return_ticket_is_real === false
-                                                        ? "Return date will be left blank until a genuine return ticket is uploaded later, from the Visa/ETA tracker."
-                                                        : "Whether the ticket's return/departure leg is genuine or a dummy booking used to satisfy visa requirements. Only a real one is trusted for the return-date countdown."}
-                                                </p>
-                                            </TableRow>
-                                        )}
                                     </CardContent>
                                 </Card>
                             </div>
 
-                            <div className="col-span-1">
+<div className="col-span-1">
                                 {/* REQUIREMENT INTELLIGENCE SECTION */}
                                 <Card className={`border-blue-100 shadow-sm overflow-hidden bg-white mb-4 ${workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit ? 'opacity-50 pointer-events-none' : ''}`}>
                                     <CardHeader className="bg-blue-50/50 px-6 border-b border-blue-100">
                                         <CardTitle className="text-sm font-black text-blue-800 uppercase tracking-wider flex items-center gap-2">
                                             <HelpCircle className="h-4 w-4" />
-                                            Job Specific Questions
+                                            Job Specific Requirements
                                         </CardTitle>
+                                        <p className="text-xs text-slate-400 font-medium mt-1">Dynamic questionnaire based on Department + Class</p>
                                     </CardHeader>
                                     <CardContent className="p-6">
                                         {Object.entries(groupedQuestions).length > 0 ? (
@@ -2857,25 +2892,6 @@ export function EnquiryDialog({
                                                 </div>
                                             </div>
                                         )}
-                                    </CardContent>
-                                </Card>
-
-                                {/* ADDITIONAL REMARKS SECTION */}
-                                <Card className={`border-blue-100 shadow-sm overflow-hidden bg-white mb-4 ${workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit ? 'opacity-50 pointer-events-none' : ''}`}>
-                                    <CardHeader className="bg-blue-50/50 py-3 px-6 border-b border-blue-100">
-                                        <CardTitle className="text-sm font-black text-blue-800 uppercase tracking-wider flex items-center gap-2">
-                                            <FileText className="h-4 w-4" />
-                                            Additional Remarks
-                                        </CardTitle>
-                                    </CardHeader>
-                                    <CardContent className="p-6">
-                                        <Textarea
-                                            value={formData.job_description}
-                                            onChange={e => setFormData(prev => ({ ...prev, job_description: e.target.value }))}
-                                            disabled={workflowRestrictionSummary?.hasBlockingWorkflow && !taskToEdit}
-                                            placeholder="Capture additional client context here..."
-                                            className="min-h-[120px] bg-white border-slate-200 p-4"
-                                        />
                                     </CardContent>
                                 </Card>
                             </div>

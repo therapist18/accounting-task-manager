@@ -24,7 +24,6 @@ export const SCANNER_USER_ROLES: ScannerUserRole[] = [
 export const SCANNER_USERS_SELECT = [
   "id",
   "firebase_uid",
-  "clerk_user_id",
   "company_id",
   "role",
   "created_at",
@@ -44,7 +43,6 @@ export const SCANNER_USERS_SELECT = [
 export interface ScannerUserRow {
   id: string;
   firebase_uid: string | null;
-  clerk_user_id: string | null;
   company_id: number | null;
   role: ScannerUserRole;
   created_at: string | null;
@@ -160,7 +158,6 @@ function mapManagedScannerUser(row: ScannerUserRow): ManagedAuthUser {
   const base = mapScannerUser(row);
   return {
     ...base,
-    clerkUserId: row.clerk_user_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastLogin: row.last_login,
@@ -223,7 +220,7 @@ async function normalizeManagedUserInput(
   const hasAllCompanyAccess = input.role === "SuperAdmin";
 
   if (input.role === "officer") {
-    if (!username && !existingUser?.clerkUserId) {
+    if (!username) {
       throw new Error("Username is required for sign-in.");
     }
     if (username && username !== existingUser?.username) await assertUniqueValue("username", username, userId);
@@ -248,7 +245,7 @@ async function normalizeManagedUserInput(
   if (!hasAllCompanyAccess && companyIds.length === 0) {
     throw new Error("Select at least one company.");
   }
-  if (!username && !existingUser?.clerkUserId) {
+  if (!username) {
     throw new Error("Username is required for sign-in.");
   }
 
