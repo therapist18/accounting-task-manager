@@ -677,21 +677,52 @@ export async function syncAccount(
   return result
 }
 
-// Syncs every active mailbox within a time budget (serverless functions have a hard run-time cap).
-export async function syncAllAccounts(sb: SupabaseClient, only?: string, budgetMs = 45_000): Promise<SyncResult[]> {
-  let q = sb.from("email_accounts").select("id, email").eq("status", "active").not("refresh_token", "is", null)
+const SYNC_CONCURRENCY = 6
+
+// Syncs active mailboxes within a time budget, several at a time (serverless functions have a hard
+// run-time cap, and with 40+ connected mailboxes a strictly one-at-a-time loop is what made the page
+// feel slow to load).
+//
+// staleAfterMs, when set, skips any mailbox whose last_synced_at is more recent than that — the
+// page's own sync-on-open passes this (nothing to gain re-checking a mailbox that was just synced a
+// few minutes ago, likely by push anyway), while an explicit "Sync now" click and a per-mailbox sync
+// from the Mailboxes tab always pass it as undefined to force a real check.
+export async function syncAllAccounts(
+  sb: SupabaseClient,
+  only?: string,
+  budgetMs = 45_000,
+  staleAfterMs?: number
+): Promise<SyncResult[]> {
+  let q = sb
+    .from("email_accounts")
+    .select("id, email, last_synced_at")
+    .eq("status", "active")
+    .not("refresh_token", "is", null)
   if (only) q = q.eq("id", only)
-  const { data: accounts, error } = await q
+  const { data: allAccounts, error } = await q
   if (error) throw new Error(error.message)
+
+  const cutoff = staleAfterMs ? Date.now() - staleAfterMs : null
+  const accounts = (allAccounts ?? []).filter(
+    (a: any) => !cutoff || !a.last_synced_at || new Date(a.last_synced_at).getTime() < cutoff
+  )
+  const skippedFresh = (allAccounts ?? []).length - accounts.length
 
   const started = Date.now()
   const results: SyncResult[] = []
-  for (const a of accounts ?? []) {
+  for (let i = 0; i < accounts.length; i += SYNC_CONCURRENCY) {
     if (Date.now() - started > budgetMs) {
-      results.push({ email: a.email, ingested: 0, skipped: 0, failed: 0, truncated: true, error: "Skipped — out of time, will run on the next sync." })
-      continue
+      for (const a of accounts.slice(i)) {
+        results.push({ email: a.email, ingested: 0, skipped: 0, failed: 0, truncated: true, error: "Skipped — out of time, will run on the next sync." })
+      }
+      break
     }
-    results.push(await syncAccount(sb, a.id))
+    const batch = accounts.slice(i, i + SYNC_CONCURRENCY)
+    const batchResults = await Promise.all(batch.map((a: any) => syncAccount(sb, a.id)))
+    results.push(...batchResults)
+  }
+  if (skippedFresh > 0) {
+    console.log(`[email-center] sync: skipped ${skippedFresh} recently-synced mailbox(es)`)
   }
   return results
 }

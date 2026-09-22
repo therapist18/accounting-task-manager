@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getGmailClient } from '@/lib/gmail/client'
 import { createClient } from '@supabase/supabase-js'
+import { getServiceClient, renewWatch, type AccountRow } from '@/lib/email-center/ingest'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 
@@ -123,35 +124,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${APP_URL}/dashboard/emails?error=db_error`)
     }
 
-    // Auto-setup Gmail push watch (optional — needs Pub/Sub configured)
-    await setupWatch(gmail, account.id, sb)
+    // Auto-setup Gmail push watch (INBOX + SENT, optional — needs Pub/Sub configured). Shared with
+    // the sync path so a freshly-connected mailbox watches the same labels as every other one.
+    await renewWatch(getServiceClient(), account as AccountRow).catch((err) =>
+      console.warn('[gmail/callback] watch setup failed', err)
+    )
 
-    return NextResponse.redirect(`${APP_URL}/dashboard/emails?connected=true`)
+    // connected=true tells the page to jump straight to the Mailboxes tab and toast, so the
+    // "Connect Gmail account" button for the next mailbox is immediately in view — connecting
+    // 40+ accounts back to back stays a two-click loop (Connect → pick account → Allow → repeat)
+    // instead of hunting back to the tab each time.
+    return NextResponse.redirect(`${APP_URL}/dashboard/emails?connected=true&email=${encodeURIComponent(emailAddress)}`)
   } catch (err) {
     console.error('[gmail/callback]', err)
     return NextResponse.redirect(`${APP_URL}/dashboard/emails?error=server_error`)
-  }
-}
-
-async function setupWatch(gmail: any, accountId: string, sb: any) {
-  const topicName = process.env.PUBSUB_TOPIC_NAME
-  if (!topicName) return
-
-  try {
-    const res = await gmail.users.watch({
-      userId: 'me',
-      requestBody: { topicName, labelIds: ['INBOX'] },
-    })
-
-    const expiry = res.data.expiration
-      ? new Date(parseInt(res.data.expiration)).toISOString()
-      : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
-
-    await sb
-      .from('email_accounts')
-      .update({ history_id: parseInt(res.data.historyId ?? '0'), watch_expiry: expiry })
-      .eq('id', accountId)
-  } catch (err) {
-    console.warn('[gmail/watch setup]', err)
   }
 }

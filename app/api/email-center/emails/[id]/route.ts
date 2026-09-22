@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { authorize, fail } from "@/lib/email-center/api"
+import { authorize, companyNames, fail } from "@/lib/email-center/api"
 import { CATEGORY_BY_KEY } from "@/lib/email-center/categories"
 import { fetchMessageBody, openCaseFromEmail } from "@/lib/email-center/ingest"
 import { DISPOSITIONS, type Disposition } from "@/lib/email-center/types"
@@ -79,6 +79,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     // Marking an email as action-required for a case-creating category opens the case, just as
     // automatic ingestion would.
     let caseId: string | null = email.case_id
+    let newCase: Record<string, unknown> | null = null
     if (patch.disposition === "action_required" && !email.case_id) {
       const current = CATEGORY_BY_KEY.get(email.category_key ?? "")
       const chosen = category ?? current
@@ -103,12 +104,26 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
       )
       caseId = caseRow.id
       patch.case_id = caseId
+
+      // Hand back the full, freshly-opened case (joined name included) so the client can add it to
+      // its list directly instead of fetching it right back — it was just built here.
+      const companies = await companyNames(sb, [caseRow.company_id])
+      newCase = {
+        ...caseRow,
+        company_name: caseRow.company_id ? companies.get(String(caseRow.company_id))?.name ?? null : null,
+        responded_by_name: null,
+        assigned_to_name: null,
+        completed_by_name: null,
+      }
     }
 
     const { error } = await sb.from("emails").update(patch).eq("id", id)
     if (error) throw new Error(error.message)
 
-    return NextResponse.json({ success: true, case_id: caseId })
+    // email_patch: exactly the fields that changed, so the client can merge them into whichever
+    // local copy of this email it's holding (the Needs Review list, the open dialog, …) without a
+    // round trip back to GET the same row it just wrote.
+    return NextResponse.json({ success: true, case_id: caseId, email_patch: patch, case: newCase })
   } catch (error) {
     return fail(error, "email PATCH")
   }

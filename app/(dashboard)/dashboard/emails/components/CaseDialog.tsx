@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { NativeSelect } from "./NativeSelect"
+import { SearchSelect } from "./SearchSelect"
 import { APPROVAL_LABEL, type ApprovalStatus, type CaseRow, type CompanyOption, type StaffOption } from "./types"
 import { api, fmtDate, fmtDateTime } from "./utils"
 
@@ -34,14 +34,17 @@ export function CaseDialog({
   companies,
   staff,
   onClose,
-  onChanged,
+  onCaseLoaded,
   onOpenEmail,
 }: {
   caseId: string | null
   companies: CompanyOption[]
   staff: StaffOption[]
   onClose: () => void
-  onChanged: () => void
+  // Called with the fresh case row on the initial open AND after every save (assign, complete,
+  // field edit) — the page upserts it into its own list by id. This is the row's only route back
+  // to the page: nothing here ever triggers a full page reload.
+  onCaseLoaded: (c: CaseRow) => void
   onOpenEmail: (emailId: string) => void
 }) {
   const [loading, setLoading] = useState(false)
@@ -58,12 +61,14 @@ export function CaseDialog({
       setRow(res.case)
       setEmails(res.emails)
       setForm(Object.fromEntries(FIELDS.map((f) => [f, (res.case as any)[f] ?? ""])) as Record<FieldKey, string>)
+      onCaseLoaded(res.case)
     } catch (e: any) {
       toast.error(e.message)
       onClose()
     } finally {
       setLoading(false)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseId, onClose])
 
   useEffect(() => {
@@ -80,7 +85,6 @@ export function CaseDialog({
       await api(`/api/email-center/cases/${row.id}`, { method: "PATCH", body: JSON.stringify(body) })
       toast.success(success)
       await load()
-      onChanged()
     } catch (e: any) {
       toast.error(e.message)
     } finally {
@@ -129,14 +133,13 @@ export function CaseDialog({
             <div className="border rounded-lg p-4 space-y-3">
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <Field label="Assigned to">
-                  <NativeSelect
+                  <SearchSelect
                     className="min-w-[220px]"
                     value={form.assigned_to_id ?? ""}
-                    onChange={(e) => set("assigned_to_id", e.target.value)}
-                  >
-                    <option value="">— Unassigned —</option>
-                    {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </NativeSelect>
+                    onChange={(v) => set("assigned_to_id", v)}
+                    placeholder="— Unassigned —"
+                    options={[{ value: "", label: "— Unassigned —" }, ...staff.map((s) => ({ value: s.id, label: s.name }))]}
+                  />
                 </Field>
                 {closed ? (
                   <Button variant="outline" disabled={saving} onClick={() => patch({ status: "open" }, "Case reopened.")}>
@@ -159,10 +162,17 @@ export function CaseDialog({
               <div className="space-y-3">
                 <h4 className="text-xs font-semibold uppercase tracking-wide text-blue-700">From KRA</h4>
                 <Field label="Company">
-                  <NativeSelect className="w-full" value={form.company_id ?? ""} onChange={(e) => set("company_id", e.target.value)}>
-                    <option value="">— Unassigned —</option>
-                    {companies.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-                  </NativeSelect>
+                  <SearchSelect
+                    className="w-full"
+                    value={form.company_id ?? ""}
+                    onChange={(v) => {
+                      set("company_id", v)
+                      // KRA PIN follows the company record — still freely editable afterward.
+                      set("kra_pin", companies.find((c) => c.id === v)?.kra_pin ?? "")
+                    }}
+                    placeholder="— Unassigned —"
+                    options={[{ value: "", label: "— Unassigned —" }, ...companies.map((c) => ({ value: c.id, label: c.company_name }))]}
+                  />
                 </Field>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Notice type"><Input value={form.notice_type ?? ""} onChange={(e) => set("notice_type", e.target.value)} /></Field>
@@ -191,9 +201,12 @@ export function CaseDialog({
                   <Field label="Approval date"><Input type="date" value={form.approval_date ?? ""} onChange={(e) => set("approval_date", e.target.value)} /></Field>
                 </div>
                 <Field label="Approval status">
-                  <NativeSelect className="w-full" value={form.approval_status ?? ""} onChange={(e) => set("approval_status", e.target.value)}>
-                    {(Object.keys(APPROVAL_LABEL) as ApprovalStatus[]).map((s) => <option key={s} value={s}>{APPROVAL_LABEL[s]}</option>)}
-                  </NativeSelect>
+                  <SearchSelect
+                    className="w-full"
+                    value={form.approval_status ?? ""}
+                    onChange={(v) => set("approval_status", v)}
+                    options={(Object.keys(APPROVAL_LABEL) as ApprovalStatus[]).map((s) => ({ value: s, label: APPROVAL_LABEL[s] }))}
+                  />
                 </Field>
               </div>
             </div>

@@ -1,15 +1,8 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Sparkles, FileText, Upload, Plus, Trash2, Download, ZoomIn, ZoomOut, Check, User, Briefcase, GraduationCap, FolderGit2, BookOpen, MessageSquare, AlertCircle, Eye, Search, Users, ImagePlus, X, Loader2, CheckCircle2, Save, Settings2, Palette, ChevronDown, ChevronRight, Globe, ArrowRight, Award, Target, FileSpreadsheet, Layout, Type, Image, PenLine, BarChart3, Crosshair, FileText as CoverLetterIcon, Copy, RefreshCw, Database } from "lucide-react";
+import { Sparkles, FileText, Download, Check, User, Briefcase, GraduationCap, FolderGit2, BookOpen, MessageSquare, AlertCircle, Eye, Search, Users, ImagePlus, X, Loader2, CheckCircle2, Save, Settings2, Palette, ChevronDown, ChevronRight, Globe, ArrowRight, Award, Target, FileSpreadsheet, Layout, Type, Image, PenLine, BarChart3, Crosshair, FileText as CoverLetterIcon, Copy, RefreshCw, Database } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { printElementAsPdf, buildWordDocBlob, downloadBlob } from "@/lib/documentExport";
 import { applyWordSafeDomFixes } from "@/lib/documentTheme";
 import { buildCvDocument } from "@/app/(dashboard)/dashboard/cv-generator/utils/cvThemeEngine";
@@ -18,7 +11,6 @@ import { toast } from "sonner";
 import supabase from "@/lib/supabase/client";
 import { useCurrentUser } from "@/lib/hooks/use-current-user";
 import { buildJobApplicantAuditLog } from "@/lib/jobApplicantAudit";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { type ComboOption } from "./components/CreatableCombobox";
 import { ClientPortalView } from "./components/ClientPortalView";
 import { ModuleModals } from "./components/ModuleModals";
@@ -54,12 +46,6 @@ import {
 } from "./utils/cvGeneratorData";
 import { resolveCvMasterFieldValues } from "./utils/cvResolver";
 
-// Finds an existing 'Job Applicant' third_party_contacts row for this person (matched
-// on name + email/phone, since third_party_contacts has no date_of_birth to match on),
-// or creates one. Mirrors bcl-registry's own findOrCreateApplicantContact
-// (app/job-applicants/page.tsx) — kept as a separate copy here since the two apps
-// don't share code, but the shape must stay identical since both write into the same
-// third_party_contacts table.
 async function findOrCreateApplicantContact(fullName: string, email: string, phone: string) {
   const trimmedName = fullName.trim();
   const { data: existingContacts } = await supabase
@@ -89,12 +75,6 @@ async function findOrCreateApplicantContact(fullName: string, email: string, pho
   return newContact;
 }
 
-// Creates a brand-new job_applicant_cvs row for a CV being built from scratch (no
-// applicantId in the URL, nothing uploaded yet), applying the same registry-matching
-// bcl-registry's handleCVUpload uses: match against an existing client
-// (registry_individuals) by name + date of birth, otherwise track the person as a
-// 'Job Applicant' third-party contact — so a CV built here shows up correctly in the
-// registry's Job Applicants / Clients lists from the very first save.
 async function createNewApplicantRecord(cvData: CvData): Promise<{ applicantId: string; individualId: number | null }> {
   const applicantId = crypto.randomUUID();
   const fullName = (cvData.personalInfo?.fullName || '').trim();
@@ -127,7 +107,6 @@ async function createNewApplicantRecord(cvData: CvData): Promise<{ applicantId: 
     date_of_birth: normalizedDob || rawDob || null,
     individual_id: matchedIndividual?.id || null,
     third_party_id: thirdPartyContact?.id || null,
-    // Not null on this table, but a from-scratch CV build has no uploaded source file.
     raw_cv_file_path: '',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -137,11 +116,6 @@ async function createNewApplicantRecord(cvData: CvData): Promise<{ applicantId: 
   return { applicantId, individualId: matchedIndividual?.id || null };
 }
 
-// job_applicant_cvs.applicant_id has no unique/exclusion constraint (only id, the
-// serial primary key, and email/phone_number are actually unique) — a real
-// `.upsert(..., { onConflict: 'applicant_id' })` is therefore not possible; Postgres
-// rejects it outright with 42P10. This does the same insert-or-update by hand: check
-// for an existing row first, then update or insert accordingly.
 async function upsertJobApplicantCvByApplicantId(applicantId: string, fields: Record<string, any>): Promise<void> {
   const { data: existing } = await supabase
     .from('job_applicant_cvs')
@@ -437,24 +411,16 @@ export default function CVGeneratorPage() {
     }
   }, []);
 
-  // Read applicantId from URL params and fetch CV data from Supabase
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const applicantIdParam = params.get('applicantId');
-    // When this is a client-portal link (?portal=true), applicantId is only
-    // needed to identify which record to load/save — it must NOT flip
-    // workflowStep into the internal 'review-edit' UI or strip the portal/
-    // draftId params, both of which would kick the client out of the portal.
     const isPortalMode = params.get('portal') === 'true';
 
-    // Also check legacy sessionStorage fallback
     const raw = sessionStorage.getItem('cv_builder_prefill');
 
     if (applicantIdParam) {
       setApplicantId(applicantIdParam);
-
-      // Fetch the CV record from Supabase
       (async () => {
         try {
           console.log('[CV Builder] Fetching CV record for applicantId:', applicantIdParam);
@@ -483,18 +449,13 @@ export default function CVGeneratorPage() {
           if (record.individual_id) setLinkedIndividualId(record.individual_id);
           originalRecordRef.current = record;
 
-          // PRIORITY: Use bcl_cv_snapshot if available (contains the full edited CV data)
           if (record.bcl_cv_snapshot && Object.keys(record.bcl_cv_snapshot).length > 0) {
             console.log('[CV Builder] Loading from bcl_cv_snapshot (existing CV data)');
             const snapshotData = record.bcl_cv_snapshot;
 
-            // A snapshot already exists in the database for this applicant, so the
-            // Secure Review URL can be generated immediately without forcing another
-            // "Save Draft" step.
             setHasSavedDraft(true);
             setLastDraftName(record.full_name ? `CV - ${record.full_name}` : 'Saved CV');
 
-            // Merge snapshot with EMPTY_CV_DATA to ensure all fields exist
             const mergedData = {
               ...EMPTY_CV_DATA,
               ...snapshotData,
@@ -503,15 +464,12 @@ export default function CVGeneratorPage() {
               skills: (() => {
                 const mappedSkills = Array.isArray(snapshotData.skills)
                   ? snapshotData.skills.map((s: any) => {
-                      // Normalize format: {Skill: "..."} -> {category: "", items: "..."}
                       if (s.Skill || s.skill) {
                         return { category: "", items: s.Skill || s.skill || "" };
                       }
                       return s;
                     })
                   : EMPTY_CV_DATA.skills;
-                // Snapshot entries can exist but be entirely blank (placeholders) —
-                // fall back to the raw raw_cv_extracted_details in that case.
                 if (isSkillsBlank(mappedSkills)) {
                   const fallback = mapSkillsFromExtractedDetails(record.raw_cv_extracted_details || {});
                   if (fallback.length > 0) return fallback;
@@ -683,9 +641,6 @@ export default function CVGeneratorPage() {
                   value: info.value || info.Value || info.description || ""
                 }));
               })(),
-              // Declaration is a fixed BCL statement, not something extracted from the
-              // candidate's uploaded CV — always use our own default text here so it
-              // stays consistent regardless of what the source document contained.
               declaration: DEFAULT_DECLARATION_TEXT,
               includeDeclaration: true,
               verifiedBadge: true
@@ -702,13 +657,8 @@ export default function CVGeneratorPage() {
               achievements_count: prefilledData.achievements.length,
             });
 
-            // Clear localStorage to prevent stale data from interfering
             try { localStorage.removeItem('cv_generator_cvData'); } catch {}
 
-            // No bcl_cv_snapshot saved yet for this applicant — use the prefilled
-            // data from the raw extraction (bcl_cv_snapshot, checked above, is now
-            // the single source of truth for an in-progress draft; there's no
-            // separate storage draft to fall back to).
             setCvData(prefilledData);
             toast.success('CV pre-filled from applicant data. You can now edit and build the CV.');
           }
@@ -855,9 +805,6 @@ export default function CVGeneratorPage() {
     toast.success(`Successfully merged ${mergeCount} updates into the registry!`);
   };
 
-  // Sends the whole CV to the AI to be rewritten/polished in one pass, then merges
-  // the result back in — keeping factual/identity fields (contact info, dates,
-  // declaration, etc.) exactly as they were so the AI can only touch wording.
   const handleAiEnhanceCv = async () => {
     if (isEnhancingCv) return;
     setIsEnhancingCv(true);
@@ -883,19 +830,11 @@ export default function CVGeneratorPage() {
     try {
       await enhancePromise;
     } catch {
-      // toast.promise already surfaced the error to the user
     } finally {
       setIsEnhancingCv(false);
     }
   };
 
-  // Full reset for "Start Building" — clears every piece of current-session
-  // state (including its localStorage cache), not just cvData. Previously
-  // this only reset cvData, so leftover state like hasClientSubmission /
-  // clientSubmission from a prior applicant would still show up under
-  // "Client Submission Received!" on the Collaboration tab of a brand-new
-  // CV. Saved Drafts (cvDrafts) and Resume Versions (cvVersions) are left
-  // alone since those are explicit saves, not session cache.
   const handleStartFromScratch = () => {
     setCvData(EMPTY_CV_DATA);
     setApplicantId(null);
@@ -1015,9 +954,6 @@ export default function CVGeneratorPage() {
     }));
   };
 
-  // Employment-gap answers get their own keyed bucket so they never overwrite
-  // unrelated fields like personalDetails.kenyaStatus (Kenya work-permit status),
-  // which is rendered directly on the CV.
   const handleClientGapNoteChange = (gapKey: string, field: 'reason' | 'detail', value: string) => {
     setClientEdits((prev: any) => ({
       ...prev,
@@ -1031,7 +967,6 @@ export default function CVGeneratorPage() {
     }));
   };
 
-  // Draft functions — all drafts persisted to Supabase storage + bcl_cv_snapshot in database
   const saveDraft = async (name: string, forPortal: boolean = false): Promise<string> => {
     setIsSavingDraft(true);
     const id = (forPortal && currentPortalDraftId) ? currentPortalDraftId : (crypto.randomUUID ? crypto.randomUUID() : `draft-${Date.now()}`);
@@ -1048,14 +983,9 @@ export default function CVGeneratorPage() {
     setCvDrafts(prev => { const filtered = prev.filter(d => d.id !== id); return [newDraft, ...filtered]; });
     if (forPortal) setCurrentPortalDraftId(id);
 
-    // Track if database save succeeded
     let dbSaveSucceeded = false;
 
     try {
-      // Building a CV from scratch (no applicantId yet, e.g. opened via the plain
-      // "Build CV" button rather than an upload or a registry link) — create the
-      // job_applicant_cvs row now so this draft always has somewhere durable to live,
-      // the same way the upload-and-extract flow already does.
       let currentApplicantId = applicantId;
       if (!currentApplicantId) {
         try {
@@ -1072,11 +1002,9 @@ export default function CVGeneratorPage() {
         }
       }
 
-      // Save to database (bcl_cv_snapshot) - this is the sole primary save
       if (currentApplicantId) {
         console.log('[CV Builder] Saving CV data to bcl_cv_snapshot in job_applicant_cvs for applicantId:', currentApplicantId);
-        // Save cvData along with cvSettings and selectedLayout in the snapshot
-        const snapshotPayload = {
+           const snapshotPayload = {
           ...cvData,
           cvSettings,
           selectedLayout,
@@ -1099,10 +1027,6 @@ export default function CVGeneratorPage() {
         }
       }
 
-      // Portal share links are opened by an unauthenticated candidate via a
-      // draftId token decoupled from applicantId (never exposed in that URL), so
-      // they still need their own storage copy — everything else now lives solely
-      // in job_applicant_cvs.
       if (forPortal) {
         try {
           const payload = JSON.stringify(newDraft);
@@ -1129,9 +1053,6 @@ export default function CVGeneratorPage() {
 
   const loadDraft = async (draft: any) => {
     try {
-      // Applicant-linked drafts live in job_applicant_cvs.bcl_cv_snapshot now — try
-      // that first, since it's always the freshest copy (the local `cvDrafts` list
-      // entry can be stale if this draft was last saved from a different tab/device).
       let draftData = null;
       if (applicantId) {
         const { data: record, error: recordError } = await supabase
@@ -1143,7 +1064,6 @@ export default function CVGeneratorPage() {
           draftData = { data: record.bcl_cv_snapshot, cvSettings: record.bcl_cv_snapshot.cvSettings, selectedLayout: record.bcl_cv_snapshot.selectedLayout };
         }
       }
-      // Fallback to cv-drafts path (for standalone/portal drafts)
       if (!draftData) {
         const { data, error } = await supabase.storage
           .from('kyc-documents').download(`cv-drafts/${draft.id}/draft.json`);
@@ -1279,11 +1199,6 @@ export default function CVGeneratorPage() {
           const parsedData = await response.json();
           setExtractionProgress("Populating CV fields...");
 
-          // Merge onto EMPTY_CV_DATA, not initialCVData (the Ajay Yadav demo
-          // profile) — otherwise any field Gemini didn't extract silently
-          // keeps the sample data instead of coming through blank. Also clear
-          // the localStorage cache so a stale previous upload/edit can't leak
-          // into this one, matching the other prefill flows in this file.
           const cleanedData = {
             ...EMPTY_CV_DATA,
             ...parsedData,
@@ -1302,9 +1217,7 @@ export default function CVGeneratorPage() {
             references: Array.isArray(parsedData.references) ? parsedData.references : EMPTY_CV_DATA.references,
             languages: Array.isArray(parsedData.languages) ? parsedData.languages : EMPTY_CV_DATA.languages,
             certifications: Array.isArray(parsedData.certifications) ? parsedData.certifications : EMPTY_CV_DATA.certifications,
-            // Declaration is a fixed BCL statement, never something the AI should extract
-            // or overwrite from the uploaded document — keep our own default here.
-            declaration: EMPTY_CV_DATA.declaration,
+                    declaration: EMPTY_CV_DATA.declaration,
             includeDeclaration: true,
             verifiedBadge: true,
           };
@@ -1314,8 +1227,6 @@ export default function CVGeneratorPage() {
           const enhancedLabel = enhancementLevel !== "none" ? ` (${enhancementLevel} enhancement applied)` : "";
           toast.success(`CV parsed successfully!${enhancedLabel}`);
 
-          // Persist the raw file + extracted data into job_applicant_cvs so the
-          // upload isn't lost if the user navigates away before saving a draft.
           setExtractionProgress("Saving to database...");
           try {
             const finalApplicantId = applicantId || crypto.randomUUID();
@@ -1464,11 +1375,6 @@ export default function CVGeneratorPage() {
       languages: [{ language: 'English', proficiency: 'Professional' }],
     });
 
-    // Persist the Registry link immediately (not just once "Apply to CV" is
-    // clicked) so the master-field write-back control has an individual_id
-    // to attach to as soon as someone is selected, and so re-opening this CV
-    // later still knows who it's linked to. Fire-and-forget: a failed
-    // background persist shouldn't block continuing to "Apply to CV".
     setLinkedIndividualId(individual.id);
     (async () => {
       try {
@@ -1495,11 +1401,6 @@ export default function CVGeneratorPage() {
       ? selectedIndividual.contact_details[0] || {}
       : selectedIndividual.contact_details || {};
 
-    // Master-field-linked fields (configured via "Field Sources") win when
-    // present; every field still falls back to the pre-existing hardcoded
-    // registry mapping when unlinked, so nothing regresses for an admin who
-    // hasn't linked anything yet - same guarantee ec_placeholders shipped
-    // with ("resolution falls back to the existing hardcoded computation").
     const { values: masterValues } = await resolveCvMasterFieldValues(selectedIndividual.id);
 
     setCvData({
@@ -1532,9 +1433,6 @@ export default function CVGeneratorPage() {
     if (pendingPhotoFile) setShowSavePhotoPrompt(true);
     setShowSaveCvPrompt(true);
 
-    // Re-fires the individual_id upsert (idempotent) since this is the
-    // actual "commit" action - covers reselecting a different individual
-    // before applying.
     setLinkedIndividualId(selectedIndividual.id);
     try {
       const currentApplicantId = applicantId || crypto.randomUUID();
@@ -1647,9 +1545,7 @@ export default function CVGeneratorPage() {
     try {
       console.log('[CV Builder] saveCVToDb called:', { applicantId, selectedIndividual: selectedIndividual?.id, linkedIndividualId });
       const cvJson = JSON.stringify(cvData, null, 2);
-      const blob = new Blob([cvJson], { type: 'application/json' });
-
-      // Path A: Save to client's acc_portal_directors_documents (if selectedIndividual)
+      const blob = new Blob([cvJson], { type: 'text/plain' });
       if (selectedIndividual) {
         console.log('[CV Builder] Saving CV to client record:', selectedIndividual.id);
         const filePath = `individual-documents/${selectedIndividual.id}/${CV_DOCUMENT_ID}/cv_${Date.now()}.json`;
@@ -1667,8 +1563,6 @@ export default function CVGeneratorPage() {
         }, { onConflict: 'director_id,file_path' });
       }
 
-      // Path B: Update bcl_cv_snapshot in job_applicant_cvs (if applicantId) — the DB
-      // row is the sole source of truth here, no storage backup needed.
       if (applicantId) {
         console.log('[CV Builder] Saving CV for applicantId:', applicantId);
         console.log('[CV Builder] Updating bcl_cv_snapshot in job_applicant_cvs');
@@ -1691,7 +1585,6 @@ export default function CVGeneratorPage() {
         if (snapshotError) throw snapshotError;
         originalRecordRef.current = { ...(originalRecordRef.current || {}), ...cvUpdatePayload, ...auditLog };
 
-        // If linked client, also save to acc_portal_directors_documents
         if (linkedIndividualId) {
           console.log('[CV Builder] Also saving to linked individual record:', linkedIndividualId);
           const registryPath = `individual-documents/${linkedIndividualId}/${CV_DOCUMENT_ID}/cv_${Date.now()}.json`;
@@ -1720,12 +1613,6 @@ export default function CVGeneratorPage() {
     }
   };
 
-  // Mirrors Employment Contracts' ContractPreview.tsx handleDownloadPdf: the
-  // print target is always the DocumentViewer's portaled print area, already
-  // a direct child of document.body (see DocumentViewer.tsx's createPortal),
-  // so no detach/bodyClassName juggling is needed here - that's only for the
-  // Advanced Export modal's ATS variant, which prints a container it built
-  // itself outside the DocumentViewer.
   const handleDownloadPdf = async () => {
     const element = previewRef.current?.getPrintArea() ?? null;
     if (!element) return;
@@ -1733,8 +1620,6 @@ export default function CVGeneratorPage() {
     setIsDownloadingPdf(true);
     toast.info("Opening print dialog — choose \"Save as PDF\" as the destination.");
 
-    // Chrome's "Save as PDF" suggests document.title as the filename. The
-    // shared printElementAsPdf sets it before printing and restores it after.
     const age = cvData.personalDetails?.dateOfBirth
       ? (() => { const dob = cvData.personalDetails.dateOfBirth; const [d, m, y] = dob.includes('/') ? dob.split('/').map(Number) : [0, 0, Number(dob.split('-')[0])]; const birth = new Date(y, m ? m - 1 : 0, d || 1); return `${Math.floor((Date.now() - birth.getTime()) / (365.25 * 24 * 3600 * 1000))}`; })()
       : '';
@@ -1756,15 +1641,6 @@ export default function CVGeneratorPage() {
     }
   };
 
-  // Mirrors Employment Contracts' ContractPreview.tsx buildOutput(): the
-  // themed HTML/CSS is already word-safe at the CSS level (buildCvDocument's
-  // `wordSafe` option handles font substitution + the mso-* fallback
-  // declarations), but Word's HTML import filter also needs a DOM-level pass -
-  // it forces its own built-in Heading style onto real h1-h6 tags no matter
-  // what the CSS says, and ignores a <table>'s CSS width/padding in favor of
-  // legacy cellpadding/cellspacing/width attributes - so that pass happens
-  // here, in the calling component, exactly where Employment Contracts
-  // performs the equivalent fixups.
   const buildCvWordOutput = async (): Promise<{ blob: Blob; fileName: string } | null> => {
     const doc = await buildCvDocument(cvData, cvSettings, selectedLayout, { wordSafe: true });
     let bodyContent = doc.bodyHtml;

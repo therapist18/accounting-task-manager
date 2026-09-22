@@ -27,7 +27,10 @@ export async function GET(request: NextRequest) {
     `response_type=code&` +
     `scope=${encodeURIComponent(scope)}&` +
     `access_type=offline&` +
-    `prompt=consent`
+    // select_account forces the account chooser every time, even when only one Google account is
+    // signed into the browser — without it Google can silently reuse the last-picked account and
+    // you'd reconnect the same mailbox instead of moving to the next one.
+    `prompt=${encodeURIComponent('consent select_account')}`
 
   console.log('Redirecting to:', authUrl)
   return NextResponse.redirect(authUrl)

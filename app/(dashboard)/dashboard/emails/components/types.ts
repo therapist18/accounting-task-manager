@@ -103,12 +103,6 @@ export interface CategoryOption {
   disposition: Disposition | null
 }
 
-export interface Counts {
-  needs_review: number
-  open_cases: number
-  unassigned_mailboxes: number
-}
-
 export interface StaffOption {
   id: string
   name: string

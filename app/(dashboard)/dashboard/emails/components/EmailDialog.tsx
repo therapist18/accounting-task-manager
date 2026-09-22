@@ -5,13 +5,15 @@ import { toast } from "sonner"
 import { Loader2, Paperclip } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { NativeSelect } from "./NativeSelect"
+import { SearchSelect } from "./SearchSelect"
 import {
   DISPOSITION_LABEL,
   type AttachmentRow,
+  type CaseRow,
   type CategoryOption,
   type Disposition,
   type EmailDetail,
+  type EmailRow,
 } from "./types"
 import { api, fmtDateTime } from "./utils"
 
@@ -19,13 +21,19 @@ export function EmailDialog({
   emailId,
   categories,
   onClose,
-  onChanged,
+  // Merges straight into whichever local copy of this email the page is holding (the Needs Review
+  // list); no refetch of that list is ever needed for a classification change.
+  onEmailChanged,
+  // Only called when this reclassification opened a brand-new case — the PATCH route hands back the
+  // full row it just built, so the page can add it to its case list with no follow-up fetch.
+  onCaseOpened,
   onOpenCase,
 }: {
   emailId: string | null
   categories: CategoryOption[]
   onClose: () => void
-  onChanged: () => void
+  onEmailChanged: (id: string, patch: Partial<EmailRow>) => void
+  onCaseOpened: (c: CaseRow) => void
   onOpenCase: (caseId: string) => void
 }) {
   const [email, setEmail] = useState<EmailDetail | null>(null)
@@ -45,7 +53,7 @@ export function EmailDialog({
         setCategoryKey(res.email.category_key ?? "")
         if (!res.email.is_read) {
           api(`/api/email-center/emails/${emailId}`, { method: "PATCH", body: JSON.stringify({ is_read: true }) })
-            .then(onChanged)
+            .then(() => onEmailChanged(emailId, { is_read: true }))
             .catch(() => {})
         }
       })
@@ -60,12 +68,13 @@ export function EmailDialog({
     if (!email) return
     setSaving(true)
     try {
-      const res = await api<{ case_id: string | null }>(`/api/email-center/emails/${email.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ disposition: disposition || undefined, category_key: categoryKey || undefined }),
-      })
+      const res = await api<{ case_id: string | null; email_patch: Partial<EmailRow>; case: CaseRow | null }>(
+        `/api/email-center/emails/${email.id}`,
+        { method: "PATCH", body: JSON.stringify({ disposition: disposition || undefined, category_key: categoryKey || undefined }) }
+      )
       toast.success("Classification saved.")
-      onChanged()
+      onEmailChanged(email.id, res.email_patch)
+      if (res.case) onCaseOpened(res.case)
       if (res.case_id && !email.case_id) onOpenCase(res.case_id)
       else onClose()
     } catch (e: any) {
@@ -140,19 +149,26 @@ export function EmailDialog({
             <div className="flex flex-wrap items-end gap-3 border-t pt-3">
               <div className="space-y-1">
                 <p className="text-xs text-slate-500">Category</p>
-                <NativeSelect value={categoryKey} onChange={(e) => setCategoryKey(e.target.value)}>
-                  <option value="">—</option>
-                  {categories.map((c) => <option key={c.key} value={c.key}>{c.name}</option>)}
-                </NativeSelect>
+                <SearchSelect
+                  className="w-56"
+                  value={categoryKey}
+                  onChange={setCategoryKey}
+                  placeholder="—"
+                  options={[{ value: "", label: "—" }, ...categories.map((c) => ({ value: c.key, label: c.name }))]}
+                />
               </div>
               <div className="space-y-1">
                 <p className="text-xs text-slate-500">Treat as</p>
-                <NativeSelect value={disposition} onChange={(e) => setDisposition(e.target.value as Disposition)}>
-                  <option value="">—</option>
-                  {(Object.keys(DISPOSITION_LABEL) as Disposition[]).map((d) => (
-                    <option key={d} value={d}>{DISPOSITION_LABEL[d]}</option>
-                  ))}
-                </NativeSelect>
+                <SearchSelect
+                  className="w-48"
+                  value={disposition}
+                  onChange={(v) => setDisposition(v as Disposition)}
+                  placeholder="—"
+                  options={[
+                    { value: "", label: "—" },
+                    ...(Object.keys(DISPOSITION_LABEL) as Disposition[]).map((d) => ({ value: d, label: DISPOSITION_LABEL[d] })),
+                  ]}
+                />
               </div>
               <Button onClick={save} disabled={saving}>
                 {saving && <Loader2 className="w-4 h-4 animate-spin mr-2" />} Save
