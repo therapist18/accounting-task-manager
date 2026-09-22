@@ -351,7 +351,12 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   } else {
     const rule = classifyByRules({ subject, body: text, senderEmail, threadHasCase: !!threadCase })
     const ruleCat = rule ? CATEGORY_BY_KEY.get(rule.categoryKey) : null
-    const needsAi = kra && (!rule || rule.confidence < THRESHOLD || ruleCat?.disposition === "action_required")
+    // AI only runs to extract PDF details (deadline, PIN, signing officer) for a category the rules
+    // are already confident about — never to guess an uncertain category. An email the rules can't
+    // confidently place always ends up in Needs Review regardless of what AI would say, so calling AI
+    // there just to have it also land in Needs Review was spending money without saving a person any
+    // work — those go straight to manual review instead.
+    const needsAi = kra && !!rule && rule.confidence >= THRESHOLD && ruleCat?.disposition === "action_required"
     if (needsAi) {
       ai = await extractWithAi({
         mode: "kra_notice",

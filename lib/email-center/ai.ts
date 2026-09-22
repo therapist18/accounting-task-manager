@@ -21,8 +21,17 @@ export interface AiInput {
 
 // Extracts the Sheet1 fields from a KRA email (and its PDF letter, where the deadline / signing
 // officer / requested documents usually live) or from BCL's reply. Returns null on any failure —
-// callers treat that as "not sure" and route the email to Needs Review instead of guessing.
+// callers treat that as "not sure" and route the email to Needs Review instead of guessing, or fall
+// back to whatever's already in the email (snippet, rule match) for fields AI would have filled in.
+//
+// AI is switched off by default — set EMAIL_AI_ENABLED=true to turn it back on, no other code change
+// needed. Both call sites already treat a null result this way, so disabling it here doesn't change
+// classification (that's pure rules, unaffected) — it only means the deadline/PIN/signing-officer
+// fields on a case, and the promised-date/summary on a BCL reply, are filled in by staff instead of
+// pre-populated from the letter.
 export async function extractWithAi(input: AiInput): Promise<AiExtraction | null> {
+  if (process.env.EMAIL_AI_ENABLED !== "true") return null
+
   const apiKey = process.env.GEMINI_API_KEY ?? process.env.NEXT_PUBLIC_GEMINI_API_KEY
   if (!apiKey) return null
 

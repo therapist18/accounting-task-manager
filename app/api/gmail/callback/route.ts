@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getGmailClient } from '@/lib/gmail/client'
 import { createClient } from '@supabase/supabase-js'
-import { getServiceClient, renewWatch, type AccountRow } from '@/lib/email-center/ingest'
+import { getServiceClient, renewWatch, syncAccount, type AccountRow } from '@/lib/email-center/ingest'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+
+// A first sync can involve a real backfill (Gmail calls + PDF downloads + AI classification for
+// several messages) — give it real room instead of the platform's short default.
+export const maxDuration = 60
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
@@ -48,15 +52,17 @@ export async function GET(request: NextRequest) {
 
     const { access_token, refresh_token, expires_in } = tokenData
 
-    // Fetch Gmail profile to get email address + current historyId
+    // Fetch Gmail profile for the email address only — history_id is deliberately left unset below
+    // (not set to the profile's current historyId) so the sync that follows does a real backfill
+    // instead of an incremental check that would find nothing: history.list only returns changes
+    // *after* a given historyId, so seeding it to "now" would skip every KRA email already sitting
+    // in the mailbox at the moment it's connected.
     const gmail = getGmailClient(access_token, refresh_token)
     console.log('Fetching Gmail profile...')
     const profile = await gmail.users.getProfile({ userId: 'me' })
     const emailAddress = profile.data.emailAddress!
-    const historyId = parseInt(profile.data.historyId ?? '0')
 
     console.log('Connected account:', emailAddress)
-    console.log('History ID:', historyId)
 
     const sb = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -73,6 +79,11 @@ export async function GET(request: NextRequest) {
       last_refresh: new Date().toISOString(),
     }
 
+    // history_id is deliberately absent: on INSERT (a brand-new mailbox) the column is left at its
+    // default (null), which is what makes the sync below do a real backfill. On UPDATE (reconnecting
+    // one that already existed) omitting the key leaves its current cursor untouched — no reason to
+    // force a wasted re-backfill of a mailbox that already has one, and if that cursor turns out to
+    // be stale, the sync's own 404 fallback already handles that.
     const accountPayload = {
       email:              emailAddress,
       label:              emailAddress.split('@')[0],
@@ -80,7 +91,6 @@ export async function GET(request: NextRequest) {
       refresh_token:      refresh_token ?? null,
       token_expiry:       expires_in ? new Date(Date.now() + expires_in * 1000).toISOString() : null,
       status:             'active',
-      history_id:         historyId,
       last_token_refresh: new Date().toISOString(),
       updated_at:         new Date().toISOString(),
     }
@@ -124,17 +134,36 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${APP_URL}/dashboard/emails?error=db_error`)
     }
 
+    const sbSvc = getServiceClient()
+
+    // Sync this one mailbox immediately — no need to wait for the next push or a manual "Sync now".
+    // Runs before renewWatch below: with history_id still unset (see accountPayload above), this
+    // does a real backfill and, on success, sets the cursor itself; renewWatch's own "don't overwrite
+    // an existing history_id" check then leaves that alone. Never blocks the connection itself — a
+    // slow or failed first sync just means "Sync now" still works as a fallback, same as before.
+    let ingested = 0
+    try {
+      const result = await syncAccount(sbSvc, account.id)
+      ingested = result.ingested
+      if (result.error) console.warn('[gmail/callback] initial sync reported an error', result.error)
+    } catch (err) {
+      console.warn('[gmail/callback] initial sync failed', err)
+    }
+
     // Auto-setup Gmail push watch (INBOX + SENT, optional — needs Pub/Sub configured). Shared with
     // the sync path so a freshly-connected mailbox watches the same labels as every other one.
-    await renewWatch(getServiceClient(), account as AccountRow).catch((err) =>
+    await renewWatch(sbSvc, account as AccountRow).catch((err) =>
       console.warn('[gmail/callback] watch setup failed', err)
     )
 
     // connected=true tells the page to jump straight to the Mailboxes tab and toast, so the
     // "Connect Gmail account" button for the next mailbox is immediately in view — connecting
     // 40+ accounts back to back stays a two-click loop (Connect → pick account → Allow → repeat)
-    // instead of hunting back to the tab each time.
-    return NextResponse.redirect(`${APP_URL}/dashboard/emails?connected=true&email=${encodeURIComponent(emailAddress)}`)
+    // instead of hunting back to the tab each time. synced carries the initial sync's count so that
+    // toast can say what was actually found, not just "connected".
+    return NextResponse.redirect(
+      `${APP_URL}/dashboard/emails?connected=true&email=${encodeURIComponent(emailAddress)}&synced=${ingested}`
+    )
   } catch (err) {
     console.error('[gmail/callback]', err)
     return NextResponse.redirect(`${APP_URL}/dashboard/emails?error=server_error`)

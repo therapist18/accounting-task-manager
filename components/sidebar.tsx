@@ -6,7 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { AppWindow, BarChart3, BookOpen, Calendar, CheckSquare, ChevronDown, ChevronRight, Database, FileText, HelpCircle, LayoutDashboard, LogOut, Mail, Moon, PanelLeftClose, PanelLeftOpen, PlusCircle, Search, Settings, Settings2, Sun, Users, X } from "lucide-react";
+import { AppWindow, BarChart3, BookOpen, Calendar, CheckSquare, ChevronDown, ChevronRight, Database, FileText, LayoutDashboard, LogOut, Mail, Moon, PanelLeftClose, PanelLeftOpen, PlusCircle, Search, Settings, Settings2, Sun, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -445,8 +445,7 @@ const AppSidebar = () => {
                 {/* Footer Section */}
                 <div className={cn("mt-auto p-4 border-t border-white/20", isCollapsed && "p-2")}>
                     <div className="flex flex-col gap-1">
-                        <NavItemComponent isCollapsed={isCollapsed} href="/settings" icon={Settings} label="Settings" className={utilityButtonClass} />
-                        <NavItemComponent isCollapsed={isCollapsed} href="/help" icon={HelpCircle} label="Support" className={utilityButtonClass} />
+                        <NavItemComponent isCollapsed={isCollapsed} href="/dashboard/settings/access-controls" icon={Settings} label="Settings" className={utilityButtonClass} />
 
                         {mounted && (
                             <button className={cn(utilityButtonClass, "mb-2")} onClick={toggleTheme}>

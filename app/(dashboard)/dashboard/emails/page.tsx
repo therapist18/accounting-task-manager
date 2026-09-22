@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, Loader2, Mail, Plus, RefreshCw, RotateCcw, Search, Wifi, WifiOff } from "lucide-react"
+import { AlertTriangle, Columns3, List, Loader2, Mail, Plus, RefreshCw, RotateCcw, Search, Wifi, WifiOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -18,6 +18,7 @@ import {
 } from "./components/chrome"
 import { EmailDialog } from "./components/EmailDialog"
 import { EmailList } from "./components/EmailList"
+import { EmailSidebarView } from "./components/EmailSidebarView"
 import { MailboxesPanel } from "./components/MailboxesPanel"
 import { NewCaseDialog } from "./components/NewCaseDialog"
 import { SearchSelect } from "./components/SearchSelect"
@@ -52,6 +53,13 @@ export default function EmailCenterPage() {
   const [assignee, setAssignee] = useState("")
   const [search, setSearch] = useState("")
   const [caseStatus, setCaseStatus] = useState<"open" | "closed" | "all">("open")
+
+  // Needs Review has two views: the flat list (uses the shared `company` filter above, like every
+  // other tab) and a mailbox-client-style sidebar (its own, separate company selection — switching
+  // to this view doesn't touch or get touched by the shared filter, and switching tabs never loses
+  // either one's state).
+  const [reviewView, setReviewView] = useState<"list" | "sidebar">("list")
+  const [reviewSidebarCompany, setReviewSidebarCompany] = useState("")
 
   const [accounts, setAccounts] = useState<AccountRow[]>([])
   const [companies, setCompanies] = useState<CompanyOption[]>([])
@@ -136,13 +144,17 @@ export default function EmailCenterPage() {
 
   // Returning from Google's OAuth screen (see /api/gmail/callback): surface the result and jump to
   // the Mailboxes tab so the "Connect Gmail account" button for the next mailbox is right there.
-  // The mailbox itself is already in `accounts` from the mount-time loadAll() above.
+  // The mailbox — and anything its own first sync just found — is already reflected in the
+  // mount-time loadAll() above, since the callback syncs the mailbox before redirecting here.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const connectedEmail = params.get("email")
+    const synced = params.get("synced")
     const error = params.get("error")
     if (params.get("connected") === "true") {
-      toast.success(connectedEmail ? `Connected ${connectedEmail}.` : "Mailbox connected.")
+      const n = synced !== null ? Number(synced) : null
+      const suffix = n ? ` — ${n} email(s) pulled in already.` : "."
+      toast.success((connectedEmail ? `Connected ${connectedEmail}` : "Mailbox connected") + suffix)
       setTab("mailboxes")
     } else if (error) {
       toast.error(`Could not connect: ${error.replace(/_/g, " ")}`)
@@ -226,6 +238,14 @@ export default function EmailCenterPage() {
       return true
     })
   }, [emails, company, search])
+
+  // Search-only (no company filter) — the sidebar view does its own company slicing from this, via
+  // reviewSidebarCompany, independent of the shared `company` filter the list view uses above.
+  const searchedEmails = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return emails
+    return emails.filter((e) => `${e.subject ?? ""} ${e.sender_email} ${e.snippet ?? ""}`.toLowerCase().includes(q))
+  }, [emails, search])
 
   // ── counts, derived from what's already loaded — no separate server round trip for these ──
 
@@ -312,14 +332,43 @@ export default function EmailCenterPage() {
             </div>
 
             <div className="flex items-center gap-2.5 flex-wrap shrink-0">
-              <SearchSelect
-                variant="pill"
-                className="w-52"
-                value={company}
-                onChange={setCompany}
-                placeholder="All companies"
-                options={[{ value: "", label: "All companies" }, ...companies.map((c) => ({ value: c.id, label: c.company_name }))]}
-              />
+              {/* In the sidebar view, company selection happens in the sidebar itself — this filter
+                  would just be a second, disconnected way to do the same thing. */}
+              {!(tab === "review" && reviewView === "sidebar") && (
+                <SearchSelect
+                  variant="pill"
+                  className="w-52"
+                  value={company}
+                  onChange={setCompany}
+                  placeholder="All companies"
+                  options={[{ value: "", label: "All companies" }, ...companies.map((c) => ({ value: c.id, label: c.company_name }))]}
+                />
+              )}
+
+              {tab === "review" && (
+                <div className="flex p-0.5 bg-slate-100 rounded-full border border-slate-200">
+                  <button
+                    onClick={() => setReviewView("list")}
+                    className={cn(
+                      "h-9 px-3 rounded-full text-sm font-bold flex items-center gap-1.5 transition-colors",
+                      reviewView === "list" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                    )}
+                    title="Flat list"
+                  >
+                    <List className="h-3.5 w-3.5" /> List
+                  </button>
+                  <button
+                    onClick={() => setReviewView("sidebar")}
+                    className={cn(
+                      "h-9 px-3 rounded-full text-sm font-bold flex items-center gap-1.5 transition-colors",
+                      reviewView === "sidebar" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                    )}
+                    title="By company, mailbox-style"
+                  >
+                    <Columns3 className="h-3.5 w-3.5" /> By company
+                  </button>
+                </div>
+              )}
 
               {tab === "cases" && (
                 <>
@@ -365,10 +414,20 @@ export default function EmailCenterPage() {
         ) : (
           <>
             {tab === "cases" && <CasesTable cases={filteredCases} onOpen={(c) => setOpenCaseId(c.id)} />}
-            {tab === "review" && (
+            {tab === "review" && reviewView === "list" && (
               <EmailList
                 emails={filteredEmails}
                 categories={categories}
+                onOpen={(e) => setOpenEmailId(e.id)}
+                onQuickClassify={quickClassify}
+              />
+            )}
+            {tab === "review" && reviewView === "sidebar" && (
+              <EmailSidebarView
+                emails={searchedEmails}
+                categories={categories}
+                selectedCompany={reviewSidebarCompany}
+                onSelectCompany={setReviewSidebarCompany}
                 onOpen={(e) => setOpenEmailId(e.id)}
                 onQuickClassify={quickClassify}
               />
