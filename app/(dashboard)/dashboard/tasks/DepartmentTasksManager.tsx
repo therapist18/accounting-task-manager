@@ -25,7 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import * as XLSX from 'xlsx'
-import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, invalidateAllDocumentsCache, fetchAllKycFields, fetchKycDocument, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document, fetchTasksDuplicate, fetchDocumentWorkflowLogs, REQUIREMENTS_LOCK_STAGE_IDS, STAGE_TAB_LINKS, captureRequirementsDocumentsSnapshot, fetchUploadedDocumentsForTasks, getLinkedDocumentsForTaskStage, fetchClassRequirements } from "./utils/taskManagerData"
+import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, invalidateAllDocumentsCache, fetchAllKycFields, fetchKycDocument, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document, fetchTasksDuplicate, fetchDocumentWorkflowLogs, REQUIREMENTS_LOCK_STAGE_IDS, STAGE_TAB_LINKS, captureRequirementsDocumentsSnapshot, fetchUploadedDocumentsForTasks, getLinkedDocumentsForTaskStage, fetchClassRequirements, hasAvailableDocumentForStage, WRITE_UP_STAGE_ID, ENDORSEMENT_STAGE_IDS } from "./utils/taskManagerData"
 import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog';
 import { StandardTable } from './overall-view/StandardTable';
 import { EnhancedTable } from './overall-view/EnhancedTable';
@@ -2813,6 +2813,13 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     const stageData = task.stages?.[row.stage.id];
     const cellValue = stageData?.date || stageData?.status || null;
     const isLocked = isReadOnly || task.status === 'cancel';
+    // Only the Write Up/Endorsement stages, per the ask — an unlinked-but-available document is a
+    // much narrower/rarer signal elsewhere and this check (while cheap) is still per-cell, so it's
+    // not run for every stage in the table.
+    const isWriteUpOrEndorsementStage = row.stage?.id === WRITE_UP_STAGE_ID || ENDORSEMENT_STAGE_IDS.includes(row.stage?.id);
+    const hasAvailableDocToLink = isWriteUpOrEndorsementStage
+      ? hasAvailableDocumentForStage(task, row.stage, allDocuments, tasks)
+      : false;
 
     return (
       <EditableStageCell
@@ -2825,6 +2832,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         onDocumentUpload={isLocked ? undefined : handleStageDocumentUpload}
         onShowDocuments={handleViewDocument}
         requiresUpload={requiresUpload}
+        hasAvailableDocToLink={hasAvailableDocToLink}
         departments={departments}
         enhancedTaskData={enhancedTasksData.get(task.id?.toString())}
         onAutomationClick={isLocked ? undefined : (e) => handleAutomationClick(e, row.stage, task.id)}

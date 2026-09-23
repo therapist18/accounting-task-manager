@@ -139,19 +139,19 @@ export const APPROVAL_LABEL: Record<ApprovalStatus, string> = {
 // tabs/buttons on the custom-blue accent, soft-tint status badges) so this module reads as part of
 // the same app instead of a bolted-on page.
 
-export const TAB_LIST_CLASS = "bg-slate-100 p-1 rounded-full border border-slate-200 flex-wrap"
+export const TAB_LIST_CLASS = "bg-slate-100/90 p-0.5 rounded-lg border border-slate-200/80 flex-wrap gap-0.5"
 export const TAB_TRIGGER_CLASS =
-  "group gap-2 rounded-full px-4 h-9 text-sm font-bold text-slate-600 hover:text-slate-900 hover:bg-white transition-colors data-[state=active]:bg-custom-blue data-[state=active]:text-white data-[state=active]:shadow-sm"
+  "group gap-1.5 rounded-md px-3 h-7 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-white/70 transition-all data-[state=active]:bg-custom-blue data-[state=active]:text-white data-[state=active]:shadow-xs"
 export const COUNT_BADGE_CLASS =
-  "inline-flex items-center justify-center font-bold tabular-nums px-2.5 py-0.5 rounded-full text-xs min-w-[1.375rem] leading-none shadow-sm bg-custom-blue text-white group-data-[state=active]:bg-white/25 group-data-[state=active]:text-white"
+  "inline-flex items-center justify-center font-semibold tabular-nums px-1.5 py-0.5 rounded-full text-[10px] min-w-[1.125rem] leading-none bg-slate-200 text-slate-700 group-data-[state=active]:bg-white/20 group-data-[state=active]:text-white"
 export const URGENT_BADGE_CLASS =
-  "inline-flex items-center justify-center font-bold tabular-nums px-2.5 py-0.5 rounded-full text-xs min-w-[1.375rem] leading-none shadow-sm bg-amber-500 text-white"
+  "inline-flex items-center justify-center font-semibold tabular-nums px-1.5 py-0.5 rounded-full text-[10px] min-w-[1.125rem] leading-none bg-amber-500 text-white"
 
 export const PILL_BUTTON_CLASS =
-  "h-9 px-4 rounded-full text-sm font-bold gap-2 border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
+  "h-8 px-3 rounded-md text-xs font-semibold gap-1.5 border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-all shadow-none"
 export const PILL_BUTTON_ACTIVE_CLASS = "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue hover:text-white"
 export const PRIMARY_PILL_BUTTON_CLASS =
-  "h-10 px-6 rounded-full text-sm font-bold gap-2 text-white shadow-md transition-all disabled:opacity-70"
+  "h-8 px-3.5 rounded-md text-xs font-semibold gap-1.5 text-white shadow-xs transition-all disabled:opacity-70 bg-custom-blue hover:bg-custom-blue/90"
 
 // Soft pill badges (bg-*-50 / text-*-700 / border-*-200) — same convention as the passport module's
 // STEP_BADGE_CLASSES, gentler than solid-fill badges for a table with many rows.
@@ -250,8 +250,7 @@ export async function api<T = any>(url: string, init?: RequestInit): Promise<T> 
 // Thin wrapper over the app's existing SearchableSelect (Popover + Command, already used across
 // other modules) so every dropdown in this module — company/staff pickers with long, growing lists
 // especially — is searchable instead of a plain <select>, with one place to keep the styling
-// consistent. `variant="pill"` matches the page-level filter bar's rounded-full chrome; dialogs use
-// the default (standard-radius) look, same restraint the rest of the app's dialogs use.
+// consistent. Sized to match IDM's compact, clean h-8 inputs.
 export function SearchSelect({
   value,
   onChange,
@@ -280,7 +279,8 @@ export function SearchSelect({
       disabled={disabled}
       className={className}
       buttonClassName={cn(
-        variant === "pill" && "h-10 rounded-full border-slate-300 bg-white text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-50",
+        "h-8 text-xs font-medium rounded-md border-slate-200 bg-white text-slate-700 shadow-none hover:bg-slate-50 focus-visible:ring-1 focus-visible:ring-custom-blue",
+        variant === "pill" && "rounded-md",
         error && "border-red-300 text-red-600"
       )}
     />

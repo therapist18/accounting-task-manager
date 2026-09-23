@@ -7,7 +7,7 @@
 //                   read and DB write only for emails that belong to a KRA matter or need review.
 //                   Noise, acknowledgements and certificates are never stored — they stay in Gmail.
 
-import { createClient, type SupabaseClient } from "@supabase/supabase-js"
+import type { SupabaseClient } from "@supabase/supabase-js"
 import type { gmail_v1 } from "googleapis"
 import { getGmailClient, parseEmailHeaders } from "@/lib/gmail/client"
 import { extractWithAi } from "./ai"
@@ -26,10 +26,6 @@ const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
 const LOCK_MS = 90_000
 const MAX_PASSES = 3
 const BUCKET = "email-attachments"
-
-export function getServiceClient(): SupabaseClient {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-}
 
 export interface AccountRow {
   id: string

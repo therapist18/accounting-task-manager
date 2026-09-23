@@ -77,6 +77,11 @@ interface EditableStageCellProps {
   // and anyone with that permission pass true straight through hasPermission) rather than
   // fetched per-cell, so this is a plain prop, not a hook call in here.
   enforceStageOrder?: boolean
+  // Write Up/Endorsement stages only (see taskManagerData.ts's hasAvailableDocumentForStage) —
+  // this individual has an uploaded document matching the stage's requirement that isn't linked
+  // to any task yet. Computed by the parent (it already has allDocuments/tasks loaded) rather
+  // than fetched per-cell.
+  hasAvailableDocToLink?: boolean
 }
 
 const documentFieldsCache = new Map<string, { fields: any[], timestamp: number }>();
@@ -133,7 +138,7 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[] = [])
   }
 };
 
-export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, enhancedTaskData, renderMode = 'date', taskName, clientName, getKycFields, kycDocuments = new Map(), onFetchData, onDocumentTypeFixed, officers = [], onOfficerChange, readOnly = false, onOpenRequirements, showTime = true, previewOnly = false, enforceStageOrder = false }: EditableStageCellProps) {
+export default function EditableStageCell({ stage, stages = [], task, value, onSave, onDocumentUpload, onShowDocuments, allDocuments = [], isDocumentRow = false, linkedDocuments = [], documentData = null, departments, enhancedTaskData, renderMode = 'date', taskName, clientName, getKycFields, kycDocuments = new Map(), onFetchData, onDocumentTypeFixed, officers = [], onOfficerChange, readOnly = false, onOpenRequirements, showTime = true, previewOnly = false, enforceStageOrder = false, hasAvailableDocToLink = false }: EditableStageCellProps) {
   const { user: currentUser } = useCurrentUser();
   const actor = auditActor(currentUser);
   const [isEditing, setIsEditing] = useState(false);
@@ -2243,9 +2248,23 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   // (renderCellContent's isLegacyMode consumers, or 'status' in the split layout).
   const showFirstEmptyIndicator = isFirstEmptyStage &&
     (renderMode === 'date' || renderMode === 'actions' || renderMode === 'combined' || renderMode === 'status');
+  // Same gating as showFirstEmptyIndicator (avoids repeating once per sub-column in the
+  // transposed 4-column layout) — hasAvailableDocToLink is already false once this stage has a
+  // linked document (see taskManagerData.ts's hasAvailableDocumentForStage), so this never
+  // overlaps a completed/linked cell.
+  const showAvailableDocIndicator = hasAvailableDocToLink &&
+    (renderMode === 'date' || renderMode === 'actions' || renderMode === 'combined' || renderMode === 'status');
 
   return (
     <div className="relative flex items-center min-h-[28px] py-0.5" data-stage-cell={`${task?.id}::${stage?.id}`}>
+      {showAvailableDocIndicator && (
+        <Link2
+          className="absolute -top-1.5 -right-1.5 h-3.5 w-3.5 text-blue-600 bg-blue-100 rounded-full p-0.5 shadow pointer-events-none z-10"
+          aria-label="An uploaded document is available to link to this stage"
+        >
+          <title>This person has an uploaded document that isn't linked to a task yet — open Link Source Documents to attach it here.</title>
+        </Link2>
+      )}
       {showFirstEmptyIndicator && (
         <AlertTriangle
           className="absolute -top-2 -left-2 h-5 w-5 text-amber-500 fill-amber-100 animate-bounce drop-shadow pointer-events-none z-10"

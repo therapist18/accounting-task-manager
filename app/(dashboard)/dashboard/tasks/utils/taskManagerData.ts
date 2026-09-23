@@ -1136,6 +1136,62 @@ export const collectTaskTriggerDocumentIds = (sourceDocumentMap: any): Set<strin
   return triggerIds;
 };
 
+/**
+ * Client-side-only "does this task's stage have an eligible existing document sitting unlinked"
+ * check — for EditableStageCell's small indicator on the Write Up/Endorsement stage cells in
+ * DepartmentTasksManager's table. Deliberately lighter than getDocumentLinkAvailabilityContext/
+ * isDocumentAvailableForLinking (which query document_workflow_logs and do a fresh per-task
+ * Supabase call): this only uses data the table already has loaded — allDocuments and the current
+ * department/subdepartment's own task list — so it's cheap enough to run per cell across a whole
+ * table render. It's a hint to go open Link Source Documents, not the authoritative answer that
+ * dialog itself computes when actually linking (which also checks workflow-log trigger docs).
+ */
+export const hasAvailableDocumentForStage = (
+  task: {
+    id: string | number;
+    individual_id?: string | number;
+    source_document_id?: Record<string, any>;
+    stages?: Record<string, any>;
+  },
+  stage: { id: string; documents?: any[] },
+  allDocuments: Array<{ id: string | number; director_id?: string | number; document_id?: string }>,
+  allTasks: Array<{ id: string | number; stages?: Record<string, any> }>,
+): boolean => {
+  // Already linked on this task — nothing to flag.
+  const existingDocs = task.stages?.[stage.id]?.documents;
+  if (existingDocs && Object.keys(existingDocs).length > 0) return false;
+  if (!task.individual_id) return false;
+
+  const applicableKycIds = new Set(
+    (stage.documents || [])
+      .filter((doc: any) => isStageDocumentApplicableToTask(doc, task))
+      .map((doc: any) => doc.kycId)
+      .filter(Boolean),
+  );
+  if (applicableKycIds.size === 0) return false;
+
+  const currentTaskTriggerIds = collectTaskTriggerDocumentIds(task.source_document_id);
+
+  const candidateDocs = allDocuments.filter(
+    (d) => String(d.director_id) === String(task.individual_id) && applicableKycIds.has(String(d.document_id)),
+  );
+  if (candidateDocs.length === 0) return false;
+
+  return candidateDocs.some((doc) => {
+    const docId = String(doc.id);
+    if (currentTaskTriggerIds.has(docId)) return false;
+    const linkedElsewhere = allTasks.some((otherTask) => {
+      if (String(otherTask.id) === String(task.id)) return false;
+      return Object.values(otherTask.stages || {}).some((stageData: any) =>
+        Object.values(stageData?.documents || {}).some(
+          (stageDoc: any) => String(stageDoc?.id) === docId || String(stageDoc?.linked_document_id) === docId,
+        ),
+      );
+    });
+    return !linkedElsewhere;
+  });
+};
+
 export interface DocumentLinkAvailabilityContext {
   otherTasksData: any[];
   workflowDocMap: Record<string, any>;
@@ -1409,12 +1465,21 @@ export const buildStageUnlinkUpdate = (params: {
  * StageUploadDialog so LinkSourceDocumentDialog (which can also complete the Write Up/
  * Endorsement stages) resolves the same workflow logs the same way instead of running its own
  * looser version of this.
+ *
+ * relatedDocumentTypeIds gets merged into each resolved log's payload.relatedDocumentTypeIds.
+ * That field is what bcl-registry's Individual Document Manager actually matches a document
+ * column against to decide its workflow-status badge (see documentWorkflowEngine.ts's
+ * matchesRecord — it checks relatedDocumentTypeIds before falling back to the log's own single
+ * documentTypeId/uploadedDocId), so a resolution recorded here only shows up for OTHER document
+ * types produced by the same task (e.g. a Write Up PDF's Passport Endorsement) if their type ids
+ * are present in this list — appending a resolution object alone does nothing for them.
  */
 export const resolveOriginalDocumentWorkflow = async (
   task: { id: string | number; individual_id?: number | string },
   newDocumentId: string | number,
   documentTypeId: string,
-  uploaderId: string | null
+  uploaderId: string | null,
+  relatedDocumentTypeIds: string[] = []
 ): Promise<void> => {
   try {
     const { data: existingLogs, error: logsError } = await supabase
@@ -1453,8 +1518,16 @@ export const resolveOriginalDocumentWorkflow = async (
           return t;
         })
         : [];
+      const existingRelatedIds = Array.isArray(logToResolve.payload?.relatedDocumentTypeIds)
+        ? logToResolve.payload.relatedDocumentTypeIds.map(String)
+        : [];
+      const mergedRelatedIds = Array.from(new Set(
+        [...existingRelatedIds, documentTypeId, ...relatedDocumentTypeIds].filter(Boolean).map(String)
+      ));
+
       const updatedPayload = {
         ...(logToResolve.payload || {}),
+        relatedDocumentTypeIds: mergedRelatedIds,
         activeWorkflow: {
           ...(logToResolve.payload?.activeWorkflow || {}),
           canProceed: false,
@@ -1491,13 +1564,68 @@ export const resolveOriginalDocumentWorkflow = async (
 };
 
 /**
+ * If either the Write Up document or its Endorsement counterpart already has an existing
+ * document_workflow_logs row (most commonly a resolution recorded manually on the registry
+ * side, via ResolutionDialog or the "Sync with Paired Document" action there), attaches the
+ * OTHER document to that SAME log's payload.pairedDocuments. Mirrors bcl-registry's
+ * workflowService.findWorkflowRecord + setPairedDocuments exactly — this is the task-manager
+ * side firing that same sync automatically at the moment it learns the precise pairing (both
+ * stages just completed together), instead of requiring someone to click the registry's manual
+ * action afterward. Does nothing if NEITHER document has an existing log yet — there's no
+ * resolution to share between them.
+ */
+const syncPairedDocumentWorkflow = async (
+  individualId: string | number,
+  writeUpDoc: { documentTypeId: string; uploadedDocId: string } | null,
+  endorsementDoc: { documentTypeId: string; uploadedDocId: string } | null,
+): Promise<void> => {
+  if (!writeUpDoc?.uploadedDocId || !endorsementDoc?.uploadedDocId) return;
+  try {
+    const { data: existingLogs, error } = await supabase
+      .from('document_workflow_logs')
+      .select('id, payload, uploaded_doc_id, updated_at')
+      .eq('individual_id', individualId)
+      .in('uploaded_doc_id', [writeUpDoc.uploadedDocId, endorsementDoc.uploadedDocId])
+      .order('updated_at', { ascending: false });
+
+    if (error) throw error;
+    if (!existingLogs || existingLogs.length === 0) return;
+
+    // If both documents somehow already have their own separate log, prefer the more recently
+    // touched one as the surviving shared record — same "stays anchored, doesn't create a
+    // second one" principle the registry side's findWorkflowRecord follows.
+    const targetLog = existingLogs[0];
+
+    const existingPaired: Array<{ documentTypeId: string; uploadedDocId: string }> = Array.isArray(targetLog.payload?.pairedDocuments)
+      ? targetLog.payload.pairedDocuments
+      : [];
+    const key = (p: { documentTypeId: string; uploadedDocId: string }) => `${p.documentTypeId}::${p.uploadedDocId}`;
+    const merged = new Map(existingPaired.map((p) => [key(p), p]));
+    [writeUpDoc, endorsementDoc].forEach((p) => merged.set(key(p), p));
+
+    const { error: updateError } = await supabase
+      .from('document_workflow_logs')
+      .update({
+        payload: { ...(targetLog.payload || {}), pairedDocuments: Array.from(merged.values()) },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', targetLog.id);
+    if (updateError) throw updateError;
+  } catch (error) {
+    console.error('Error syncing paired document workflow:', error);
+  }
+};
+
+/**
  * After a batch of stage updates lands (any of which may be the Write Up or an Endorsement
  * stage), fires resolveOriginalDocumentWorkflow exactly once, pointed at the Write Up document,
  * the moment BOTH stages are complete — whichever of the two completes second, in either order.
  * Guards against re-firing on a later re-save of a stage that was already done before this save.
  * Shared so StageUploadDialog and LinkSourceDocumentDialog trigger this renewal pairing
  * identically instead of StageUploadDialog's stage-pairing gate vs. LinkSourceDocumentDialog's
- * old per-document, un-paired trigger.
+ * old per-document, un-paired trigger. Also fires syncPairedDocumentWorkflow so the two
+ * documents' OWN resolutions (not just the original triggering document's) stay in sync with
+ * each other, independent of whether a triggering log exists at all.
  */
 export const maybeResolveWriteUpWorkflowPairing = async (params: {
   task: { id: string | number; individual_id?: number | string; stages?: Record<string, any>; linked_document_type_id?: string };
@@ -1531,10 +1659,41 @@ export const maybeResolveWriteUpWorkflowPairing = async (params: {
         null;
       const finalDocId = workflowTargetDocument?.id || null;
 
+      // Independent of whether a triggering log exists (resolveOriginalDocumentWorkflow below
+      // requires one) — if either document already has its own resolution, attach the other to
+      // it. See syncPairedDocumentWorkflow.
+      if (task.individual_id) {
+        const endorsementDocuments = ENDORSEMENT_STAGE_IDS.flatMap((stageId) =>
+          Object.values(updatedStages[stageId]?.documents || {})
+        ) as any[];
+        const endorsementTargetDocument = endorsementDocuments[0] || null;
+
+        await syncPairedDocumentWorkflow(
+          task.individual_id,
+          (finalDocId && workflowTargetDocument?.document_id)
+            ? { documentTypeId: workflowTargetDocument.document_id, uploadedDocId: finalDocId }
+            : null,
+          (endorsementTargetDocument?.id && endorsementTargetDocument?.document_id)
+            ? { documentTypeId: endorsementTargetDocument.document_id, uploadedDocId: endorsementTargetDocument.id }
+            : null,
+        );
+      }
+
       if (finalDocId) {
         const resolvedDocumentTypeId = workflowTargetDocument?.document_id || task.linked_document_type_id;
         if (resolvedDocumentTypeId) {
-          await resolveOriginalDocumentWorkflow(task, finalDocId, resolvedDocumentTypeId, uploaderId);
+          // Every document type this Write Up/Endorsement pair produces — not just the one the
+          // resolution is filed against — so bcl-registry shows the SAME workflow status for
+          // both (e.g. the Endorsement column, not just the Write Up PDF's own column).
+          const endorsementDocumentTypeIds = ENDORSEMENT_STAGE_IDS.flatMap((stageId) =>
+            Object.values(updatedStages[stageId]?.documents || {}).map((doc: any) => doc.document_id)
+          );
+          const relatedDocumentTypeIds = [
+            ...writeUpDocuments.map((doc: any) => doc.document_id),
+            ...endorsementDocumentTypeIds,
+          ].filter(Boolean);
+
+          await resolveOriginalDocumentWorkflow(task, finalDocId, resolvedDocumentTypeId, uploaderId, relatedDocumentTypeIds);
         }
       }
     }

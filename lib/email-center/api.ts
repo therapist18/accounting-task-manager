@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { ensurePermission } from "@/lib/auth/access-controls"
 import { requireAppSession } from "@/lib/auth/session"
 import { toAuthErrorResponse } from "@/lib/auth/errors"
-import { getServiceClient } from "./ingest"
+import { getServiceClient } from "./service"
 import type { Actor } from "./types"
 
 // Every /api/email-center route authenticates the session user and requires emails.view, then talks

@@ -20,6 +20,30 @@ const sessionMaxAgeMs = Number.parseInt(
   10
 );
 
+// Short-TTL in-memory cache for verified sessions. Every authenticated call currently pays a full
+// chain on each request: Firebase verifySessionCookie (a network RPC to Google) + the lookup that
+// maps the token uid to a scanner_users row. In a page that fires several API calls in parallel
+// (and where every dialog save is its own request), that fixed cost stacks up and makes simple
+// PATCHes feel sluggish. Caching the resolved session for a minute means consecutive requests from
+// the same cookie skip both lookups entirely. Revocations are only reflected within the TTL — an
+// acceptable trade for internal tooling; the cookie, permissions and DB rows are always still
+// re-read fresh by each route's own queries.
+const SESSION_CACHE_TTL_MS = 60_000;
+const sessionCache = new Map<string, { session: AppSession; expiresAt: number }>();
+
+function getCachedSession(cookie: string): AppSession | null {
+  const entry = sessionCache.get(cookie);
+  if (!entry) return null;
+  if (entry.expiresAt > Date.now()) return entry.session;
+  sessionCache.delete(cookie);
+  return null;
+}
+
+function setCachedSession(cookie: string, session: AppSession) {
+  if (sessionCache.size > 512) sessionCache.clear(); // crude bound for long-lived processes
+  sessionCache.set(cookie, { session, expiresAt: Date.now() + SESSION_CACHE_TTL_MS });
+}
+
 function parseCookieHeader(cookieHeader: string | null, name: string): string | null {
   if (!cookieHeader) return null;
   for (const pair of cookieHeader.split(";").map((p) => p.trim())) {
@@ -67,11 +91,16 @@ export async function getAppSessionFromRequest(request: Request): Promise<AppSes
   );
   if (!sessionCookie) return null;
 
+  const cached = getCachedSession(sessionCookie);
+  if (cached) return cached;
+
   try {
     const decoded = await getFirebaseAdminAuth().verifySessionCookie(sessionCookie, false);
     const user = await resolveUserFromVerifiedToken(decoded);
     if (!user || !user.isActive) return null;
-    return { tokenUid: decoded.uid, user };
+    const session = { tokenUid: decoded.uid, user };
+    setCachedSession(sessionCookie, session);
+    return session;
   } catch {
     return null;
   }
@@ -82,11 +111,16 @@ export async function getServerAppSession(): Promise<AppSession | null> {
   const sessionCookie = cookieStore.get(AUTH_SESSION_COOKIE_NAME)?.value;
   if (!sessionCookie) return null;
 
+  const cached = getCachedSession(sessionCookie);
+  if (cached) return cached;
+
   try {
     const decoded = await getFirebaseAdminAuth().verifySessionCookie(sessionCookie, false);
     const user = await resolveUserFromVerifiedToken(decoded);
     if (!user || !user.isActive) return null;
-    return { tokenUid: decoded.uid, user };
+    const session = { tokenUid: decoded.uid, user };
+    setCachedSession(sessionCookie, session);
+    return session;
   } catch {
     return null;
   }

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getGmailClient } from '@/lib/gmail/client'
 import { createClient } from '@supabase/supabase-js'
-import { getServiceClient, renewWatch, syncAccount, type AccountRow } from '@/lib/email-center/ingest'
+import { getServiceClient } from '@/lib/email-center/service'
+import { renewWatch, syncAccount, type AccountRow } from '@/lib/email-center/ingest'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 

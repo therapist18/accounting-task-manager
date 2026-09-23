@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
-import { Loader2, Paperclip } from "lucide-react"
+import { Loader2, Mail, Paperclip } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
@@ -79,37 +79,49 @@ export function EmailDialog({
 
   return (
     <Dialog open={!!emailId} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[88vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="pr-8 text-base leading-snug">{email?.subject || "Email"}</DialogTitle>
-        </DialogHeader>
+      <DialogContent className="max-w-3xl max-h-[88vh] p-0 gap-0 border border-slate-200 shadow-xl rounded-xl overflow-hidden bg-white flex flex-col">
+        <div className="border-b border-slate-200/80 bg-white px-6 py-4 shrink-0">
+          <DialogHeader className="gap-1.5">
+            <div className="flex items-center gap-3 pr-8">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-custom-blue/10 text-custom-blue shrink-0">
+                <Mail className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <DialogTitle className="text-base font-bold text-slate-900 truncate">{email?.subject || "Email"}</DialogTitle>
+                <p className="text-xs text-slate-500 mt-0.5">{email?.case_id ? "Linked to a KRA case" : "Not linked to a case"}</p>
+              </div>
+            </div>
+          </DialogHeader>
+        </div>
 
         {!email ? (
           <div className="flex items-center justify-center py-16 text-slate-400">
-            <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading…
+            <Loader2 className="w-4 h-4 animate-spin mr-2 text-custom-blue" /> Loading…
           </div>
         ) : (
-          <div className="flex flex-col gap-4 overflow-y-auto">
-            <div className="text-sm">
-              <p className="font-medium text-slate-800">{email.company_name ?? "Unassigned company"}</p>
-              <p className="text-slate-600">
-                {email.direction === "outbound" ? "To" : "From"}: {email.sender_name ? `${email.sender_name} <${email.sender_email}>` : email.sender_email}
-              </p>
-              {email.to_addresses && <p className="text-xs text-slate-400">To: {email.to_addresses}</p>}
-              {email.cc_addresses && <p className="text-xs text-slate-400">Cc: {email.cc_addresses}</p>}
-              <p className="text-xs text-slate-400">{fmtDateTime(email.received_at)}{email.kra_pin ? ` · ${email.kra_pin}` : ""}</p>
+          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4 bg-slate-50/40 custom-scrollbar">
+            <div className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-2 shadow-xs text-xs">
+              <p className="text-sm font-semibold text-slate-900">{email.company_name ?? <span className="text-red-500 font-normal">Unassigned company</span>}</p>
+              <div className="text-slate-600 space-y-0.5">
+                <p>
+                  <span className="text-slate-400 font-medium">{email.direction === "outbound" ? "To" : "From"}:</span> {email.sender_name ? `${email.sender_name} <${email.sender_email}>` : email.sender_email}
+                </p>
+                {email.to_addresses && <p><span className="text-slate-400 font-medium">To:</span> {email.to_addresses}</p>}
+                {email.cc_addresses && <p><span className="text-slate-400 font-medium">Cc:</span> {email.cc_addresses}</p>}
+              </div>
+              <p className="text-[11px] text-slate-400 tabular-nums pt-1 border-t border-slate-100">{fmtDateTime(email.received_at)}{email.kra_pin ? ` · ${email.kra_pin}` : ""}</p>
             </div>
 
             {email.review_reason && (
-              <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-sm text-amber-800">
+              <div className="rounded-xl bg-amber-50/60 border border-amber-200 p-3.5 text-xs text-amber-900 font-medium shadow-xs">
                 {email.review_reason}
               </div>
             )}
 
             {email.ai_summary && email.ai_summary !== email.snippet && (
-              <div className="bg-blue-50 border border-blue-100 rounded-md p-3">
-                <p className="text-xs font-semibold text-blue-700 mb-1">Summary</p>
-                <p className="text-sm text-blue-900">{email.ai_summary}</p>
+              <div className="rounded-xl bg-blue-50/60 border border-blue-200/80 p-3.5 shadow-xs">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-custom-blue mb-1">AI Summary</p>
+                <p className="text-xs text-slate-800 leading-relaxed">{email.ai_summary}</p>
               </div>
             )}
 
@@ -122,60 +134,66 @@ export function EmailDialog({
                       href={`/api/email-center/emails/${email.id}/attachments/${a.index}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs border rounded-md px-2 py-1 text-blue-700 hover:bg-blue-50"
+                      className="inline-flex items-center gap-1.5 text-xs border border-slate-200 rounded-md px-2.5 py-1 text-custom-blue bg-white hover:bg-slate-50 transition-colors shadow-xs"
                     >
-                      <Paperclip className="w-3 h-3" /> {a.filename}
+                      <Paperclip className="w-3.5 h-3.5" /> {a.filename}
                     </a>
                   ) : (
-                    <span key={a.index} className="inline-flex items-center gap-1 text-xs border rounded-md px-2 py-1 text-slate-400">
-                      <Paperclip className="w-3 h-3" /> {a.filename} (not stored)
+                    <span key={a.index} className="inline-flex items-center gap-1.5 text-xs border border-slate-200 rounded-md px-2.5 py-1 text-slate-400 bg-slate-50">
+                      <Paperclip className="w-3.5 h-3.5" /> {a.filename} (not stored)
                     </span>
                   )
                 )}
               </div>
             )}
 
-            <pre className="border rounded-md p-3 bg-white text-sm text-slate-700 whitespace-pre-wrap font-sans max-h-72 overflow-y-auto">
+            <pre className="rounded-xl border border-slate-200/80 p-4 bg-white text-xs text-slate-700 whitespace-pre-wrap font-sans max-h-72 overflow-y-auto leading-relaxed shadow-xs">
               {email.body || email.snippet || "No preview available."}
             </pre>
 
-            <div className="flex flex-wrap items-end gap-3 border-t pt-3">
-              <div className="space-y-1">
-                <p className="text-xs text-slate-500">Category</p>
-                <SearchSelect
-                  className="w-56"
-                  value={categoryKey}
-                  onChange={setCategoryKey}
-                  placeholder="—"
-                  options={[{ value: "", label: "—" }, ...categories.map((c) => ({ value: c.key, label: c.name }))]}
-                />
+            <div className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3 shadow-xs">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="space-y-1">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Category</p>
+                  <SearchSelect
+                    className="w-56"
+                    value={categoryKey}
+                    onChange={setCategoryKey}
+                    placeholder="—"
+                    options={[{ value: "", label: "—" }, ...categories.map((c) => ({ value: c.key, label: c.name }))]}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Treat as</p>
+                  <SearchSelect
+                    className="w-48"
+                    value={disposition}
+                    onChange={(v) => setDisposition(v as Disposition)}
+                    placeholder="—"
+                    options={[
+                      { value: "", label: "—" },
+                      ...(Object.keys(DISPOSITION_LABEL) as Disposition[]).map((d) => ({ value: d, label: DISPOSITION_LABEL[d] })),
+                    ]}
+                  />
+                </div>
               </div>
-              <div className="space-y-1">
-                <p className="text-xs text-slate-500">Treat as</p>
-                <SearchSelect
-                  className="w-48"
-                  value={disposition}
-                  onChange={(v) => setDisposition(v as Disposition)}
-                  placeholder="—"
-                  options={[
-                    { value: "", label: "—" },
-                    ...(Object.keys(DISPOSITION_LABEL) as Disposition[]).map((d) => ({ value: d, label: DISPOSITION_LABEL[d] })),
-                  ]}
-                />
-              </div>
-              <Button onClick={save} disabled={saving}>
-                {saving && <Loader2 className="w-4 h-4 animate-spin mr-2" />} Save
-              </Button>
-              {email.case_id && (
-                <Button variant="outline" onClick={() => onOpenCase(email.case_id!)}>Open case</Button>
-              )}
+              <p className="text-[11px] text-slate-400">
+                Choosing “Action required” opens a KRA case (a task under KRA ITAX EMAILS).
+                The correction is saved with your user id.
+              </p>
             </div>
-            <p className="text-[11px] text-slate-400">
-              Choosing “Action required” opens a KRA case (a task under KRA ITAX EMAILS).
-              The correction is saved with your user id.
-            </p>
           </div>
         )}
+
+        <div className="border-t border-slate-200 bg-slate-50/80 px-6 py-3 flex items-center justify-end gap-2.5 shrink-0">
+          {email?.case_id && (
+            <Button variant="outline" size="sm" onClick={() => onOpenCase(email.case_id!)} className="h-8 px-3 text-xs font-medium rounded-md border-slate-200">Open case</Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={onClose} className="h-8 px-3 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-md">Cancel</Button>
+          <Button size="sm" onClick={save} disabled={saving} className="h-8 px-4 text-xs font-semibold bg-custom-blue hover:bg-custom-blue/90 text-white rounded-md shadow-xs gap-1.5">
+            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   )

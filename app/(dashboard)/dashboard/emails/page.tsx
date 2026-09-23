@@ -14,13 +14,13 @@ import { MailboxesPanel } from "./components/MailboxesPanel"
 import { EmailList, EmailSidebarView } from "./components/NeedsReview"
 import { fetchCompanies, type Company } from "../companies/database"
 import {
-  DISPOSITION_LABEL, PILL_BUTTON_CLASS, PRIMARY_PILL_BUTTON_CLASS, SearchSelect,
+  COUNT_BADGE_CLASS, DISPOSITION_LABEL, PILL_BUTTON_CLASS, PRIMARY_PILL_BUTTON_CLASS, SearchSelect,
   TAB_LIST_CLASS, TAB_TRIGGER_CLASS, URGENT_BADGE_CLASS, api,
   type AccountRow, type CaseRow, type CategoryOption, type CompanyOption,
   type Disposition, type EmailRow, type StaffOption,
 } from "./components/shared"
 
-type Tab = "cases" | "review" | "mailboxes"
+type Tab = "inprogress" | "completed" | "review" | "update" | "ignored" | "mailboxes"
 
 // Email Center: KRA emails from every connected company mailbox, grouped into cases — each case is a
 // task (department 2 / subdepartment 28, "KRA ITAX EMAILS") laid out as the
@@ -33,12 +33,41 @@ type Tab = "cases" | "review" | "mailboxes"
 // explicit "Refresh" button (reload from the database) and "Sync now" (actually go check Gmail).
 // A save inside a dialog updates just that one row in local state from the save's own response,
 // never the whole list.
+//
+// The `emails` state holds every dispositioned email that has a tab here (needs_review, update_only
+// and ignore) as one sorted list; the tabs are client-side filters over it, so quick-classifying an
+// email simply moves it between tabs without a reload.
+const EMAIL_TABS = ["needs_review", "update_only", "ignore"] as const
+
+function byReceivedDesc(list: EmailRow[]): EmailRow[] {
+  return list.sort((a, b) => (a.received_at < b.received_at ? 1 : a.received_at > b.received_at ? -1 : 0))
+}
+
+function meetsCaseFilters(c: CaseRow, company: string, assignee: string, q: string): boolean {
+  if (company && c.company_id !== company) return false
+  if (assignee === "none" && c.assigned_to_id) return false
+  else if (assignee && assignee !== "none" && c.assigned_to_id !== assignee) return false
+  if (q) {
+    const hay = `${c.subject ?? ""} ${c.kra_pin ?? ""} ${c.notice_type ?? ""} ${c.case_ref}`.toLowerCase()
+    if (!hay.includes(q)) return false
+  }
+  return true
+}
+
+function meetsEmailFilters(e: EmailRow, company: string, q: string): boolean {
+  if (company && e.company_id !== company) return false
+  if (q) {
+    const hay = `${e.subject ?? ""} ${e.sender_email} ${e.snippet ?? ""}`.toLowerCase()
+    if (!hay.includes(q)) return false
+  }
+  return true
+}
+
 export default function EmailCenterPage() {
-  const [tab, setTab] = useState<Tab>("cases")
+  const [tab, setTab] = useState<Tab>("inprogress")
   const [company, setCompany] = useState("")
   const [assignee, setAssignee] = useState("")
   const [search, setSearch] = useState("")
-  const [caseStatus, setCaseStatus] = useState<"open" | "closed" | "all">("open")
 
   // Needs Review has two views: the flat list (uses the shared `company` filter above, like every
   // other tab) and a mailbox-client-style sidebar (its own, separate company selection — switching
@@ -84,14 +113,21 @@ export default function EmailCenterPage() {
     hasFullOverview.current = true
   }, [])
 
-  // The one place that fetches the actual case/email lists — every case (status=all; the status
-  // filter itself is applied client-side below) and every email currently awaiting review.
+  // The one place that fetches the actual case/email lists — every case (the per-status tab
+  // filtering itself is applied client-side below) and every dispositioned email that has a tab
+  // here (needs_review, update_only, ignore), merged into one sorted list the tabs slice.
   const loadAll = useCallback(async () => {
-    await Promise.all([
-      loadOverview(),
-      api<{ cases: CaseRow[] }>("/api/email-center/cases?status=all").then((r) => setCases(r.cases)),
-      api<{ emails: EmailRow[] }>("/api/email-center/emails?disposition=needs_review&limit=200").then((r) => setEmails(r.emails)),
-    ])
+    const fetchLists = async () => {
+      const [casesRes, reviewRes, updateRes, ignoreRes] = await Promise.all([
+        api<{ cases: CaseRow[] }>("/api/email-center/cases?status=all"),
+        api<{ emails: EmailRow[] }>(`/api/email-center/emails?disposition=${EMAIL_TABS[0]}&limit=200`),
+        api<{ emails: EmailRow[] }>(`/api/email-center/emails?disposition=${EMAIL_TABS[1]}&limit=200`),
+        api<{ emails: EmailRow[] }>(`/api/email-center/emails?disposition=${EMAIL_TABS[2]}&limit=200`),
+      ])
+      setCases(casesRes.cases)
+      setEmails(byReceivedDesc([...reviewRes.emails, ...updateRes.emails, ...ignoreRes.emails]))
+    }
+    await Promise.all([loadOverview(), fetchLists()])
   }, [loadOverview])
 
   useEffect(() => {
@@ -176,13 +212,7 @@ export default function EmailCenterPage() {
   }, [])
 
   const mergeEmail = useCallback((id: string, patch: Partial<EmailRow>) => {
-    setEmails((prev) => {
-      // A disposition change away from "needs_review" means it no longer belongs in this list.
-      if (patch.disposition && patch.disposition !== "needs_review") {
-        return prev.filter((e) => e.id !== id)
-      }
-      return prev.map((e) => (e.id === id ? { ...e, ...patch } : e))
-    })
+    setEmails((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)))
   }, [])
 
   const updateAccountCompany = useCallback((accountId: string, companyId: string | null) => {
@@ -210,77 +240,84 @@ export default function EmailCenterPage() {
 
   // ── client-side filtering (no network involved in any of this) ──
 
-  const filteredCases = useMemo(() => {
+  const openCases = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return cases.filter((c) => {
-      if (company && c.company_id !== company) return false
-      if (caseStatus !== "all" && c.status !== caseStatus) return false
-      if (assignee === "none" && c.assigned_to_id) return false
-      else if (assignee && assignee !== "none" && c.assigned_to_id !== assignee) return false
-      if (q) {
-        const hay = `${c.subject ?? ""} ${c.kra_pin ?? ""} ${c.notice_type ?? ""} ${c.case_ref}`.toLowerCase()
-        if (!hay.includes(q)) return false
-      }
-      return true
-    })
-  }, [cases, company, caseStatus, assignee, search])
+    return cases.filter((c) => c.status === "open" && meetsCaseFilters(c, company, assignee, q))
+  }, [cases, company, assignee, search])
 
-  const filteredEmails = useMemo(() => {
+  const closedCases = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return emails.filter((e) => {
-      if (company && e.company_id !== company) return false
-      if (q) {
-        const hay = `${e.subject ?? ""} ${e.sender_email} ${e.snippet ?? ""}`.toLowerCase()
-        if (!hay.includes(q)) return false
-      }
-      return true
-    })
+    return cases.filter((c) => c.status === "closed" && meetsCaseFilters(c, company, assignee, q))
+  }, [cases, company, assignee, search])
+
+  const reviewEmails = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return emails.filter((e) => e.disposition === "needs_review" && meetsEmailFilters(e, company, q))
   }, [emails, company, search])
 
-  // Search-only (no company filter) — the sidebar view does its own company slicing from this, via
-  // reviewSidebarCompany, independent of the shared `company` filter the list view uses above.
-  const searchedEmails = useMemo(() => {
+  const updateEmails = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return emails
-    return emails.filter((e) => `${e.subject ?? ""} ${e.sender_email} ${e.snippet ?? ""}`.toLowerCase().includes(q))
+    return emails.filter((e) => e.disposition === "update_only" && meetsEmailFilters(e, company, q))
+  }, [emails, company, search])
+
+  const ignoredEmails = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return emails.filter((e) => e.disposition === "ignore" && meetsEmailFilters(e, company, q))
+  }, [emails, company, search])
+
+  // Search-only (no company filter) over the needs-review subset — the sidebar view does its own
+  // company slicing from this, via reviewSidebarCompany, independent of the shared `company` filter
+  // the list view uses above.
+  const searchedReviewEmails = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return emails.filter(
+      (e) => e.disposition === "needs_review" && (!q || `${e.subject ?? ""} ${e.sender_email} ${e.snippet ?? ""}`.toLowerCase().includes(q))
+    )
   }, [emails, search])
 
   // ── counts, derived from what's already loaded — no separate server round trip for these ──
 
   const openCasesCount = useMemo(() => cases.filter((c) => c.status === "open").length, [cases])
+  const closedCasesCount = useMemo(() => cases.filter((c) => c.status === "closed").length, [cases])
+  const reviewCount = useMemo(() => emails.filter((e) => e.disposition === "needs_review").length, [emails])
+  const updateCount = useMemo(() => emails.filter((e) => e.disposition === "update_only").length, [emails])
+  const ignoreCount = useMemo(() => emails.filter((e) => e.disposition === "ignore").length, [emails])
   const unassignedMailboxes = useMemo(() => accounts.filter((a) => !a.company_id).length, [accounts])
   const pushHealthy = accounts.some((a) => a.watch_expiry && new Date(a.watch_expiry).getTime() > Date.now())
 
   const showFilters = tab !== "mailboxes"
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] overflow-hidden bg-slate-50">
+    <div className="flex flex-col h-[calc(100vh-4rem)] overflow-hidden bg-slate-50/50">
       {/* Title bar */}
-      <div className="border-b border-slate-200 bg-white px-8 py-5 antialiased flex flex-col justify-center shrink-0">
+      <div className="border-b border-slate-200/80 bg-white px-6 py-3.5 antialiased flex flex-col justify-center shrink-0">
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="min-w-0 flex flex-col gap-1.5">
-            <h1 className="text-[22px] font-black text-slate-900 uppercase tracking-tight truncate leading-none">
-              Email Center
-            </h1>
-            <div className="flex items-center text-sm text-slate-500 font-semibold gap-1 flex-wrap">
-              <Mail className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-              <span className="text-blue-600 font-bold">KRA Correspondence</span>
-              <span className="text-slate-300 mx-0.5">/</span>
-              <span className="text-slate-500">{openCasesCount} open case{openCasesCount === 1 ? "" : "s"}</span>
-              <span className="text-slate-300 mx-0.5">/</span>
-              <span className={cn("inline-flex items-center gap-1 shrink-0", pushHealthy ? "text-emerald-600" : "text-slate-400")}>
-                {pushHealthy ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
-                {pushHealthy ? "Live" : "Polling"}
+          <div className="min-w-0 flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <h1 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight leading-none">
+                Email Center
+              </h1>
+              <span className="text-[11px] font-semibold text-custom-blue bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                KRA Correspondence
+              </span>
+            </div>
+            <div className="flex items-center text-xs text-slate-500 font-medium gap-1.5 flex-wrap">
+              <Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+              <span>{openCasesCount} open case{openCasesCount === 1 ? "" : "s"}</span>
+              <span className="text-slate-300">·</span>
+              <span className={cn("inline-flex items-center gap-1 shrink-0 font-medium", pushHealthy ? "text-emerald-600" : "text-slate-400")}>
+                {pushHealthy ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+                {pushHealthy ? "Live Push" : "Polling"}
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
-            <Button variant="outline" onClick={handleRefresh} disabled={refreshing || loading} className={PILL_BUTTON_CLASS} title="Reload from the database">
+          <div className="flex items-center gap-2 shrink-0">
+            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing || loading} className={PILL_BUTTON_CLASS} title="Reload from the database">
               {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
               Refresh
             </Button>
-            <Button variant="outline" onClick={handleSync} disabled={syncing || loading} className={PILL_BUTTON_CLASS} title="Check Gmail for new mail">
+            <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing || loading} className={PILL_BUTTON_CLASS} title="Check Gmail for new mail">
               {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               Sync now
             </Button>
@@ -291,21 +328,36 @@ export default function EmailCenterPage() {
       {unassignedMailboxes > 0 && (
         <button
           onClick={() => setTab("mailboxes")}
-          className="mx-8 mt-4 flex items-center gap-2 text-sm font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-left shadow-sm"
+          className="mx-6 mt-3 flex items-center gap-2 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3.5 py-2 text-left shadow-xs hover:bg-amber-100/60 transition-colors"
         >
-          <AlertTriangle className="w-4 h-4 shrink-0" />
-          {unassignedMailboxes} mailbox{unassignedMailboxes === 1 ? "" : "es"} not linked to a company — their emails can't be matched to a client. Link them →
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-600" />
+          <span>{unassignedMailboxes} mailbox{unassignedMailboxes === 1 ? "" : "es"} not linked to a company — their emails can't be matched to a client. <span className="underline font-bold">Link them →</span></span>
         </button>
       )}
 
       {/* Tabs */}
-      <div className="px-8 py-3 flex items-center gap-4 border-b border-slate-200 bg-white antialiased shrink-0">
+      <div className="px-6 py-2 flex items-center gap-4 border-b border-slate-200/80 bg-white antialiased shrink-0">
         <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
           <TabsList className={TAB_LIST_CLASS}>
-            <TabsTrigger value="cases" className={TAB_TRIGGER_CLASS}>KRA Cases</TabsTrigger>
+            <TabsTrigger value="inprogress" className={TAB_TRIGGER_CLASS}>
+              In Progress
+              {openCasesCount > 0 && <span className={COUNT_BADGE_CLASS}>{openCasesCount}</span>}
+            </TabsTrigger>
+            <TabsTrigger value="completed" className={TAB_TRIGGER_CLASS}>
+              Completed
+              {closedCasesCount > 0 && <span className={COUNT_BADGE_CLASS}>{closedCasesCount}</span>}
+            </TabsTrigger>
             <TabsTrigger value="review" className={TAB_TRIGGER_CLASS}>
               Needs Review
-              {emails.length > 0 && <span className={URGENT_BADGE_CLASS}>{emails.length}</span>}
+              {reviewCount > 0 && <span className={URGENT_BADGE_CLASS}>{reviewCount}</span>}
+            </TabsTrigger>
+            <TabsTrigger value="update" className={TAB_TRIGGER_CLASS}>
+              Update
+              {updateCount > 0 && <span className={COUNT_BADGE_CLASS}>{updateCount}</span>}
+            </TabsTrigger>
+            <TabsTrigger value="ignored" className={TAB_TRIGGER_CLASS}>
+              Ignored
+              {ignoreCount > 0 && <span className={COUNT_BADGE_CLASS}>{ignoreCount}</span>}
             </TabsTrigger>
             <TabsTrigger value="mailboxes" className={TAB_TRIGGER_CLASS}>
               Mailboxes
@@ -317,24 +369,21 @@ export default function EmailCenterPage() {
 
       {/* Filter bar */}
       {showFilters && (
-        <div className="border-b border-slate-200 antialiased flex flex-col bg-white shrink-0">
-          <div className="px-8 py-3 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
-            <div className="relative group w-full lg:w-[320px] shrink-0">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+        <div className="border-b border-slate-200/80 antialiased flex flex-col bg-slate-50/60 shrink-0">
+          <div className="px-6 py-2.5 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-2.5">
+            <div className="relative group w-full lg:w-72 shrink-0">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
               <Input
-                placeholder={tab === "cases" ? "Search subject, PIN, case ref…" : "Search subject, sender, content…"}
+                placeholder={tab === "inprogress" || tab === "completed" ? "Search subject, PIN, case ref…" : "Search subject, sender, content…"}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full h-10 pl-11 pr-4 bg-white border-slate-300 rounded-full text-sm font-medium focus-visible:ring-1 focus-visible:ring-blue-500 focus-visible:border-blue-500 transition-all placeholder:text-slate-400"
+                className="w-full h-8 pl-8 pr-3 bg-white border-slate-200 rounded-md text-xs font-medium focus-visible:ring-1 focus-visible:ring-custom-blue transition-all placeholder:text-slate-400 shadow-none"
               />
             </div>
 
-            <div className="flex items-center gap-2.5 flex-wrap shrink-0">
-              {/* In the sidebar view, company selection happens in the sidebar itself — this filter
-                  would just be a second, disconnected way to do the same thing. */}
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
               {!(tab === "review" && reviewView === "sidebar") && (
                 <SearchSelect
-                  variant="pill"
                   className="w-52"
                   value={company}
                   onChange={setCompany}
@@ -344,12 +393,12 @@ export default function EmailCenterPage() {
               )}
 
               {tab === "review" && (
-                <div className="flex p-0.5 bg-slate-100 rounded-full border border-slate-200">
+                <div className="flex p-0.5 bg-slate-200/60 rounded-md border border-slate-200">
                   <button
                     onClick={() => setReviewView("list")}
                     className={cn(
-                      "h-9 px-3 rounded-full text-sm font-bold flex items-center gap-1.5 transition-colors",
-                      reviewView === "list" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                      "h-7 px-2.5 rounded text-xs font-semibold flex items-center gap-1.5 transition-all",
+                      reviewView === "list" ? "bg-white text-slate-800 shadow-xs" : "text-slate-500 hover:text-slate-800"
                     )}
                     title="Flat list"
                   >
@@ -358,8 +407,8 @@ export default function EmailCenterPage() {
                   <button
                     onClick={() => setReviewView("sidebar")}
                     className={cn(
-                      "h-9 px-3 rounded-full text-sm font-bold flex items-center gap-1.5 transition-colors",
-                      reviewView === "sidebar" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                      "h-7 px-2.5 rounded text-xs font-semibold flex items-center gap-1.5 transition-all",
+                      reviewView === "sidebar" ? "bg-white text-slate-800 shadow-xs" : "text-slate-500 hover:text-slate-800"
                     )}
                     title="By company, mailbox-style"
                   >
@@ -368,21 +417,9 @@ export default function EmailCenterPage() {
                 </div>
               )}
 
-              {tab === "cases" && (
+              {(tab === "inprogress" || tab === "completed") && (
                 <>
                   <SearchSelect
-                    variant="pill"
-                    className="w-40"
-                    value={caseStatus}
-                    onChange={(v) => setCaseStatus(v as typeof caseStatus)}
-                    options={[
-                      { value: "open", label: "Open cases" },
-                      { value: "closed", label: "Completed" },
-                      { value: "all", label: "All cases" },
-                    ]}
-                  />
-                  <SearchSelect
-                    variant="pill"
                     className="w-44"
                     value={assignee}
                     onChange={setAssignee}
@@ -393,7 +430,7 @@ export default function EmailCenterPage() {
                       ...staff.map((s) => ({ value: s.id, label: s.name })),
                     ]}
                   />
-                  <Button onClick={() => setNewCaseOpen(true)} className={PRIMARY_PILL_BUTTON_CLASS} style={{ backgroundColor: "#376bae" }}>
+                  <Button size="sm" onClick={() => setNewCaseOpen(true)} className="h-8 px-3.5 rounded-md text-xs font-semibold bg-custom-blue hover:bg-custom-blue/90 text-white shadow-xs gap-1.5 flex items-center">
                     <Plus className="h-3.5 w-3.5" /> New case
                   </Button>
                 </>
@@ -404,18 +441,20 @@ export default function EmailCenterPage() {
       )}
 
       {/* Body */}
-      <div className="px-8 py-5 flex-1 flex flex-col min-h-0 overflow-y-auto">
+      <div className="px-6 py-4 flex-1 flex flex-col min-h-0 overflow-y-auto">
         {loading ? (
           <div className="flex items-center justify-center py-24 text-slate-400">
             <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…
           </div>
         ) : (
           <>
-            {tab === "cases" && <CasesTable cases={filteredCases} onOpen={(c) => setOpenCaseId(c.id)} />}
+            {(tab === "inprogress" || tab === "completed") && (
+              <CasesTable cases={tab === "inprogress" ? openCases : closedCases} onOpen={(c) => setOpenCaseId(c.id)} />
+            )}
             {tab === "review" && reviewView === "list" && (
-              <div className="flex-1 min-h-0 overflow-y-auto">
+              <div className="flex-1 min-h-0 flex flex-col">
                 <EmailList
-                  emails={filteredEmails}
+                  emails={reviewEmails}
                   categories={categories}
                   onOpen={(e) => setOpenEmailId(e.id)}
                   onQuickClassify={quickClassify}
@@ -424,7 +463,7 @@ export default function EmailCenterPage() {
             )}
             {tab === "review" && reviewView === "sidebar" && (
               <EmailSidebarView
-                emails={searchedEmails}
+                emails={searchedReviewEmails}
                 companies={fullCompanies}
                 categories={categories}
                 selectedCompany={reviewSidebarCompany}
@@ -432,6 +471,17 @@ export default function EmailCenterPage() {
                 onOpen={(e) => setOpenEmailId(e.id)}
                 onQuickClassify={quickClassify}
               />
+            )}
+            {(tab === "update" || tab === "ignored") && (
+              <div className="flex-1 min-h-0 flex flex-col">
+                <EmailList
+                  emails={tab === "update" ? updateEmails : ignoredEmails}
+                  categories={categories}
+                  onOpen={(e) => setOpenEmailId(e.id)}
+                  onQuickClassify={quickClassify}
+                  emptyMessage={tab === "update" ? "No emails marked Update only." : "No ignored emails."}
+                />
+              </div>
             )}
             {tab === "mailboxes" && (
               <MailboxesPanel
