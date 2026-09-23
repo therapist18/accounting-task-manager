@@ -5,17 +5,10 @@ import { toast } from "sonner"
 import { Loader2, Paperclip } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { SearchSelect } from "./SearchSelect"
 import {
-  DISPOSITION_LABEL,
-  type AttachmentRow,
-  type CaseRow,
-  type CategoryOption,
-  type Disposition,
-  type EmailDetail,
-  type EmailRow,
-} from "./types"
-import { api, fmtDateTime } from "./utils"
+  DISPOSITION_LABEL, SearchSelect, api, fmtDateTime,
+  type AttachmentRow, type CaseRow, type CategoryOption, type Disposition, type EmailDetail, type EmailRow,
+} from "./shared"
 
 export function EmailDialog({
   emailId,

@@ -4,9 +4,7 @@ import { useMemo, useState } from "react"
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { APPROVAL_BADGE, FROM_KRA_BAND, RESPOND_BAND, TRACKING_BAND } from "./chrome"
-import { APPROVAL_LABEL, type CaseRow } from "./types"
-import { caseMetrics, fmtDate, todayYmd, type CaseMetrics } from "./utils"
+import { APPROVAL_BADGE, APPROVAL_LABEL, FROM_KRA_BAND, RESPOND_BAND, TRACKING_BAND, caseMetrics, fmtDate, todayYmd, type CaseMetrics, type CaseRow } from "./shared"
 
 // Renders the "KRA CORESPONDENCE PLATFORM" Sheet1 layout: a two-level, colour-banded header
 // (From KRA email | When BCL responds to KRA | Tracking), an index column, and click-to-sort

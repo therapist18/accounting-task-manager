@@ -7,32 +7,18 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
-import { CaseDialog } from "./components/CaseDialog"
+import { CaseDialog, NewCaseDialog } from "./components/CaseDialogs"
 import { CasesTable } from "./components/CasesTable"
-import {
-  PILL_BUTTON_CLASS,
-  PRIMARY_PILL_BUTTON_CLASS,
-  TAB_LIST_CLASS,
-  TAB_TRIGGER_CLASS,
-  URGENT_BADGE_CLASS,
-} from "./components/chrome"
 import { EmailDialog } from "./components/EmailDialog"
-import { EmailList } from "./components/EmailList"
-import { EmailSidebarView } from "./components/EmailSidebarView"
 import { MailboxesPanel } from "./components/MailboxesPanel"
-import { NewCaseDialog } from "./components/NewCaseDialog"
-import { SearchSelect } from "./components/SearchSelect"
+import { EmailList, EmailSidebarView } from "./components/NeedsReview"
+import { fetchCompanies, type Company } from "../companies/database"
 import {
-  DISPOSITION_LABEL,
-  type AccountRow,
-  type CaseRow,
-  type CategoryOption,
-  type CompanyOption,
-  type Disposition,
-  type EmailRow,
-  type StaffOption,
-} from "./components/types"
-import { api } from "./components/utils"
+  DISPOSITION_LABEL, PILL_BUTTON_CLASS, PRIMARY_PILL_BUTTON_CLASS, SearchSelect,
+  TAB_LIST_CLASS, TAB_TRIGGER_CLASS, URGENT_BADGE_CLASS, api,
+  type AccountRow, type CaseRow, type CategoryOption, type CompanyOption,
+  type Disposition, type EmailRow, type StaffOption,
+} from "./components/shared"
 
 type Tab = "cases" | "review" | "mailboxes"
 
@@ -63,6 +49,12 @@ export default function EmailCenterPage() {
 
   const [accounts, setAccounts] = useState<AccountRow[]>([])
   const [companies, setCompanies] = useState<CompanyOption[]>([])
+  // Full company records (with ACC/IMM/Audit/Sheria effective dates + cease details) for the Needs
+  // Review sidebar's Client Category Filter — the thin CompanyOption list above doesn't carry those
+  // fields. Fetched the same way every other module's company sidebar does: directly from Supabase
+  // client-side, not through /api/email-center. Loaded once; the category filter itself is a
+  // client-side predicate, so no refetch is needed as filters change.
+  const [fullCompanies, setFullCompanies] = useState<Company[]>([])
   const [categories, setCategories] = useState<CategoryOption[]>([])
   const [staff, setStaff] = useState<StaffOption[]>([])
   const [cases, setCases] = useState<CaseRow[]>([])
@@ -108,6 +100,12 @@ export default function EmailCenterPage() {
       .catch((e: any) => toast.error(e.message))
       .finally(() => setLoading(false))
   }, [loadAll])
+
+  // Loaded once, independent of Refresh/Sync now — the Needs Review sidebar's company list and
+  // Client Category Filter don't need to be as fresh as accounts/cases/emails.
+  useEffect(() => {
+    fetchCompanies().then(setFullCompanies).catch((e: any) => toast.error(e.message))
+  }, [])
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -256,9 +254,9 @@ export default function EmailCenterPage() {
   const showFilters = tab !== "mailboxes"
 
   return (
-    <div className="flex flex-col flex-1 overflow-auto bg-slate-50">
+    <div className="flex flex-col h-[calc(100vh-4rem)] overflow-hidden bg-slate-50">
       {/* Title bar */}
-      <div className="border-b border-slate-200 bg-white px-8 py-5 antialiased flex flex-col justify-center">
+      <div className="border-b border-slate-200 bg-white px-8 py-5 antialiased flex flex-col justify-center shrink-0">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="min-w-0 flex flex-col gap-1.5">
             <h1 className="text-[22px] font-black text-slate-900 uppercase tracking-tight truncate leading-none">
@@ -301,7 +299,7 @@ export default function EmailCenterPage() {
       )}
 
       {/* Tabs */}
-      <div className="px-8 py-3 flex items-center gap-4 border-b border-slate-200 bg-white antialiased">
+      <div className="px-8 py-3 flex items-center gap-4 border-b border-slate-200 bg-white antialiased shrink-0">
         <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
           <TabsList className={TAB_LIST_CLASS}>
             <TabsTrigger value="cases" className={TAB_TRIGGER_CLASS}>KRA Cases</TabsTrigger>
@@ -319,7 +317,7 @@ export default function EmailCenterPage() {
 
       {/* Filter bar */}
       {showFilters && (
-        <div className="border-b border-slate-200 antialiased flex flex-col bg-white">
+        <div className="border-b border-slate-200 antialiased flex flex-col bg-white shrink-0">
           <div className="px-8 py-3 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
             <div className="relative group w-full lg:w-[320px] shrink-0">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -406,7 +404,7 @@ export default function EmailCenterPage() {
       )}
 
       {/* Body */}
-      <div className="px-8 py-5 flex-1">
+      <div className="px-8 py-5 flex-1 flex flex-col min-h-0 overflow-y-auto">
         {loading ? (
           <div className="flex items-center justify-center py-24 text-slate-400">
             <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…
@@ -415,16 +413,19 @@ export default function EmailCenterPage() {
           <>
             {tab === "cases" && <CasesTable cases={filteredCases} onOpen={(c) => setOpenCaseId(c.id)} />}
             {tab === "review" && reviewView === "list" && (
-              <EmailList
-                emails={filteredEmails}
-                categories={categories}
-                onOpen={(e) => setOpenEmailId(e.id)}
-                onQuickClassify={quickClassify}
-              />
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <EmailList
+                  emails={filteredEmails}
+                  categories={categories}
+                  onOpen={(e) => setOpenEmailId(e.id)}
+                  onQuickClassify={quickClassify}
+                />
+              </div>
             )}
             {tab === "review" && reviewView === "sidebar" && (
               <EmailSidebarView
                 emails={searchedEmails}
+                companies={fullCompanies}
                 categories={categories}
                 selectedCompany={reviewSidebarCompany}
                 onSelectCompany={setReviewSidebarCompany}

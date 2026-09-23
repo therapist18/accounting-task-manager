@@ -6,10 +6,7 @@ import { AlertCircle, Loader2, Plus, RefreshCw, Wifi, WifiOff } from "lucide-rea
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { SearchSelect } from "./SearchSelect"
-import { PRIMARY_PILL_BUTTON_CLASS } from "./chrome"
-import type { AccountRow, CompanyOption } from "./types"
-import { api, fmtDateTime } from "./utils"
+import { PRIMARY_PILL_BUTTON_CLASS, SearchSelect, api, fmtDateTime, type AccountRow, type CompanyOption } from "./shared"
 
 export function MailboxesPanel({
   accounts,

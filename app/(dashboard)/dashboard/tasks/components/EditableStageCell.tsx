@@ -12,6 +12,7 @@ import { toast } from "@/lib/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
+import { performExtraction } from "@/lib/extractionUtils"
 import { formatDuration, getTimeStatus, isDocumentApplicable, stageApplicabilityConditionsMet, isStageOptionalForTask } from "../overall-view/tableUtils"
 import { parseDate } from "@/app/generic-functions/dateUtils"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
@@ -739,6 +740,43 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       toast({ title: 'Error', description: 'Failed to save document data.', variant: 'destructive' });
     }
   }, [onSave, previewDocuments, currentPreviewIndex, stage.id, task.id, onFetchData]);
+
+  // Re-runs extraction against the document's own file/fields (same performExtraction
+  // UploadModal uses for its "Stop Extraction"-capable initial pass) and persists the result
+  // through the existing onSave path — same persistence handleSave/handlePreviewSave already use,
+  // so a retry is just "re-extract, then save" rather than a separate write path of its own.
+  const handleRetryExtraction = useCallback(async (targetDoc: any) => {
+    if (!onSave) return;
+    const currentDoc = previewDocuments.find(d => d.documentId === targetDoc?.documentId) || targetDoc;
+    if (!currentDoc?.fileUrl) {
+      toast({ title: 'Error', description: 'No file available to re-extract.', variant: 'destructive' });
+      return;
+    }
+    try {
+      const result = await performExtraction(
+        currentDoc.fileUrl,
+        currentDoc.fields || [],
+        currentDoc.documentName,
+        undefined,
+        currentDoc.fileName
+      );
+      const extractedData = typeof result.extractedData === 'string'
+        ? JSON.parse(result.extractedData)
+        : (result.extractedData || {});
+
+      await onSave(stage.id, task.id, 'completed', { extractedData, documentId: currentDoc.documentId });
+      setPreviewDocuments(prev => prev.map(d => d.documentId === currentDoc.documentId ? { ...d, extractedData } : d));
+      toast({
+        title: result.success ? 'Success' : 'Extraction incomplete',
+        description: result.message || (result.success ? 'Document re-extracted successfully.' : 'Some fields may need manual review.'),
+        variant: result.success ? 'success' : 'default'
+      });
+      if (onFetchData) await onFetchData();
+    } catch (error) {
+      console.error('Error retrying extraction:', error);
+      toast({ title: 'Error', description: 'Failed to retry extraction.', variant: 'destructive' });
+    }
+  }, [onSave, previewDocuments, stage.id, task.id, onFetchData]);
 
   const handleOfficerChange = async (officerId: string) => {
     if (!onOfficerChange) return;
@@ -1473,10 +1511,10 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
                 previewDocuments.map((doc) => (
                   <div key={doc.documentId} className="border rounded-lg overflow-hidden mb-4">
                     <div className="p-4 bg-gray-50 border-b">
-                      <h3 className="font-medium">{doc.documentName || 'Document'} <span className="text-muted-foreground text-sm font-normal ml-2">(Uploaded: {doc.created_at ? formatDateDisplay(doc.created_at) : 'N/A'})</span></h3>
+                      <h3 className="font-medium">{doc.documentName || 'Document'}</h3>
                     </div>
                     <div className="p-4">
-                      <ExtractionPreview documentId={doc.documentId} documentName={doc.documentName} extractedData={doc.extractedData || {}} fields={doc.fields || []} fileUrl={doc.fileUrl} fileName={doc.fileName} onSave={handlePreviewSave} onDelete={handleDeleteDocument} expanded={true} showSaveButton={false} readOnly={true} type={doc.type} file={doc.file} onDataChange={(fieldName, value) => handlePreviewDataChange(doc.documentId, fieldName, value)} />
+                      <ExtractionPreview documentId={doc.documentId} documentName={doc.documentName} extractedData={doc.extractedData || {}} fields={doc.fields || []} fileUrl={doc.fileUrl} fileName={doc.fileName} onSave={handlePreviewSave} onDelete={handleDeleteDocument} onRetryExtraction={() => handleRetryExtraction(doc)} uploadedAt={doc.created_at} expanded={true} showSaveButton={false} readOnly={true} type={doc.type} file={doc.file} onDataChange={(fieldName, value) => handlePreviewDataChange(doc.documentId, fieldName, value)} />
                     </div>
                   </div>
                 ))
@@ -1566,10 +1604,10 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
               previewDocuments.map((doc) => (
                 <div key={doc.documentId} className="border rounded-lg overflow-hidden mb-4">
                   <div className="p-4 bg-gray-50 border-b">
-                    <h3 className="font-medium">{doc.documentName || 'Document'} <span className="text-muted-foreground text-sm font-normal ml-2">(Uploaded: {doc.created_at ? formatDateDisplay(doc.created_at) : 'N/A'})</span></h3>
+                    <h3 className="font-medium">{doc.documentName || 'Document'}</h3>
                   </div>
                   <div className="p-4">
-                    <ExtractionPreview documentId={doc.documentId} documentName={doc.documentName} extractedData={doc.extractedData || {}} fields={doc.fields || []} fileUrl={doc.fileUrl} fileName={doc.fileName} onSave={handlePreviewSave} onDelete={handleDeleteDocument} expanded={true} showSaveButton={!!onSave} readOnly={false} type={doc.type} file={doc.file} onDataChange={(fieldName, value) => handlePreviewDataChange(doc.documentId, fieldName, value)} />
+                    <ExtractionPreview documentId={doc.documentId} documentName={doc.documentName} extractedData={doc.extractedData || {}} fields={doc.fields || []} fileUrl={doc.fileUrl} fileName={doc.fileName} onSave={handlePreviewSave} onDelete={handleDeleteDocument} onRetryExtraction={() => handleRetryExtraction(doc)} uploadedAt={doc.created_at} expanded={true} showSaveButton={!!onSave} readOnly={false} type={doc.type} file={doc.file} onDataChange={(fieldName, value) => handlePreviewDataChange(doc.documentId, fieldName, value)} />
                   </div>
                 </div>
               ))
@@ -1851,10 +1889,10 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
               previewDocuments.map((doc) => (
                 <div key={doc.documentId} className="border rounded-lg overflow-hidden mb-4">
                   <div className="p-4 bg-gray-50 border-b">
-                    <h3 className="font-medium">{doc.documentName || 'Document'} <span className="text-muted-foreground text-sm font-normal ml-2">(Uploaded: {doc.created_at ? formatDateDisplay(doc.created_at) : 'N/A'})</span></h3>
+                    <h3 className="font-medium">{doc.documentName || 'Document'}</h3>
                   </div>
                   <div className="p-4">
-                    <ExtractionPreview documentId={doc.documentId} documentName={doc.documentName} extractedData={doc.extractedData || {}} fields={doc.fields || []} fileUrl={doc.fileUrl} fileName={doc.fileName} onSave={handlePreviewSave} onDelete={handleDeleteDocument} expanded={true} showSaveButton={!readOnly && !!onSave} readOnly={readOnly} type={doc.type} file={doc.file} onDataChange={(fieldName, value) => handlePreviewDataChange(doc.documentId, fieldName, value)} />
+                    <ExtractionPreview documentId={doc.documentId} documentName={doc.documentName} extractedData={doc.extractedData || {}} fields={doc.fields || []} fileUrl={doc.fileUrl} fileName={doc.fileName} onSave={handlePreviewSave} onDelete={handleDeleteDocument} onRetryExtraction={() => handleRetryExtraction(doc)} uploadedAt={doc.created_at} expanded={true} showSaveButton={!readOnly && !!onSave} readOnly={readOnly} type={doc.type} file={doc.file} onDataChange={(fieldName, value) => handlePreviewDataChange(doc.documentId, fieldName, value)} />
                   </div>
                 </div>
               ))

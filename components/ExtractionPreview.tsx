@@ -23,11 +23,22 @@ import {
 import Image from 'next/image'
 import { toast } from "@/lib/hooks/use-toast"
 import dynamic from 'next/dynamic'
+import { format } from 'date-fns'
 import { Textarea } from '@/components/ui/textarea';
 import DocumentActions from '@/app/generic-components/DocumentActions';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 
 // Dynamically import PDF viewer to avoid SSR issues
 const PDFViewer = dynamic(() => import('@/components/PDFViewer'), { ssr: false })
+
+const formatDateTimeToDMY = (value?: string | null) => {
+  if (!value) return '';
+  try {
+    return format(new Date(value), 'dd/MM/yyyy HH:mm');
+  } catch {
+    return '';
+  }
+};
 
 interface Field {
   id: string
@@ -51,6 +62,7 @@ interface ExtractionPreviewProps {
   onRemoveFile?: () => void;
   onDelete?: (doc?: any) => Promise<void> | void;
   onRetryExtraction?: (doc?: any) => Promise<void> | void;
+  onRetryExtractionWithAI?: (doc?: any) => Promise<void> | void;
   onDownload?: (format: 'document' | 'excel' | 'pdf') => Promise<void> | void;
   onSave?: (data: Record<string, any>) => Promise<void> | void;
   documentTypes?: Array<{ id: string; name: string }>;
@@ -73,6 +85,11 @@ interface ExtractionPreviewProps {
   onDownloadSuccess?: () => void;
   onDownloadError?: (error: Error) => void;
   onDialogClose?: () => void;
+  updatedAt?: string;
+  uploadedAt?: string;
+  uploadedBy?: string;
+  modifiedAt?: string;
+  modifiedBy?: string;
 }
 
 // --- HELPER COMPONENTS MOVED OUTSIDE ---
@@ -200,6 +217,7 @@ export const ExtractionPreview = ({
   onDataChange,
   onDelete,
   onRetryExtraction,
+  onRetryExtractionWithAI,
   fileUrl,
   fileName,
   expanded = false,
@@ -219,6 +237,11 @@ export const ExtractionPreview = ({
   onDownloadError,
   onSave,
   onDialogClose,
+  updatedAt,
+  uploadedAt,
+  uploadedBy,
+  modifiedAt,
+  modifiedBy,
 }: ExtractionPreviewProps) => {
 
   const [isOpen, setIsOpen] = useState(expanded)
@@ -547,100 +570,136 @@ export const ExtractionPreview = ({
   };
 
   const content = (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
-      {/* Document Preview - Fixed Height */}
-      <div className="lg:col-span-2 h-[75vh]">
-        <DocumentPreview
-          fileUrl={fileUrl}
-          fileName={fileName}
-          documentName={documentName}
-        />
-      </div>
+    // min-h-[70vh] is a floor, not a fixed size: it keeps this readable when a caller's
+    // ancestor chain doesn't resolve to a real height (most of the ~13 places that render this
+    // with expanded=true predate the resizable-panel layout and were never audited for it), while
+    // h-full still lets it fill a taller flex ancestor — see the callers that DO manage height
+    // properly (this component's own Dialog below, and StageUploadDialog/LinkSourceDocumentDialog's
+    // preview dialogs) for h-full to actually take over instead of the floor.
+    <ResizablePanelGroup direction="horizontal" className="h-full w-full min-h-[70vh]">
+      {/* Document Preview */}
+      <ResizablePanel defaultSize={40} minSize={20} maxSize={60} className="h-full min-h-0">
+        <div className="h-full max-h-full min-h-0 pr-3">
+          <DocumentPreview
+            fileUrl={fileUrl}
+            fileName={fileName}
+            documentName={documentName}
+          />
+        </div>
+      </ResizablePanel>
 
-      {/* Extracted Data - Fixed Height with Overflow */}
-      <div className="lg:col-span-1 h-[75vh] shadow-sm rounded-lg flex flex-col">
-        <div className={`h-full flex flex-col rounded-lg border ${getStylesByType?.(type || 'principal')?.getBgColor() || 'bg-white'} ${getStylesByType?.(type || 'principal')?.getBorderColor() || 'border-gray-200'} overflow-hidden`}>
+      <ResizableHandle withHandle />
 
-          {/* 1. Header Section (Fixed at top) */}
-          <div className="p-4 border-b border-gray-200 bg-white flex-shrink-0">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-bold text-gray-800">Extracted Details</h3>
-              <div className="flex items-center space-x-2">
-                <DocumentActions
-                  document={{
-                    ...localData,
-                    fileUrl,
-                    fileName,
-                    documentName,
-                    type,
-                    file,
-                    document_display_name: documentName,
-                    document_id: type,
-                    extracted_details: localData,
-                    id: documentId,
-                    file_path: fileUrl
-                  }}
-                  documentTypes={documentTypes || []}
-                  supabase={supabase}
-                  onSave={onSave}
-                  onDelete={onDelete ? handleDelete : undefined}
-                  onRetry={onRetryExtraction}
-                  onDownloadSuccess={() => toast.success('Download started')}
-                  onDownloadError={(error) => toast.error(error.message || 'Download failed')}
-                  className="ml-auto"
-                  showDeleteConfirmation={true}
-                />
-              </div>
-            </div>
+      {/* Extracted Data */}
+      <ResizablePanel defaultSize={60} minSize={30} maxSize={80} className="h-full min-h-0">
+        <div className="h-full max-h-full min-h-0 pl-3 shadow-sm rounded-lg flex flex-col">
+          <div className={`h-full flex flex-col rounded-lg border ${getStylesByType?.(type || 'principal')?.getBgColor() || 'bg-white'} ${getStylesByType?.(type || 'principal')?.getBorderColor() || 'border-gray-200'} overflow-hidden`}>
 
-            {extractionStatus === 'failed' && (
-              <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-xs">
-                <AlertTriangle className="inline-block w-4 h-4 mr-2 -mt-1" />
-                Extraction failed. Please verify manually.
-              </div>
-            )}
-          </div>
-
-          {/* 2. Table Column Headers (Fixed) */}
-          <div className="flex bg-gray-100 border-b border-gray-200 text-xs font-bold text-gray-500 uppercase tracking-wider flex-shrink-0">
-            <div className="w-full sm:w-[160px] p-3 border-r border-gray-200">Field</div>
-            <div className="flex-1 p-3">Value</div>
-          </div>
-
-          {/* 3. Scrollable List Area (Takes remaining height) */}
-          <div className="flex-1 overflow-y-auto bg-white scrollbar-thin scrollbar-thumb-gray-200 scrollbar-track-transparent">
-            <div className="flex flex-col">
-              {fields
-                .sort((a, b) => {
-                  const order = ['name', 'company_name', 'date', 'reference_number', 'file_number'];
-                  // Safe access with fallback to empty string
-                  const aName = (a?.name || '').toLowerCase();
-                  const bName = (b?.name || '').toLowerCase();
-
-                  const aIndex = order.indexOf(aName);
-                  const bIndex = order.indexOf(bName);
-                  return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
-                })
-                .map((field, index) => renderField(field, index))}
-            </div>
-
-            {/* Comment Section (Scrolls with content) */}
-            {extractedData?.comment && (
-              <div className="p-4 border-t border-gray-200 bg-yellow-50/30">
-                <h4 className="text-xs font-bold text-gray-500 mb-2 uppercase">Upload Comment</h4>
-                <div className="p-3 bg-white border border-gray-200 rounded-md text-sm text-gray-700 italic">
-                  "{extractedData.comment}"
+            {/* 1. Header Section (Fixed at top) */}
+            <div className="p-4 border-b border-gray-200 bg-white flex-shrink-0">
+              <div className="flex justify-between items-center gap-4">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800">Extracted Details</h3>
+                  {(uploadedAt || modifiedAt || updatedAt) && (
+                    <div className="mt-1 space-y-0.5 flex flex-wrap gap-x-4 gap-y-0.5">
+                      {uploadedAt && (
+                        <p className="text-xs text-gray-500">
+                          <span className="font-semibold">Uploaded:</span> {formatDateTimeToDMY(uploadedAt)}
+                          {uploadedBy && <> by <span className="font-semibold">{uploadedBy}</span></>}
+                        </p>
+                      )}
+                      {modifiedAt && (
+                        <p className="text-xs text-gray-500">
+                          <span className="font-semibold">Edited:</span> {formatDateTimeToDMY(modifiedAt)}
+                          {modifiedBy && <> by <span className="font-semibold">{modifiedBy}</span></>}
+                        </p>
+                      )}
+                      {updatedAt && (!modifiedAt || modifiedAt !== updatedAt) && (
+                        <p className="text-xs text-gray-500">
+                          <span className="font-semibold">Last updated:</span> {formatDateTimeToDMY(updatedAt)}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center space-x-2">
+                  <DocumentActions
+                    document={{
+                      ...localData,
+                      fileUrl,
+                      fileName,
+                      documentName,
+                      type,
+                      file,
+                      document_display_name: documentName,
+                      document_id: type,
+                      extracted_details: localData,
+                      id: documentId,
+                      file_path: fileUrl
+                    }}
+                    documentTypes={documentTypes || []}
+                    supabase={supabase}
+                    onSave={onSave}
+                    onDelete={onDelete ? handleDelete : undefined}
+                    onRetry={onRetryExtraction}
+                    onRetryWithAI={onRetryExtractionWithAI}
+                    onDownloadSuccess={() => toast.success('Download started')}
+                    onDownloadError={(error) => toast.error(error.message || 'Download failed')}
+                    className="ml-auto"
+                    showDeleteConfirmation={true}
+                  />
                 </div>
               </div>
-            )}
 
-            {/* Bottom Padding */}
-            <div className="h-4"></div>
+              {extractionStatus === 'failed' && (
+                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-xs">
+                  <AlertTriangle className="inline-block w-4 h-4 mr-2 -mt-1" />
+                  Extraction failed. Please verify manually.
+                </div>
+              )}
+            </div>
+
+            {/* 2. Table Column Headers (Fixed) */}
+            <div className="flex bg-gray-100 border-b border-gray-200 text-xs font-bold text-gray-500 uppercase tracking-wider flex-shrink-0">
+              <div className="w-full sm:w-[160px] p-3 border-r border-gray-200">Field</div>
+              <div className="flex-1 p-3">Value</div>
+            </div>
+
+            {/* 3. Scrollable List Area (Takes remaining height) */}
+            <div className="flex-1 overflow-y-auto bg-white scrollbar-thin scrollbar-thumb-gray-200 scrollbar-track-transparent">
+              <div className="flex flex-col">
+                {fields
+                  .sort((a, b) => {
+                    const order = ['name', 'company_name', 'date', 'reference_number', 'file_number'];
+                    // Safe access with fallback to empty string
+                    const aName = (a?.name || '').toLowerCase();
+                    const bName = (b?.name || '').toLowerCase();
+
+                    const aIndex = order.indexOf(aName);
+                    const bIndex = order.indexOf(bName);
+                    return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+                  })
+                  .map((field, index) => renderField(field, index))}
+              </div>
+
+              {/* Comment Section (Scrolls with content) */}
+              {extractedData?.comment && (
+                <div className="p-4 border-t border-gray-200 bg-yellow-50/30">
+                  <h4 className="text-xs font-bold text-gray-500 mb-2 uppercase">Upload Comment</h4>
+                  <div className="p-3 bg-white border border-gray-200 rounded-md text-sm text-gray-700 italic">
+                    "{extractedData.comment}"
+                  </div>
+                </div>
+              )}
+
+              {/* Bottom Padding */}
+              <div className="h-4"></div>
+            </div>
+
           </div>
-
         </div>
-      </div>
-    </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 
   if (expanded) {
@@ -654,8 +713,8 @@ export const ExtractionPreview = ({
           <DialogHeader className="p-4 border-b bg-white shrink-0">
             <DialogTitle>Document Details Extraction: {documentName}</DialogTitle>
           </DialogHeader>
-          <div className="flex-1 overflow-auto p-4 flex items-start justify-center">
-            <div className="w-full max-w-[1800px]">
+          <div className="flex-1 min-h-0 overflow-hidden p-4 flex items-stretch justify-center">
+            <div className="w-full max-w-[1800px] flex items-stretch min-w-0 min-h-0 h-full">
               {content}
             </div>
           </div>

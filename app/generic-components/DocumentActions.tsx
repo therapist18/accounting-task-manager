@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Button } from "@/components/ui/button";
-import { Download, Trash2, RefreshCw, Save, FileText, Loader2 } from 'lucide-react';
+import { Download, Trash2, RefreshCw, Save, FileText, Loader2, Sparkles } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { handleDocumentDownload } from '../generic-functions/documentSorting';
 import { toast } from "@/lib/hooks/use-toast";
@@ -64,6 +64,7 @@ type DocumentActionsProps = {
   supabase: any;
   onDelete?: (doc: any) => Promise<void>;
   onRetry?: (doc: any) => Promise<void>;
+  onRetryWithAI?: (doc: any) => Promise<void>;
   onSave?: (doc: any) => Promise<void>;
   className?: string;
   showLabels?: boolean;
@@ -80,6 +81,7 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
   supabase,
   onDelete,
   onRetry,
+  onRetryWithAI,
   onSave,
   className = '',
   showLabels = true,
@@ -92,6 +94,7 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [isRetryingWithAI, setIsRetryingWithAI] = useState(false);
 
   const handleDeleteClick = () => {
     if (showDeleteConfirmation) {
@@ -131,6 +134,18 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
       console.error("Retry failed in Action wrapper", error);
     } finally {
       setIsRetrying(false);
+    }
+  }
+
+  const handleRetryWithAI = async () => {
+    if (!onRetryWithAI) return;
+    setIsRetryingWithAI(true);
+    try {
+      await onRetryWithAI(document);
+    } catch (error) {
+      console.error("Retry with AI failed in Action wrapper", error);
+    } finally {
+      setIsRetryingWithAI(false);
     }
   }
 
@@ -249,6 +264,25 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
             <RefreshCw className="h-4 w-4" />
           )}
           {showLabels && <span>Retry</span>}
+        </Button>
+      )}
+
+      {/* 3b. Retry with AI */}
+      {onRetryWithAI && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleRetryWithAI}
+          title="Re-extract using AI instead of the local text/OCR parser — useful if some fields are still missing or wrong"
+          className="flex items-center gap-1 border-purple-200 text-purple-600 hover:bg-purple-50"
+          disabled={isRetryingWithAI}
+        >
+          {isRetryingWithAI ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Sparkles className="h-4 w-4" />
+          )}
+          {showLabels && <span>Re-extract with AI</span>}
         </Button>
       )}
 

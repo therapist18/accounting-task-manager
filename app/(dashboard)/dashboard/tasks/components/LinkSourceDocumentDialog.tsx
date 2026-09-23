@@ -3,16 +3,23 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Eye, Loader2, FileText, Trash2, RotateCcw } from "lucide-react";
+import { Eye, Loader2 } from "lucide-react";
 import { toast } from "@/lib/hooks/use-toast";
-import { format, parseISO } from "date-fns";
 import { supabase } from "@/lib/supabase/client";
 import { useCurrentUser } from "@/lib/hooks/use-current-user";
 import { auditActor } from "../utils/audit";
 import { Button } from "@/components/ui/button";
 import {
-  getWorkflowLogsForIndividual
-} from "../utils/workflowSyncService";
+  isStageDocumentApplicableToTask,
+  collectTaskTriggerDocumentIds,
+  getDocumentLinkAvailabilityContext,
+  invalidateDocumentLinkAvailabilityCache,
+  isDocumentAvailableForLinking,
+  buildStageLinkUpdate,
+  buildStageUnlinkUpdate,
+  computeAdvancedTaskStatus,
+  maybeResolveWriteUpWorkflowPairing,
+} from "../utils/taskManagerData";
 import {
   Dialog,
   DialogContent,
@@ -36,17 +43,14 @@ interface Task {
   id: string;
   applicant_name: string;
   individual_id: string;
+  status?: string;
+  linked_document_type_id?: string;
   source_document_id?: Record<string, SelectedDoc[] | SelectedDoc>;
   created_at: string;
   class_id?: string;
   subclass_id?: string;
   subdepartment?: { id: string } | string;
   department?: { id: string } | string;
-}
-
-interface TaskDocumentLink {
-  id: string;
-  source_document_id: Record<string, SelectedDoc[] | SelectedDoc>;
 }
 
 interface Stage {
@@ -132,136 +136,6 @@ const isStageApplicableToTask = (
   }
 };
 
-// Function to filter documents applicable to the current task context (from StageUploadDialog)
-const isDocumentApplicableToTask = (doc: any, task: any, childContext: any = null) => {
-  if (!doc.isSpecial) return true;
-
-  if (doc.targetEntities?.length > 0) {
-    const matchesTarget = doc.targetEntities.some((entity: any) => {
-      const classMatch = entity.class_id ? entity.class_id.toString() === task.class_id?.toString() : true;
-      const subdeptMatch = entity.subdept_id ? entity.subdept_id.toString() === task.subdepartment?.id?.toString() : true;
-      return classMatch && subdeptMatch;
-    });
-    if (!matchesTarget) return false;
-    return true;
-  }
-
-  const taskClassId = task.class_id?.toString();
-  const taskSubdeptId = task.subdepartment?.id?.toString();
-  const docClassId = doc.class_id?.toString();
-  const docSubdeptId = doc.subdept_id?.toString();
-
-  if (docClassId) {
-    if (docClassId !== taskClassId) return false;
-    if (docSubdeptId && docSubdeptId !== taskSubdeptId) return false;
-    return true;
-  }
-
-  if (docSubdeptId) {
-    return docSubdeptId === taskSubdeptId;
-  }
-
-  if (childContext?.childLevelId && childContext?.childLevelType) {
-    const { childLevelId, childLevelType } = childContext;
-    if (doc[`${childLevelType}_id`] && doc[`${childLevelType}_id`].toString() !== childLevelId) {
-      return false;
-    }
-    if (childLevelType === 'subclass' && doc.class_id && doc.class_id.toString() !== taskClassId) return false;
-    if (childLevelType === 'class' && doc.subdept_id && doc.subdept_id.toString() !== taskSubdeptId) return false;
-  }
-
-  if (doc.entityType === 'class' && doc.class_id) {
-    const classMatch = taskClassId === doc.class_id.toString();
-    if (doc.subdept_id) return classMatch && (taskSubdeptId === doc.subdept_id.toString());
-    return classMatch;
-  }
-
-  if (doc.entityType === 'subdept' && doc.subdept_id) {
-    return taskSubdeptId === doc.subdept_id.toString();
-  }
-
-  return false;
-};
-
-// Function to get documents linked to other tasks
-const getDocumentsLinkedToOtherTasks = async (
-  currentTaskId: string,
-  individualId: string
-): Promise<Set<string>> => {
-  try {
-
-    // Get tasks with source_document_id (linked source documents)
-    const { data: sourceDocTasks, error: sourceDocError } = await supabase
-      .from("tm_tasks")
-      .select("id, source_document_id")
-      .eq("individual_id", individualId)
-      .neq("id", currentTaskId)
-      .not("source_document_id", "is", null);
-
-    if (sourceDocError) throw sourceDocError;
-
-    // Get completed tasks to check stage-linked documents
-    const { data: completedTasks, error: completedError } = await supabase
-      .from("tm_tasks")
-      .select("id, stages")
-      .eq("individual_id", individualId)
-      .neq("id", currentTaskId)
-      .in('status', ['completed', 'write_up_completed']);
-
-    if (completedError) throw completedError;
-
-    const linkedDocIds = new Set<string>();
-
-    // Check source_document_id links
-    if (sourceDocTasks) {
-
-      sourceDocTasks.forEach((task: TaskDocumentLink) => {
-        if (task.source_document_id && typeof task.source_document_id === "object") {
-          Object.values(task.source_document_id).forEach((docs) => {
-            const docArray = Array.isArray(docs) ? docs : [docs];
-            docArray.forEach((doc) => {
-              if (doc?.id) {
-                linkedDocIds.add(doc.id.toString());
-              }
-            });
-          });
-        }
-      });
-    }
-
-    // Check documents linked to completed stages
-    if (completedTasks) {
-
-      completedTasks.forEach((task: any) => {
-
-        if (task.stages && typeof task.stages === "object") {
-          Object.entries(task.stages).forEach(([stageId, stageData]: [string, any]) => {
-            // Only check completed stages
-            if (stageData.status === 'completed') {
-
-              const stageDocuments = stageData.documents || {};
-              Object.values(stageDocuments).forEach((stageDoc: any) => {
-                if (stageDoc?.id) {
-                  linkedDocIds.add(stageDoc.id.toString());
-                }
-                if (stageDoc?.linked_document_id) {
-                  linkedDocIds.add(stageDoc.linked_document_id.toString());
-                }
-              });
-            }
-          });
-        }
-      });
-    }
-
-
-    return linkedDocIds;
-  } catch (error) {
-    console.error("Error fetching linked documents:", error);
-    return new Set<string>();
-  }
-};
-
 export function LinkSourceDocumentDialog({
   open,
   onOpenChange,
@@ -279,222 +153,23 @@ export function LinkSourceDocumentDialog({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<any>(null);
   const [loadingPreviewId, setLoadingPreviewId] = useState<number | null>(null);
-  const [documentsLinkedToOtherTasks, setDocumentsLinkedToOtherTasks] = useState<Set<string>>(new Set());
+  // Same "who's already claimed this document" data StageUploadDialog fetches for its own
+  // "use existing document" path — see getDocumentLinkAvailabilityContext. Keeping both dialogs
+  // on this one shared query/shape means a document that's unavailable in one is unavailable in
+  // the other, instead of each dialog running its own divergent exclusion rule.
+  const [availabilityContext, setAvailabilityContext] = useState<{
+    otherTasksData: any[];
+    workflowDocMap: Record<string, any>;
+    triggerDocIdsFromWorkflow: Set<string>;
+  } | null>(null);
   const [isLoadingLinkedDocs, setIsLoadingLinkedDocs] = useState(false);
-  const [workflowDocuments, setWorkflowDocuments] = useState<Record<string, any>>({});
-  const [freshTaskData, setFreshTaskData] = useState<any>(null); // Track fresh task data
-  const [individualTasks, setIndividualTasks] = useState<any[]>([]); // Track all tasks for individual
 
-  // Track documentsLinkedToOtherTasks state changes
-  useEffect(() => {
-  }, [documentsLinkedToOtherTasks, isLoadingLinkedDocs, open]);
-
-  // NEW: Handle workflow resolution for original documents in write_up stage
-  const resolveOriginalDocumentWorkflow = async (newDocumentId: string, documentTypeId: string) => {
-    try {
-
-      // Find existing workflow logs for this document type that have not_applicable status
-      const { data: existingLogs, error: logsError } = await supabase
-        .from('document_workflow_logs')
-        .select('*')
-        .eq('individual_id', task.individual_id)
-        .eq('document_type_id', documentTypeId)
-        .order('created_at', { ascending: false });
-
-      if (logsError) {
-        console.error('Error fetching existing logs:', logsError);
-        throw logsError;
-      }
-
-
-      if (!existingLogs || existingLogs.length === 0) {
-        return;
-      }
-
-      // Find the most recent log with not_applicable tasks
-      const logToResolve = existingLogs.find(log => {
-        const tasks = Array.isArray(log.tasks) ? log.tasks : [];
-        const hasNotApplicable = tasks.some((task: any) => task.status === 'not_applicable');
-        return hasNotApplicable;
-      });
-
-      if (!logToResolve) {
-        return;
-      }
-
-
-      // Create a new resolution that marks the document as renewed
-      const newResolution = {
-        outcome: 'renewed_by_client',
-        document_id: newDocumentId, // Link to the new document
-        effectiveDate: new Date().toISOString().split('T')[0],
-        note: 'Document renewed through task completion',
-        createdAt: new Date().toISOString()
-      };
-
-      // Update the workflow log with the new resolution
-      const updatedResolutions = Array.isArray(logToResolve.resolutions)
-        ? [...logToResolve.resolutions, newResolution]
-        : [newResolution];
-
-      // Update tasks array to remove not_applicable status
-      const updatedTasks = Array.isArray(logToResolve.tasks)
-        ? logToResolve.tasks.map((task: any) =>
-          task.status === 'not_applicable'
-            ? { ...task, status: 'completed', note: 'Document renewed - task completed' }
-            : task
-        )
-        : [];
-
-
-      const { error: updateError } = await supabase
-        .from('document_workflow_logs')
-        .update({
-          resolutions: updatedResolutions,
-          tasks: updatedTasks,
-          action_type: 'resolution',
-          updated_at: new Date().toISOString(),
-          updated_by_id: actor.by_id,
-        })
-        .eq('id', logToResolve.id);
-
-      if (updateError) {
-        console.error('Error updating workflow log:', updateError);
-        throw updateError;
-      }
-
-
-      toast({
-        title: 'Document Renewed',
-        description: 'Original document workflow has been updated to reflect renewal',
-        variant: 'default'
-      });
-
-    } catch (error) {
-      console.error('Error resolving original document workflow:', error);
-      toast({
-        title: 'Workflow Resolution Error',
-        description: 'Failed to update original document workflow',
-        variant: 'destructive'
-      });
-    }
-  };
-
-  // NEW: Handle unlinking of documents
-  const handleUnlinkDocument = useCallback(async (stageId: string, docId: string) => {
-    try {
-      setIsLoading(true);
-
-
-      // Remove the document from the selected docs in local state
-      setSelectedDocs(prev => {
-        const currentSelections = prev[stageId] ? [...prev[stageId]] : [];
-        const filteredSelections = currentSelections.filter(d => d.id !== docId);
-        return { ...prev, [stageId]: filteredSelections };
-      });
-
-      // Update the database to remove the document from source_document_id
-      const { data: currentTask } = await supabase
-        .from('tm_tasks')
-        .select('source_document_id, stages')
-        .eq('id', task.id)
-        .single();
-
-      if (currentTask?.source_document_id) {
-        // Remove the document from the stage in source_document_id
-        const updatedSourceDocs = { ...currentTask.source_document_id };
-        if (updatedSourceDocs[stageId]) {
-          updatedSourceDocs[stageId] = Array.isArray(updatedSourceDocs[stageId])
-            ? updatedSourceDocs[stageId].filter((doc: any) => doc.id !== docId)
-            : updatedSourceDocs[stageId].id !== docId ? updatedSourceDocs[stageId] : [];
-        }
-
-        // Also update the stages JSON to remove the document
-        const updatedStages = { ...currentTask.stages };
-        if (updatedStages?.[stageId]?.documents) {
-          const stageDocs = updatedStages[stageId].documents;
-          Object.keys(stageDocs).forEach(docKey => {
-            if (stageDocs[docKey]?.id === docId) {
-              delete stageDocs[docKey];
-            }
-          });
-
-          // Determine the new stage status based on remaining documents
-          const remainingDocs = Object.keys(stageDocs).length;
-          const currentStage = updatedStages[stageId];
-          const previousStatus = currentStage?.status;
-
-
-          // Revert stage status based on remaining documents and previous status
-          let newStatus = 'in_progress'; // Default fallback
-
-          if (remainingDocs === 0) {
-            // No documents left - revert to in_progress
-            newStatus = 'in_progress';
-          } else if (previousStatus === 'endorsed') {
-            // Was endorsed but now has fewer documents - revert to write_up
-            newStatus = 'write_up';
-          } else if (previousStatus === 'completed' || previousStatus === 'write_up') {
-            // Was completed or write_up - revert to in_progress if documents removed
-            newStatus = 'in_progress';
-          } else {
-            // Keep current status for other cases
-            newStatus = previousStatus || 'in_progress';
-          }
-
-          // Update the stage with new status and metadata
-          updatedStages[stageId] = {
-            ...currentStage,
-            status: newStatus,
-            documentsUploaded: remainingDocs,
-            lastUpdated: new Date().toISOString(),
-            updated_by_id: actor.by_id,
-            // Clear completion-specific fields if reverting from completed
-            ...(newStatus !== 'completed' && {
-              completedAt: null,
-              date: null
-            })
-          };
-
-        }
-
-        // Update both source_document_id and stages in the database
-        const { error: updateError } = await supabase
-          .from('tm_tasks')
-          .update({
-            source_document_id: updatedSourceDocs,
-            stages: updatedStages,
-            updated_at: new Date().toISOString(),
-            updated_by_id: actor.by_id,
-          })
-          .eq('id', task.id);
-
-        if (updateError) {
-          console.error('[LinkSourceDocumentDialog] Error updating task:', updateError);
-          throw updateError;
-        }
-
-      }
-
-      toast({
-        title: 'Document Unlinked',
-        description: 'Document has been removed from the task and stage status has been updated',
-        variant: 'default'
-      });
-
-      // Refresh the data
-      onLinkSuccess();
-    } catch (error) {
-      console.error('Error unlinking document:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to unlink document',
-        variant: 'destructive'
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [task.id, onLinkSuccess]);
+  // Documents that triggered THIS task (e.g. a renewal task created off an expiring document) —
+  // those shouldn't be offered back as something this task can "link" as if it were new.
+  const currentTaskTriggerDocumentIds = useMemo(
+    () => collectTaskTriggerDocumentIds(task?.source_document_id),
+    [task?.source_document_id]
+  );
 
   const initialSelectedDocs = useMemo(() => {
     const normalized: Record<string, SelectedDoc[]> = {};
@@ -512,18 +187,12 @@ export function LinkSourceDocumentDialog({
     return normalized;
   }, [task?.source_document_id, allDocuments]);
 
-  // Enhanced data fetching similar to StageUploadDialog
+  // Same availability data StageUploadDialog fetches for its own "use existing document" path.
   useEffect(() => {
     if (!open) {
-      const resetStates = () => {
-        setSelectedDocs({});
-        setDocumentsLinkedToOtherTasks(new Set());
-        setWorkflowDocuments({});
-        setFreshTaskData(null);
-        setIndividualTasks([]);
-        setIsLoadingLinkedDocs(false);
-      };
-      resetStates();
+      setSelectedDocs({});
+      setAvailabilityContext(null);
+      setIsLoadingLinkedDocs(false);
       return;
     }
 
@@ -531,84 +200,20 @@ export function LinkSourceDocumentDialog({
     setSelectedDocs(initialSelectedDocs);
 
     let isCancelled = false;
+    setIsLoadingLinkedDocs(true);
     const fetchData = async () => {
       try {
-
-        // 1. Fetch Fresh Task Data for the current task
-        const { data: freshTaskData, error: taskError } = await supabase
-          .from('tm_tasks')
-          .select('*')
-          .eq('id', task.id)
-          .single();
-
-        if (taskError) console.error('Error fetching fresh task data:', taskError);
-
-        // 2. Fetch all tasks for the same individual
-        const { data: individualTasksData, error: individualTasksError } = await supabase
-          .from('tm_tasks')
-          .select('*')
-          .eq('individual_id', task.individual_id);
-
-        if (individualTasksError) console.error('Error fetching individual tasks:', individualTasksError);
-
-        // 3. IDENTIFY LINKED DOCS (Corrected Logic)
-        // We only want to block documents that are linked to OTHER tasks.
-        const allLinkedDocIds = new Set<string>();
-
-        const tasksToProcess = individualTasksData || [];
-
-        tasksToProcess.forEach((t) => {
-          // SKIP the current task. We only care about what OTHER tasks have "consumed"
-          if (String(t.id) === String(task.id)) return;
-
-          if (t.stages) {
-            Object.values(t.stages).forEach((s: any) => {
-              if (s.documents) {
-                Object.values(s.documents).forEach((d: any) => {
-                  if (d.id) {
-                    allLinkedDocIds.add(String(d.id));
-                  }
-                });
-              }
-            });
-          }
-        });
-
-        // 4. Fetch workflow documents
-        const workflowLogs = await getWorkflowLogsForIndividual(task.individual_id);
-        if (isCancelled) return;
-
-        const workflowDocMap: Record<string, any> = {};
-        if (workflowLogs) {
-          workflowLogs.forEach((log: any) => {
-            const isCompleted = log.resolutions && log.resolutions.length > 0;
-            if (log.uploaded_doc_id) {
-              workflowDocMap[log.uploaded_doc_id] = {
-                ...log,
-                isWorkflowDocument: true,
-                workflowOutcome: isCompleted ? log.resolutions[0]?.outcome : log.action_type,
-                isCompleted: isCompleted
-              };
-            }
-          });
-        }
-
-        // 5. Final State Update
+        const ctx = await getDocumentLinkAvailabilityContext(task, { isCompanyTask: false, companyId: null });
         if (!isCancelled) {
-
-          setFreshTaskData(freshTaskData);
-          setIndividualTasks(individualTasksData || []);
-          setDocumentsLinkedToOtherTasks(allLinkedDocIds); // This now strictly contains IDs from other tasks
-          setWorkflowDocuments(workflowDocMap);
-          setIsLoadingLinkedDocs(false);
+          setAvailabilityContext(ctx);
         }
-
       } catch (error) {
         console.error("Error initializing dialog:", error);
         if (!isCancelled) {
           toast({ title: "Error loading data", variant: "destructive" });
-          setIsLoadingLinkedDocs(false);
         }
+      } finally {
+        if (!isCancelled) setIsLoadingLinkedDocs(false);
       }
     };
 
@@ -626,81 +231,161 @@ export function LinkSourceDocumentDialog({
       .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
   }, [stages, task, departments]);
 
+  // Precomputed once per stage/document-set/availability change, not on every render — the JSX
+  // below used to re-run this filter for every stage on every render, including one triggered by
+  // merely checking a checkbox (a selectedDocs update), since selectedDocs isn't a dependency here.
+  const availableDocsByStage = useMemo(() => {
+    const map = new Map<string, Array<{ doc: Document; hasNoTaskOutcome: boolean }>>();
+    if (!availabilityContext) return map;
+
+    applicableStages.forEach((stage) => {
+      const applicableDocuments = stage.documents?.filter((doc) =>
+        isStageDocumentApplicableToTask(doc, task)
+      ) || [];
+      const stageDocTypes = new Set(applicableDocuments.map((d) => d.kycId));
+
+      // collectTaskTriggerDocumentIds treats every document already linked ANYWHERE on this
+      // task as a "trigger doc" to exclude — correct for StageUploadDialog, which shows an
+      // already-linked doc through a separate locked banner instead of this list. This dialog
+      // has no such separate banner: the checkbox list IS how an already-linked document is
+      // shown (checked) and unlinked (unchecked), so a doc already linked to THIS stage must
+      // stay in the list even though it also counts as a trigger doc.
+      const alreadyLinkedToThisStageIds = new Set(
+        (initialSelectedDocs[stage.id] || []).map((d) => d.id.toString())
+      );
+
+      const availableDocs = allDocuments
+        .filter((d) => {
+          const individualMatch = d.director_id?.toString() === task.individual_id?.toString();
+          const stageDocTypesMatch = stageDocTypes.has(d.document_id);
+          return individualMatch && stageDocTypesMatch;
+        })
+        .map((d) => ({
+          doc: d,
+          ...isDocumentAvailableForLinking(d, task, availabilityContext, currentTaskTriggerDocumentIds),
+        }))
+        .filter((entry) => entry.available || alreadyLinkedToThisStageIds.has(entry.doc.id.toString()))
+        .sort((a, b) => new Date(b.doc.created_at).getTime() - new Date(a.doc.created_at).getTime());
+
+      map.set(stage.id, availableDocs);
+    });
+
+    return map;
+  }, [applicableStages, allDocuments, availabilityContext, task, currentTaskTriggerDocumentIds, initialSelectedDocs]);
+
+  // Builds the same stage-entry/source_document_id shape StageUploadDialog's saveAllDocuments
+  // writes for an existing-document link, advances task.status through the same stage ladder,
+  // and fires the same write-up/endorsement renewal pairing — see taskManagerData.ts. This dialog
+  // also lets the user UNCHECK an already-linked document, so each touched stage is diffed
+  // against what was linked when the dialog opened: newly-checked docs go through
+  // buildStageLinkUpdate, newly-unchecked ones through buildStageUnlinkUpdate (unlink is applied
+  // first so a same-stage add+remove in one save lands on the post-removal document set). Every
+  // touched stage is batched into a single tm_tasks update instead of one write per stage.
   const handleSave = useCallback(async () => {
     setIsLoading(true);
     try {
       const currentDate = new Date().toISOString();
+      const allStageIds = new Set([...Object.keys(selectedDocs), ...Object.keys(initialSelectedDocs)]);
 
-      // Build updated stages JSON like StageUploadDialog
-      const updatedStages = {
-        ...task.stages,
-      };
+      let updatedStages = { ...task.stages };
+      let updatedSourceDocs = { ...task.source_document_id };
+      let runningStatus = task.status;
+      let advancedStatus: string | null = null;
+      const touchedStageIds: string[] = [];
 
-      // Update each stage with linked documents
-      Object.entries(selectedDocs).forEach(([stageId, docs]) => {
-        if (docs.length > 0) {
-          const stageDocuments = { ...(task.stages?.[stageId]?.documents || {}) };
+      allStageIds.forEach((stageId) => {
+        const currentDocs = selectedDocs[stageId] || [];
+        const initialDocs = initialSelectedDocs[stageId] || [];
+        const currentIds = new Set(currentDocs.map((d) => d.id.toString()));
+        const initialIds = new Set(initialDocs.map((d) => d.id.toString()));
 
-          // Add each document to the stage
-          docs.forEach(doc => {
-            const kycDoc = kycDocuments.get(doc.document_id);
-            stageDocuments[doc.id] = {
-              id: doc.id,
-              document_id: doc.document_id,
-              name: kycDoc?.display_name || kycDoc?.name || 'document',
-              linked_at: currentDate,
-              status: 'linked'
-            };
+        const docsToAdd = currentDocs.filter((d) => !initialIds.has(d.id.toString()));
+        const docIdsToRemove = initialDocs
+          .map((d) => d.id.toString())
+          .filter((id) => !currentIds.has(id));
+
+        if (docsToAdd.length === 0 && docIdsToRemove.length === 0) return;
+        touchedStageIds.push(stageId);
+
+        if (docIdsToRemove.length > 0) {
+          const { updatedStageEntry, sourceDocsForStage } = buildStageUnlinkUpdate({
+            task: { stages: updatedStages, source_document_id: updatedSourceDocs },
+            stageId,
+            docIdsToUnlink: docIdsToRemove,
+            uploaderId: actor.by_id,
+            currentDate,
           });
+          updatedStages = { ...updatedStages, [stageId]: updatedStageEntry };
+          updatedSourceDocs = { ...updatedSourceDocs, [stageId]: sourceDocsForStage };
+        }
 
-          updatedStages[stageId] = {
-            ...task.stages?.[stageId],
-            status: 'completed',
-            date: currentDate.split('T')[0],
-            completedAt: currentDate,
-            documentsUploaded: docs.length,
-            lastUpdated: currentDate,
-            updated_by_id: actor.by_id,
-            documents: stageDocuments
-          };
+        if (docsToAdd.length > 0) {
+          const { updatedStageEntry, sourceDocsForStage } = buildStageLinkUpdate({
+            task: { stages: updatedStages, source_document_id: updatedSourceDocs },
+            stageId,
+            docsToLink: docsToAdd,
+            kycDocuments,
+            uploaderId: actor.by_id,
+            currentDate,
+          });
+          updatedStages = { ...updatedStages, [stageId]: updatedStageEntry };
+          updatedSourceDocs = { ...updatedSourceDocs, [stageId]: sourceDocsForStage };
+        }
+
+        // Only a stage that ends this save as 'completed' should be able to advance the task's
+        // status — a pure or net unlink reverts the stage's own status but must never ratchet
+        // the task status, forward or back.
+        if (updatedStages[stageId]?.status === 'completed') {
+          const advance = computeAdvancedTaskStatus(runningStatus, stageId);
+          if (advance) {
+            advancedStatus = advance;
+            runningStatus = advance;
+          }
         }
       });
 
-      // Update the task with selected documents and stages
+      if (touchedStageIds.length === 0) {
+        toast({ title: "Nothing to save", description: "No changes were made.", variant: "default" });
+        return;
+      }
+
+      const updateData: Record<string, any> = {
+        stages: updatedStages,
+        source_document_id: updatedSourceDocs,
+        updated_at: currentDate,
+        updated_by_id: actor.by_id,
+      };
+      if (advancedStatus) updateData.status = advancedStatus;
+
       const { error } = await supabase
         .from("tm_tasks")
-        .update({
-          source_document_id: selectedDocs,
-          stages: updatedStages,
-          updated_at: currentDate,
-          updated_by_id: actor.by_id,
-        })
+        .update(updateData)
         .eq("id", task.id);
 
       if (error) throw error;
 
-      // NEW: Handle workflow resolution for write_up stage
-      const writeUpStageId = '072b9710-45df-4a05-ba65-01b4ef29d61d';
-      const writeUpDocs = selectedDocs[writeUpStageId] || [];
+      // This save may have just claimed a document (or advanced the task's status), which
+      // changes what the shared availability lookup would return for this individual — drop the
+      // cached copy so the next dialog open (this task or another for the same individual) refetches.
+      invalidateDocumentLinkAvailabilityCache(task, { isCompanyTask: false, companyId: null });
 
-      if (writeUpDocs.length > 0) {
+      await maybeResolveWriteUpWorkflowPairing({
+        task,
+        updatedStages,
+        touchedStageIds,
+        isCompanyTask: false,
+        uploaderId: actor.by_id,
+      });
 
-        // Process each document in write_up stage
-        for (const doc of writeUpDocs) {
-          const uploadedDocInfo = doc; // Already has id and document_id
-          await resolveOriginalDocumentWorkflow(uploadedDocInfo.id, uploadedDocInfo.document_id);
-        }
-      }
-
-      toast({ title: "Success", description: "Source documents linked successfully." });
+      toast({ title: "Success", description: "Source document links updated successfully." });
       onLinkSuccess();
     } catch (error: any) {
-      console.error("Failed to link documents:", error);
-      toast({ title: "Error", description: `Failed to link source documents: ${error.message}`, variant: "destructive" });
+      console.error("Failed to update source document links:", error);
+      toast({ title: "Error", description: `Failed to update source document links: ${error.message}`, variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
-  }, [selectedDocs, task.id, onLinkSuccess]);
+  }, [selectedDocs, initialSelectedDocs, task, kycDocuments, onLinkSuccess, actor.by_id]);
 
   const handleDocSelectionChange = useCallback((stageId: string, doc: Document, isSelected: boolean) => {
     setSelectedDocs((prev) => {
@@ -799,117 +484,83 @@ export function LinkSourceDocumentDialog({
         <DialogContent className="max-w-7xl h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Link Source Documents for: {task?.applicant_name} (Task ID: {task?.id})</DialogTitle>
-            <DialogDescription>Select one or more documents for each stage.</DialogDescription>
+            <DialogDescription>Check a document to link it to a stage, or uncheck an already-linked one to unlink it.</DialogDescription>
           </DialogHeader>
 
           <div className="flex-grow overflow-hidden border-t border-b">
             <ScrollArea className="h-full pr-6">
-              {isLoadingLinkedDocs ? (
+              {isLoadingLinkedDocs || !availabilityContext ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
                   <p className="ml-3 text-slate-600">Loading available documents...</p>
                 </div>
               ) : (
-                <>
-                  <div className="space-y-6 py-4">
-                    {applicableStages.map((stage) => {
-                      // Filter stage documents to only those applicable to this task
-                      const applicableDocuments = stage.documents?.filter((doc) =>
-                        isDocumentApplicableToTask(doc, task)
-                      ) || [];
+                <div className="space-y-6 py-4">
+                  {applicableStages.map((stage) => {
+                    const availableDocs = availableDocsByStage.get(stage.id) || [];
 
-                      // Get KYC IDs only from applicable documents
-                      const stageDocTypes = new Set(applicableDocuments.map((d) => d.kycId));
+                    return (
+                      <div key={stage.id} className="p-4 border rounded-lg">
+                        <h3 className="font-semibold text-lg text-slate-800 mb-3">{stage.name}</h3>
+                        {availableDocs.length > 0 ? (
+                          <div className="space-y-2">
+                            {availableDocs.map(({ doc, hasNoTaskOutcome }) => {
+                              const kycDoc = kycDocuments.get(doc.document_id);
+                              const isSelected = selectedDocs[stage.id]?.some(d => d.id.toString() === doc.id.toString()) || false;
+                              const isDisabled = hasNoTaskOutcome && !isSelected;
 
-                      // Only show documents if cross-task data is loaded to prevent appearing/disappearing
-                      if (isLoadingLinkedDocs) {
-                        return (
-                          <div key={stage.id} className="p-4 border rounded-lg">
-                            <h3 className="font-semibold text-lg text-slate-800 mb-3">{stage.name}</h3>
-                            <div className="flex items-center justify-center py-8">
-                              <Loader2 className="h-6 w-6 animate-spin text-slate-400 mr-2" />
-                              <span className="text-slate-600">Checking document availability...</span>
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      const availableDocs = allDocuments
-                        .filter(
-                          (d) => {
-                            const individualMatch = d.director_id?.toString() === task.individual_id?.toString();
-                            const stageDocTypesMatch = stageDocTypes.has(d.document_id);
-                            const isLinkedToOtherTasks = documentsLinkedToOtherTasks.has(d.id.toString());
-
-                            // Only log documents that actually match the individual to reduce noise
-
-
-                            const isAvailable = individualMatch &&
-                              stageDocTypesMatch && // Only fetch documents of applicable types
-                              !isLinkedToOtherTasks; // Filter out docs linked to other tasks
-
-
-                            return isAvailable;
-                          }
-                        )
-                        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-
-                      return (
-                        <div key={stage.id} className="p-4 border rounded-lg">
-                          <h3 className="font-semibold text-lg text-slate-800 mb-3">{stage.name}</h3>
-                          {availableDocs.length > 0 ? (
-                            <div className="space-y-2">
-                              {availableDocs.map((doc) => {
-                                const kycDoc = kycDocuments.get(doc.document_id);
-                                const isSelected = selectedDocs[stage.id]?.some(d => d.id.toString() === doc.id.toString()) || false;
-
-                                return (
-                                  <div
-                                    key={doc.id}
-                                    className={`flex items-center gap-4 p-3 border rounded-md transition-colors ${isSelected ? "bg-blue-50 border-blue-300" : "hover:bg-slate-50"}`}
-                                  >
-                                    <div className="flex items-center gap-3 flex-1">
-                                      <Checkbox
-                                        id={`${stage.id}-${doc.id}`}
-                                        checked={isSelected}
-                                        onCheckedChange={(checked) => handleDocSelectionChange(stage.id, doc, !!checked)}
-                                      />
-                                      <div className="min-w-0">
-                                        <Label htmlFor={`${stage.id}-${doc.id}`} className="font-medium text-slate-900 block truncate cursor-pointer">
+                              return (
+                                <div
+                                  key={doc.id}
+                                  className={`flex items-center gap-4 p-3 border rounded-md transition-colors ${isSelected ? "bg-blue-50 border-blue-300" : isDisabled ? "opacity-70 bg-slate-50/50" : "hover:bg-slate-50"}`}
+                                >
+                                  <div className="flex items-center gap-3 flex-1">
+                                    <Checkbox
+                                      id={`${stage.id}-${doc.id}`}
+                                      checked={isSelected}
+                                      disabled={isDisabled}
+                                      onCheckedChange={(checked) => handleDocSelectionChange(stage.id, doc, !!checked)}
+                                    />
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <Label htmlFor={`${stage.id}-${doc.id}`} className={`font-medium text-slate-900 block truncate ${isDisabled ? 'cursor-default' : 'cursor-pointer'}`}>
                                           {kycDoc?.display_name || kycDoc?.name || doc.document_id}
                                         </Label>
-                                        <p className="text-xs text-slate-500 truncate">{doc.file_path?.split("/").pop() || "document"}</p>
-                                      </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => handlePreviewClick(doc)}
-                                        disabled={loadingPreviewId === doc.id}
-                                        className="h-8 w-8 p-0"
-                                      >
-                                        {loadingPreviewId === doc.id ? (
-                                          <Loader2 className="h-4 w-4 animate-spin" />
-                                        ) : (
-                                          <Eye className="h-4 w-4" />
+                                        {hasNoTaskOutcome && (
+                                          <Badge variant="outline" className="text-[10px] text-amber-700 border-amber-300 bg-amber-50">
+                                            Resolved &mdash; not applicable
+                                          </Badge>
                                         )}
-                                      </Button>
+                                      </div>
+                                      <p className="text-xs text-slate-500 truncate">{doc.file_path?.split("/").pop() || "document"}</p>
                                     </div>
                                   </div>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <p className="text-sm text-slate-500 italic">No available documents for this stage.</p>
-                          )}
-                        </div>
-                      );
-                    })
-                    }
-                  </div>
-                </>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handlePreviewClick(doc)}
+                                      disabled={loadingPreviewId === doc.id}
+                                      className="h-8 w-8 p-0"
+                                    >
+                                      {loadingPreviewId === doc.id ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <Eye className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-slate-500 italic">No available documents for this stage.</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </ScrollArea>
           </div>
@@ -920,19 +571,25 @@ export function LinkSourceDocumentDialog({
             </Button>
             <Button onClick={handleSave} disabled={isLoading}>
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Link Documents
+              Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {previewDocument && (
-        <ExtractionPreview
-          isOpen={isPreviewOpen}
-          onClose={() => setIsPreviewOpen(false)}
-          document={previewDocument}
-        />
-      )}
+      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+        <DialogContent className="max-w-[1800px] h-[90vh] max-h-[95vh] p-4 flex flex-col overflow-hidden">
+          {previewDocument && (
+            <div className="flex-1 min-h-0">
+              <ExtractionPreview
+                {...previewDocument}
+                expanded={true}
+                showSaveButton={false}
+              />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

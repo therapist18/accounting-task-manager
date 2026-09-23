@@ -9,6 +9,7 @@ const DATE_FIELDS = ["deadline_date", "respond_date", "promised_date", "approval
 const TEXT_FIELDS = [
   "notice_type",
   "contents",
+  "attachments_summary",
   "signing_officer_name",
   "signing_officer_position",
   "respond_contents",

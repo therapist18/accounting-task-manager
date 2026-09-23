@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/lib/hooks/use-toast"
+import { getWorkflowLogsForIndividual } from "./workflowSyncService"
 
 // Types
 export interface Task {
@@ -1063,6 +1064,483 @@ export const getLinkedDocumentsForTaskStage = (
       return doc;
     })
     .filter((doc: any): doc is DirectorDocument => !!doc);
+};
+
+// ─── Shared "link an existing document into a stage" mechanics ─────────────────────────────
+// StageUploadDialog (per-stage, "use existing document" path) and LinkSourceDocumentDialog
+// (whole-task, link-only) both end up writing a document reference into
+// tm_tasks.source_document_id[stageId] and tm_tasks.stages[stageId].documents. They used to each
+// carry their own copy of the status-advance rule, the "is this doc already spoken for"
+// exclusion query, and the write-up/endorsement workflow-resolution pairing — which let the two
+// dialogs disagree about what's available to link and what linking it should do. Centralized
+// here so both dialogs produce the identical result for the identical action.
+
+export const WRITE_UP_STAGE_ID = '072b9710-45df-4a05-ba65-01b4ef29d61d';
+export const ENDORSEMENT_STAGE_IDS = ['6625f6d2-8017-4bf4-96c2-85335703164c', 'caefd742-5de5-4341-a3bb-81d7b9dd2b73'];
+
+const STAGE_STATUS_MAPPING: Record<string, string> = {
+  'a19b270e-6d1e-4e6d-b2bc-f21db72cde08': 'in_progress',
+  [WRITE_UP_STAGE_ID]: 'write_up_completed',
+  [ENDORSEMENT_STAGE_IDS[0]]: 'endorsed',
+  [ENDORSEMENT_STAGE_IDS[1]]: 'endorsed',
+};
+
+const STATUS_PRIORITY: Record<string, number> = {
+  pending: 0, new: 0, enquiry: 0,
+  in_progress: 1,
+  write_up_completed: 2,
+  endorsed: 3,
+};
+
+const normalizeTaskStatus = (s: string | null | undefined): string => {
+  if (!s) return 'pending';
+  return s.toLowerCase().trim().replace(/[\s-]/g, '_');
+};
+
+/**
+ * Given the task's current status and the stage that just got a document linked to it, returns
+ * the task-level status it should advance to, or null if the stage doesn't gate a task status or
+ * the task is already at/past that point. Status only ever moves forward here.
+ */
+export const computeAdvancedTaskStatus = (
+  currentStatusRaw: string | null | undefined,
+  stageId: string
+): string | null => {
+  const potentialNewStatus = STAGE_STATUS_MAPPING[stageId];
+  if (!potentialNewStatus) return null;
+  const currentPriority = STATUS_PRIORITY[normalizeTaskStatus(currentStatusRaw)] ?? 0;
+  const newPriority = STATUS_PRIORITY[potentialNewStatus] ?? 0;
+  return newPriority > currentPriority ? potentialNewStatus : null;
+};
+
+/**
+ * Every document instance id referenced anywhere in a task's source_document_id map — these are
+ * the documents that TRIGGERED this task (e.g. a renewal task created off an expiring document),
+ * so they shouldn't also show up as something the task can "link" as if it were a fresh document.
+ */
+export const collectTaskTriggerDocumentIds = (sourceDocumentMap: any): Set<string> => {
+  const triggerIds = new Set<string>();
+  if (!sourceDocumentMap || typeof sourceDocumentMap !== 'object') return triggerIds;
+
+  Object.values(sourceDocumentMap).forEach((stageEntries: any) => {
+    if (!Array.isArray(stageEntries)) return;
+    stageEntries.forEach((entry: any) => {
+      [entry?.id, entry?.linked_document_id, entry?.uploaded_doc_id].forEach((candidate) => {
+        if (candidate !== undefined && candidate !== null && String(candidate).trim()) {
+          triggerIds.add(String(candidate));
+        }
+      });
+    });
+  });
+
+  return triggerIds;
+};
+
+export interface DocumentLinkAvailabilityContext {
+  otherTasksData: any[];
+  workflowDocMap: Record<string, any>;
+  triggerDocIdsFromWorkflow: Set<string>;
+}
+
+// Both dialogs re-ran this same pair of queries (other completed tasks + workflow logs) from
+// scratch on every open, including opening/closing the same task back to back or StageUploadDialog
+// re-fetching on refreshTrigger — same short-lived in-flight/result cache pattern as
+// fetchAllDocuments/fetchAllKycFields above, keyed per individual-or-company since the result
+// only varies by who the task belongs to (the `.neq('id', task.id)` self-exclusion is the only
+// per-task part, and matching on it loosely below still invalidates correctly on write).
+const documentLinkAvailabilityCache = new Map<string, { promise: Promise<DocumentLinkAvailabilityContext>; timestamp: number }>();
+const DOCUMENT_LINK_AVAILABILITY_CACHE_MS = 15000;
+
+const documentLinkAvailabilityCacheKey = (
+  task: { individual_id?: number | string; company_id?: number | string },
+  isCompanyTask: boolean,
+  companyId: number | string | null
+) => (isCompanyTask ? `company:${companyId}` : `individual:${task.individual_id}`);
+
+/**
+ * Drops cached availability lookups for the individual/company a task belongs to. Call after any
+ * write that could change what's "already claimed" for them — linking or unlinking a document on
+ * any of their tasks changes what every OTHER task for that individual/company should now show.
+ */
+export const invalidateDocumentLinkAvailabilityCache = (
+  task?: { individual_id?: number | string; company_id?: number | string },
+  opts: { isCompanyTask?: boolean; companyId?: number | string | null } = {}
+) => {
+  if (!task) {
+    documentLinkAvailabilityCache.clear();
+    return;
+  }
+  documentLinkAvailabilityCache.delete(
+    documentLinkAvailabilityCacheKey(task, opts.isCompanyTask ?? false, opts.companyId ?? null)
+  );
+};
+
+/**
+ * Fetches the data needed to decide which of an individual/company's existing documents are
+ * still available to link onto this task: every OTHER task for that individual/company (to
+ * exclude documents already linked to any stage of any of them, regardless of that other task's
+ * or stage's status — a document claimed elsewhere shouldn't be offered here) and this
+ * individual's workflow logs (to exclude the document(s) that triggered this task, and to flag
+ * documents whose workflow was resolved as not-applicable). Shared by StageUploadDialog and
+ * LinkSourceDocumentDialog.
+ */
+export const getDocumentLinkAvailabilityContext = (
+  task: { id: string | number; individual_id?: number | string; company_id?: number | string },
+  opts: { isCompanyTask?: boolean; companyId?: number | string | null } = {}
+): Promise<DocumentLinkAvailabilityContext> => {
+  const { isCompanyTask = false, companyId = null } = opts;
+
+  const cacheKey = documentLinkAvailabilityCacheKey(task, isCompanyTask, companyId);
+  const now = Date.now();
+  const cached = documentLinkAvailabilityCache.get(cacheKey);
+  if (cached && now - cached.timestamp < DOCUMENT_LINK_AVAILABILITY_CACHE_MS) {
+    return cached.promise;
+  }
+
+  const promise = fetchDocumentLinkAvailabilityContext(task, isCompanyTask, companyId);
+  documentLinkAvailabilityCache.set(cacheKey, { promise, timestamp: now });
+  return promise;
+};
+
+const fetchDocumentLinkAvailabilityContext = async (
+  task: { id: string | number; individual_id?: number | string; company_id?: number | string },
+  isCompanyTask: boolean,
+  companyId: number | string | null
+): Promise<DocumentLinkAvailabilityContext> => {
+  const otherTasksPromise = isCompanyTask
+    ? (companyId
+      ? supabase.from('tm_tasks').select('id, stages, company_id, status').eq('company_id', companyId).neq('id', task.id)
+      : Promise.resolve({ data: [] as any[] }))
+    : (task.individual_id
+      ? supabase.from('tm_tasks').select('id, stages, individual_id, status').eq('individual_id', task.individual_id).neq('id', task.id)
+      : Promise.resolve({ data: [] as any[] }));
+
+  const workflowLogsPromise = isCompanyTask || !task.individual_id
+    ? Promise.resolve([])
+    : getWorkflowLogsForIndividual(task.individual_id as number);
+
+  const [otherTasksRes, workflowLogs] = await Promise.all([otherTasksPromise, workflowLogsPromise]);
+
+  const workflowDocMap: Record<string, any> = {};
+  const triggerDocIdsFromWorkflow = new Set<string>();
+
+  (workflowLogs || []).forEach((log: any) => {
+    const isCompleted = log.resolutions && log.resolutions.length > 0;
+    const tasksArray = Array.isArray(log.tasks) ? log.tasks : [];
+    const isTriggerForCurrentTask = tasksArray.some((t: any) =>
+      Array.isArray(t.taskIds) && t.taskIds.map(String).includes(String(task.id))
+    );
+    if (isTriggerForCurrentTask && log.uploaded_doc_id) {
+      triggerDocIdsFromWorkflow.add(String(log.uploaded_doc_id));
+    }
+    const workflowDocInfo = {
+      ...log,
+      isWorkflowDocument: true,
+      workflowAction: log.action_type,
+      workflowOutcome: isCompleted ? log.resolutions[0]?.outcome : log.action_type,
+      isCompleted,
+    };
+    if (log.uploaded_doc_id) workflowDocMap[log.uploaded_doc_id] = workflowDocInfo;
+    if (log.document_type_id) workflowDocMap[log.document_type_id] = workflowDocInfo;
+  });
+
+  return {
+    otherTasksData: (otherTasksRes as any)?.data || [],
+    workflowDocMap,
+    triggerDocIdsFromWorkflow,
+  };
+};
+
+/**
+ * Applies the same "is this existing document still eligible to link onto this task" rule
+ * StageUploadDialog uses: not already linked to any stage of any OTHER task — regardless of that
+ * task's or stage's own status, since a document claimed elsewhere shouldn't be offered here at
+ * all — and not one of this task's own trigger documents. Also surfaces whether the document
+ * carries a "not_applicable" workflow outcome (hasNoTaskOutcome) so a dialog can show-but-disable
+ * it rather than hiding it outright.
+ */
+export const isDocumentAvailableForLinking = (
+  doc: { id: string | number; task_id?: string | number },
+  task: { id: string | number },
+  ctx: DocumentLinkAvailabilityContext,
+  currentTaskTriggerIds: Set<string>
+): { available: boolean; hasNoTaskOutcome: boolean; workflowLogId?: any; workflowOutcome?: any } => {
+  const docId = String(doc.id);
+  const workflowDoc = ctx.workflowDocMap[docId];
+  const hasNoTaskOutcome = Boolean(
+    workflowDoc?.tasks?.some?.((t: any) => t.status === 'not_applicable')
+  );
+
+  if (currentTaskTriggerIds.has(docId) || ctx.triggerDocIdsFromWorkflow.has(docId)) {
+    return { available: false, hasNoTaskOutcome, workflowLogId: workflowDoc?.id, workflowOutcome: workflowDoc?.workflowOutcome };
+  }
+
+  let available = !doc.task_id || String(doc.task_id) === String(task.id);
+  if (available) {
+    const isAlreadyLinkedToOtherTask = ctx.otherTasksData.some((otherTask: any) =>
+      Object.values(otherTask.stages || {}).some((stageData: any) => {
+        const stageDocuments = stageData?.documents || {};
+        return Object.values(stageDocuments).some((stageDoc: any) =>
+          String(stageDoc.id) === docId || String(stageDoc.linked_document_id) === docId
+        );
+      })
+    );
+    if (isAlreadyLinkedToOtherTask) available = false;
+  }
+
+  return { available, hasNoTaskOutcome, workflowLogId: workflowDoc?.id, workflowOutcome: workflowDoc?.workflowOutcome };
+};
+
+/**
+ * Builds the updated stage entry + source_document_id entries for linking one or more EXISTING
+ * documents onto a stage — the shared "commit" step behind both StageUploadDialog's "use
+ * existing document" path and LinkSourceDocumentDialog. Pure/no DB writes: callers combine the
+ * result into their own tm_tasks update (StageUploadDialog only ever touches one stage at a
+ * time; LinkSourceDocumentDialog may touch several stages in one save).
+ */
+export const buildStageLinkUpdate = (params: {
+  task: { stages?: Record<string, any>; source_document_id?: Record<string, any> };
+  stageId: string;
+  docsToLink: Array<{ id: string | number; document_id: string }>;
+  kycDocuments: Map<string, { name?: string; display_name?: string }>;
+  uploaderId: string | null;
+  currentDate?: string;
+}) => {
+  const { task, stageId, docsToLink, kycDocuments, uploaderId } = params;
+  const currentDate = params.currentDate || new Date().toISOString();
+
+  const existingStageDocs = { ...(task.stages?.[stageId]?.documents || {}) };
+  docsToLink.forEach((doc) => {
+    const kycDoc = kycDocuments.get(doc.document_id);
+    existingStageDocs[String(doc.id)] = {
+      id: doc.id,
+      document_id: doc.document_id,
+      name: kycDoc?.display_name || kycDoc?.name || 'document',
+      linked_at: currentDate,
+      status: 'linked',
+      uploaded_by_id: uploaderId,
+    };
+  });
+
+  const updatedStageEntry = {
+    ...task.stages?.[stageId],
+    status: 'completed',
+    date: currentDate.split('T')[0],
+    completedAt: currentDate,
+    documentsUploaded: Object.keys(existingStageDocs).length,
+    lastUpdated: currentDate,
+    uploaded_by_id: uploaderId,
+    documents: existingStageDocs,
+  };
+
+  const existingSourceDocs: any[] = Array.isArray(task.source_document_id?.[stageId])
+    ? task.source_document_id![stageId]
+    : [];
+  const dedupedByType = existingSourceDocs.filter(
+    (d: any) => !docsToLink.some((nd) => nd.document_id === d.document_id)
+  );
+  const sourceDocsForStage = [
+    ...dedupedByType,
+    ...docsToLink.map((doc) => ({
+      id: doc.id,
+      document_id: doc.document_id,
+      linked_at: currentDate,
+      status: 'linked',
+      linked_document_id: doc.id,
+    })),
+  ];
+
+  return { updatedStageEntry, sourceDocsForStage };
+};
+
+/**
+ * The inverse of buildStageLinkUpdate: removes one or more previously-linked documents from a
+ * stage and reverts the stage's status based on what's left — no documents left drops it back to
+ * in_progress, otherwise it steps back one level from wherever it was (endorsed → write_up,
+ * completed/write_up → in_progress). Task-level status is deliberately left alone here: unlinking
+ * shouldn't silently roll the whole task backward, only the stage's own record of what's linked.
+ */
+export const buildStageUnlinkUpdate = (params: {
+  task: { stages?: Record<string, any>; source_document_id?: Record<string, any> };
+  stageId: string;
+  docIdsToUnlink: Array<string | number>;
+  uploaderId: string | null;
+  currentDate?: string;
+}) => {
+  const { task, stageId, docIdsToUnlink, uploaderId } = params;
+  const currentDate = params.currentDate || new Date().toISOString();
+  const unlinkIds = new Set(docIdsToUnlink.map(String));
+
+  const existingStageDocs = { ...(task.stages?.[stageId]?.documents || {}) };
+  Object.keys(existingStageDocs).forEach((key) => {
+    if (unlinkIds.has(String(existingStageDocs[key]?.id))) {
+      delete existingStageDocs[key];
+    }
+  });
+
+  const remainingCount = Object.keys(existingStageDocs).length;
+  const previousStatus = task.stages?.[stageId]?.status;
+  const newStatus =
+    remainingCount === 0 ? 'in_progress'
+      : previousStatus === 'endorsed' ? 'write_up'
+        : (previousStatus === 'completed' || previousStatus === 'write_up') ? 'in_progress'
+          : (previousStatus || 'in_progress');
+
+  const updatedStageEntry = {
+    ...task.stages?.[stageId],
+    status: newStatus,
+    documentsUploaded: remainingCount,
+    lastUpdated: currentDate,
+    updated_by_id: uploaderId,
+    documents: existingStageDocs,
+    ...(newStatus !== 'completed' && { completedAt: null, date: null }),
+  };
+
+  const existingSourceDocs: any[] = Array.isArray(task.source_document_id?.[stageId])
+    ? task.source_document_id![stageId]
+    : [];
+  const sourceDocsForStage = existingSourceDocs.filter((d: any) => !unlinkIds.has(String(d.id)));
+
+  return { updatedStageEntry, sourceDocsForStage };
+};
+
+/**
+ * Marks the original document(s) that triggered this task as renewed. Moved here from
+ * StageUploadDialog so LinkSourceDocumentDialog (which can also complete the Write Up/
+ * Endorsement stages) resolves the same workflow logs the same way instead of running its own
+ * looser version of this.
+ */
+export const resolveOriginalDocumentWorkflow = async (
+  task: { id: string | number; individual_id?: number | string },
+  newDocumentId: string | number,
+  documentTypeId: string,
+  uploaderId: string | null
+): Promise<void> => {
+  try {
+    const { data: existingLogs, error: logsError } = await supabase
+      .from('document_workflow_logs')
+      .select('*')
+      .eq('individual_id', task.individual_id)
+      .order('created_at', { ascending: false });
+
+    if (logsError) throw logsError;
+    if (!existingLogs || existingLogs.length === 0) return;
+
+    // Filter to find ALL workflow logs that actually triggered this current task — e.g. multiple
+    // dependants may have triggered the task bundle, so all of them need resolving.
+    const logsToResolve = existingLogs.filter((log: any) => {
+      const tasks = Array.isArray(log.tasks) ? log.tasks : [];
+      return tasks.some((t: any) => Array.isArray(t.taskIds) && t.taskIds.map(String).includes(String(task.id)));
+    });
+    if (logsToResolve.length === 0) return;
+
+    await Promise.all(logsToResolve.map((logToResolve: any) => {
+      const newResolution = {
+        outcome: 'renewed',
+        document_id: newDocumentId,
+        renewed_by_document_type_id: documentTypeId,
+        effectiveDate: new Date().toISOString().split('T')[0],
+        note: `Document renewed through task completion (Task ID: ${task.id})`,
+        createdAt: new Date().toISOString(),
+      };
+      const updatedResolutions = Array.isArray(logToResolve.resolutions) ? [...logToResolve.resolutions, newResolution] : [newResolution];
+      const updatedTasks = Array.isArray(logToResolve.tasks)
+        ? logToResolve.tasks.map((t: any) => {
+          const isMatchingTask = Array.isArray(t.taskIds) && t.taskIds.map(String).includes(String(task.id));
+          if (isMatchingTask || t.status === 'not_applicable' || ['pending_task_creation', 'task_created', 'task_initiated'].includes(String(t.status || ''))) {
+            return { ...t, status: 'completed', note: 'Trigger document renewed by completed write-up task' };
+          }
+          return t;
+        })
+        : [];
+      const updatedPayload = {
+        ...(logToResolve.payload || {}),
+        activeWorkflow: {
+          ...(logToResolve.payload?.activeWorkflow || {}),
+          canProceed: false,
+          isCompleted: true,
+          currentAction: 'resolution',
+          currentStatus: 'renewed',
+          nextAction: null,
+          lastUpdated: new Date().toISOString(),
+        },
+      };
+      return supabase.from('document_workflow_logs').update({
+        resolutions: updatedResolutions,
+        tasks: updatedTasks,
+        payload: updatedPayload,
+        action_type: 'resolution',
+        updated_at: new Date().toISOString(),
+        updated_by_id: uploaderId,
+      }).eq('id', logToResolve.id);
+    }));
+
+    toast({
+      title: 'Documents Renewed',
+      description: 'Original document workflows have been updated to reflect renewal',
+      variant: 'default',
+    });
+  } catch (error) {
+    console.error('Error resolving original document workflow:', error);
+    toast({
+      title: 'Workflow Resolution Error',
+      description: 'Failed to update original document workflow',
+      variant: 'destructive',
+    });
+  }
+};
+
+/**
+ * After a batch of stage updates lands (any of which may be the Write Up or an Endorsement
+ * stage), fires resolveOriginalDocumentWorkflow exactly once, pointed at the Write Up document,
+ * the moment BOTH stages are complete — whichever of the two completes second, in either order.
+ * Guards against re-firing on a later re-save of a stage that was already done before this save.
+ * Shared so StageUploadDialog and LinkSourceDocumentDialog trigger this renewal pairing
+ * identically instead of StageUploadDialog's stage-pairing gate vs. LinkSourceDocumentDialog's
+ * old per-document, un-paired trigger.
+ */
+export const maybeResolveWriteUpWorkflowPairing = async (params: {
+  task: { id: string | number; individual_id?: number | string; stages?: Record<string, any>; linked_document_type_id?: string };
+  updatedStages: Record<string, any>;
+  touchedStageIds: string[];
+  isCompanyTask?: boolean;
+  uploaderId: string | null;
+}): Promise<void> => {
+  const { task, updatedStages, touchedStageIds, isCompanyTask, uploaderId } = params;
+  if (isCompanyTask) return;
+
+  const relevantStageIds = touchedStageIds.filter(
+    (id) => id === WRITE_UP_STAGE_ID || ENDORSEMENT_STAGE_IDS.includes(id)
+  );
+  if (relevantStageIds.length === 0) return;
+
+  try {
+    const wasAlreadyCompleted = relevantStageIds.some((id) => task.stages?.[id]?.status === 'completed');
+    const writeUpStageState = updatedStages[WRITE_UP_STAGE_ID];
+    const writeUpDone = writeUpStageState?.status === 'completed';
+    const endorsementDone = ENDORSEMENT_STAGE_IDS.some((id) => updatedStages[id]?.status === 'completed');
+
+    if (!wasAlreadyCompleted && writeUpDone && endorsementDone) {
+      // Point the resolution at the WRITE UP document specifically — that's the actual renewal
+      // evidence — regardless of whether this save was the Write Up or the Endorsement (the one
+      // that happened to complete the pair).
+      const writeUpDocuments = Object.values(writeUpStageState?.documents || {});
+      const workflowTargetDocument =
+        (writeUpDocuments.find((doc: any) => doc.document_id === task.linked_document_type_id) as any) ||
+        (writeUpDocuments[0] as any) ||
+        null;
+      const finalDocId = workflowTargetDocument?.id || null;
+
+      if (finalDocId) {
+        const resolvedDocumentTypeId = workflowTargetDocument?.document_id || task.linked_document_type_id;
+        if (resolvedDocumentTypeId) {
+          await resolveOriginalDocumentWorkflow(task, finalDocId, resolvedDocumentTypeId, uploaderId);
+        }
+      }
+    }
+  } catch (workflowError) {
+    console.error('Error updating workflow:', workflowError);
+  }
 };
 
 /**

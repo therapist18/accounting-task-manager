@@ -91,6 +91,7 @@ export async function POST(request: NextRequest) {
       email_date: dateStr(body.email_date) ?? now.slice(0, 10),
       deadline_date: dateStr(body.deadline_date),
       contents: str(body.contents),
+      attachments_summary: str(body.attachments_summary),
       signing_officer_name: str(body.signing_officer_name),
       signing_officer_position: str(body.signing_officer_position),
       created_by_id: actor.id,
