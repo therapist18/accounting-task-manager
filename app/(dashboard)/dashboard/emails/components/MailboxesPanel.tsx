@@ -14,7 +14,7 @@ import {
 import { cn } from "@/lib/utils"
 import type { Company } from "../../companies/database"
 import { Pagination } from "./Pagination"
-import { HEAD_BLUE, SkeletonRows, SortTh, TD_CLASS, TH_CLASS, useSortedRows, zebraRow } from "./table"
+import { HEAD_BLUE, TableLoading, SortTh, TD_CLASS, TH_CLASS, useSortedRows, zebraRow } from "./table"
 import {
   PILL_BUTTON_ACTIVE_CLASS, PILL_BUTTON_CLASS, PRIMARY_PILL_BUTTON_CLASS, SearchSelect, api, fmtDateTime,
   type AccountRow,
@@ -305,7 +305,7 @@ export function MailboxesPanel({
                 </tr>
               </thead>
               <tbody>
-                {loading && <SkeletonRows cols={7} />}
+                {loading && <TableLoading cols={7} />}
                 {!loading && pageCompanyRows.map((r, index) => {
                   const cid = String(r.company.id)
                   const key = `c-${cid}`
@@ -409,7 +409,7 @@ export function MailboxesPanel({
                 </tr>
               </thead>
               <tbody>
-                {loading && <SkeletonRows cols={6} />}
+                {loading && <TableLoading cols={6} />}
                 {!loading && pageAccountRows.map((a, index) => (
                   <tr key={a.id} className={cn("transition-colors", zebraRow(index))}>
                     <td className={cn(TD_CLASS, "text-center text-slate-400 tabular-nums font-medium")}>{start + index + 1}</td>

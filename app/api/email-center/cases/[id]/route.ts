@@ -33,14 +33,17 @@ export async function GET(request: NextRequest, { params }: Ctx) {
         `id, gmail_message_id, gmail_thread_id, company_id, direction, subject, sender_email, sender_name,
          snippet, ai_summary, priority, is_read, received_at, has_attachments, disposition,
          classification_source, category_confidence, category_key, review_reason, kra_pin, case_id,
-         to_addresses, cc_addresses, attachments`
+         to_addresses, cc_addresses, attachments, handled_by_id, handled_at`
       )
       .eq("case_id", id)
       .order("received_at", { ascending: true })
 
     const [companies, users] = await Promise.all([
       companyNames(sb, [c.company_id]),
-      userNames(sb, [c.responded_by_id, c.assigned_to_id, c.assigned_by_id, c.completed_by_id, c.created_by_id]),
+      userNames(sb, [
+        c.responded_by_id, c.assigned_to_id, c.assigned_by_id, c.completed_by_id, c.created_by_id,
+        ...(emails ?? []).map((e: any) => e.handled_by_id),
+      ]),
     ])
     const name = (uid: string | null) => (uid ? users.get(String(uid)) ?? null : null)
     const companyName = c.company_id ? companies.get(String(c.company_id))?.name ?? null : null
@@ -60,6 +63,7 @@ export async function GET(request: NextRequest, { params }: Ctx) {
         ...e,
         attachments: clientAttachments(attachments),
         company_name: e.company_id === c.company_id ? companyName : null,
+        handled_by_name: e.handled_by_id ? name(e.handled_by_id) : null,
       })),
     })
   } catch (error) {

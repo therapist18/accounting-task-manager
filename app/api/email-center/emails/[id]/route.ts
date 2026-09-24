@@ -48,19 +48,27 @@ export async function GET(request: NextRequest, { params }: Ctx) {
   }
 }
 
-// PATCH /api/email-center/emails/:id — staff correction of the classification (or read state).
-// Body: { disposition?, category_key?, is_read? }
+// PATCH /api/email-center/emails/:id — staff correction of the classification (or read state), or
+// marking an important notification handled.
+// Body: { disposition?, category_key?, is_read?, handled? }
 export async function PATCH(request: NextRequest, { params }: Ctx) {
   try {
     const { sb, actor } = await authorize(request)
     const { id } = await params
-    const body = (await request.json()) as { disposition?: string; category_key?: string; is_read?: boolean }
+    const body = (await request.json()) as { disposition?: string; category_key?: string; is_read?: boolean; handled?: boolean }
 
     const { data: email } = await sb.from("emails").select("*").eq("id", id).maybeSingle()
     if (!email) return NextResponse.json({ success: false, error: "Email not found." }, { status: 404 })
 
     const patch: Record<string, unknown> = {}
     if (typeof body.is_read === "boolean") patch.is_read = body.is_read
+
+    // The notifications basket is worked like a task but never becomes one: recording who handled a
+    // notification and when (handled=false just moves it back into the active basket).
+    if (typeof body.handled === "boolean") {
+      patch.handled_by_id = body.handled ? actor.id : null
+      patch.handled_at = body.handled ? new Date().toISOString() : null
+    }
 
     let category = null as ReturnType<typeof CATEGORY_BY_KEY.get> | null
     if (body.category_key) {

@@ -2,10 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, Clock, Columns3, History, Loader2, Plus, RefreshCw, RotateCcw, Search, Wifi, WifiOff } from "lucide-react"
+import { AlertTriangle, Clock, Columns3, History, Loader2, Plus, RefreshCw, RotateCcw, Search, Sparkles, Wifi, WifiOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { CaseDialog, NewCaseDialog } from "./components/CaseDialogs"
 import { CasesTable } from "./components/CasesTable"
@@ -16,6 +20,7 @@ import { SyncDialog } from "./components/SyncDialog"
 import { CompanyPanels, matchesCompanySelection } from "./components/CompanyPanels"
 import { EmailsTable } from "./components/NeedsReview"
 import { fetchCompanies, type Company } from "../companies/database"
+import { isAutomatedSender } from "@/lib/email-center/rules"
 import {
   COUNT_BADGE_CLASS, DISPOSITION_LABEL, PILL_BUTTON_ACTIVE_CLASS, PILL_BUTTON_CLASS, PRIMARY_PILL_BUTTON_CLASS, SearchSelect,
   TAB_LIST_CLASS, TAB_TRIGGER_CLASS, URGENT_BADGE_CLASS, api,
@@ -23,7 +28,7 @@ import {
   type Disposition, type EmailRow, type RuleRow, type StaffOption,
 } from "./components/shared"
 
-type Tab = "inprogress" | "completed" | "review" | "update" | "ignored" | "mailboxes" | "rules"
+type Tab = "inprogress" | "completed" | "review" | "notifications" | "update" | "ignored" | "mailboxes" | "rules"
 
 // Email Center: KRA emails from every connected company mailbox, grouped into cases — each case is a
 // task (department 2 / subdepartment 28, "KRA ITAX EMAILS") laid out as the
@@ -44,6 +49,21 @@ const EMAIL_TABS = ["needs_review", "update_only", "ignore"] as const
 
 function byReceivedDesc(list: EmailRow[]): EmailRow[] {
   return list.sort((a, b) => (a.received_at < b.received_at ? 1 : a.received_at > b.received_at ? -1 : 0))
+}
+
+// The three per-disposition fetches can in theory return the same row twice (a save or reclassify
+// moving a row between dispositions mid-fetch); keep one copy per id so the tabs never render a
+// duplicate key.
+function uniqueByEmailId(list: EmailRow[]): EmailRow[] {
+  const seen = new Set<string>()
+  const out: EmailRow[] = []
+  for (const e of list) {
+    if (!seen.has(e.id)) {
+      seen.add(e.id)
+      out.push(e)
+    }
+  }
+  return out
 }
 
 function meetsCaseFilters(c: CaseRow, assignee: string, q: string): boolean {
@@ -74,6 +94,11 @@ export default function EmailCenterPage() {
   // tab; its selection is separate from the dropdown's, so switching modes never loses either one.
   const [byCompany, setByCompany] = useState(false)
   const [sidebarCompany, setSidebarCompany] = useState("")
+  // Within the Ignored tab, "Automated" shows only the auto-ignored automated mail (noreply@, alerts@).
+  const [ignoredFilter, setIgnoredFilter] = useState<"all" | "automated">("all")
+  // The Notifications basket is a work queue: "active" (default) is what needs someone to take it on,
+  // "handled" is the audit trail of who worked each notification and when.
+  const [notificationFilter, setNotificationFilter] = useState<"active" | "handled">("active")
   // Timestamps show HH:mm by default, like the other modules; the toolbar button hides it.
   const [showTime, setShowTime] = useState(true)
 
@@ -100,6 +125,16 @@ export default function EmailCenterPage() {
   // renders straight from it, so opening an email never waits on a request for its details.
   const [openEmailSeed, setOpenEmailSeed] = useState<EmailRow | null>(null)
   const [newCaseOpen, setNewCaseOpen] = useState(false)
+  // Shown the moment a rule is created: the rule changes what the mails already sitting in Needs
+  // Review would be classified as, so offer to re-run them through it (or skip and leave them).
+  // `pattern` is absent when the dialog was opened from the toolbar's "Reclassify" button instead.
+  const [reclassifyPrompt, setReclassifyPrompt] = useState<{ pattern?: string; is_ignore?: boolean; is_notify?: boolean } | null>(null)
+  const [reclassifying, setReclassifying] = useState(false)
+  // 0→100 of a reclassify run, so the dialog shows a "10 of 128" progress bar like syncing does.
+  const [reclassifyProgress, setReclassifyProgress] = useState<{ done: number; total: number } | null>(null)
+  // A new rule was created this session and the Needs Review mails haven't been re-run through it
+  // yet — the toolbar's Reclassify button glows until that happens.
+  const [reclassifyDue, setReclassifyDue] = useState(false)
   // "Sync from date" dialog; presetIds is set when it is opened from one company's row.
   const [syncFromOpen, setSyncFromOpen] = useState(false)
   const [syncFromIds, setSyncFromIds] = useState<string[] | undefined>(undefined)
@@ -138,7 +173,7 @@ export default function EmailCenterPage() {
       setRules(rulesRes.rules)
       setRulesSource(rulesRes.source)
       setCases(casesRes.cases)
-      setEmails(byReceivedDesc([...reviewRes.emails, ...updateRes.emails, ...ignoreRes.emails]))
+      setEmails(byReceivedDesc(uniqueByEmailId([...reviewRes.emails, ...updateRes.emails, ...ignoreRes.emails])))
     }
     await Promise.all([loadOverview(), fetchLists()])
   }, [loadOverview])
@@ -238,6 +273,59 @@ export default function EmailCenterPage() {
     setEmails((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)))
   }, [])
 
+  // A rule was created (Rules tab or "Remember this"): add it to the local list and ask whether to
+  // re-run the mails currently in Needs Review through it — that's how you see which ones the new
+  // rule would now handle automatically.
+  const handleRuleCreated = useCallback((rule: RuleRow) => {
+    setRules((prev) => [...prev, rule])
+    setReclassifyDue(true)
+    setReclassifyPrompt({ pattern: rule.pattern, is_ignore: rule.is_ignore, is_notify: rule.is_notify })
+  }, [])
+
+  const runReclassify = async () => {
+    setReclassifying(true)
+    setReclassifyProgress({ done: 0, total: 0 })
+    try {
+      const listed = await api<{ ids: string[]; total: number }>("/api/email-center/reclassify", {
+        method: "POST",
+        body: JSON.stringify({ action: "list" }),
+      })
+      if (listed.ids.length === 0) {
+        toast.info("Nothing in Needs Review to reclassify.")
+        setReclassifyDue(false)
+        return
+      }
+      setReclassifyProgress({ done: 0, total: listed.ids.length })
+      let queue = [...listed.ids]
+      let done = 0
+      let changed = 0
+      let opened = 0
+      while (queue.length) {
+        const batch = queue.slice(0, 25)
+        const res = await api<{ processed: number; changed: number; cases_opened: number }>("/api/email-center/reclassify", {
+          method: "POST",
+          body: JSON.stringify({ action: "run", ids: batch }),
+        })
+        queue = queue.slice(batch.length)
+        done += res.processed
+        changed += res.changed
+        opened += res.cases_opened
+        setReclassifyProgress({ done, total: listed.ids.length })
+      }
+      await loadAll()
+      setReclassifyDue(false)
+      if (changed === 0) toast.info(`Reclassified ${listed.ids.length} Needs Review mail(s) — none matched any rule.`)
+      else if (changed === listed.ids.length) toast.success(`All ${changed} Needs Review mail(s) reclassified${opened ? ` — ${opened} case(s) opened` : ""}.`)
+      else toast.success(`Reclassified ${changed} of ${listed.ids.length} Needs Review mail(s)${opened ? ` — ${opened} case(s) opened` : ""}.`)
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setReclassifying(false)
+      setReclassifyProgress(null)
+      setReclassifyPrompt(null)
+    }
+  }
+
   const updateAccountCompany = useCallback((accountId: string, companyId: string | null) => {
     const companyName = companyId ? companies.find((c) => c.id === companyId)?.company_name ?? null : null
     setAccounts((prev) => prev.map((a) => (a.id === accountId ? { ...a, company_id: companyId, company_name: companyName } : a)))
@@ -253,6 +341,21 @@ export default function EmailCenterPage() {
       mergeEmail(email.id, res.email_patch)
       if (res.case) upsertCase(res.case)
       if (disposition === "action_required" && res.case_id) setOpenCaseId(res.case_id)
+    } catch (e: any) {
+      toast.error(e.message)
+    }
+  }
+
+  // Important notifications are a work queue, not a task: "mark handled" records who and when on the
+  // email row (handled_by_id / handled_at) and moves it from the active basket to the audit trail.
+  const markHandled = async (email: EmailRow) => {
+    try {
+      const res = await api<{ email_patch: Partial<EmailRow> }>(`/api/email-center/emails/${email.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ handled: true }),
+      })
+      toast.success("Marked handled.")
+      mergeEmail(email.id, res.email_patch)
     } catch (e: any) {
       toast.error(e.message)
     }
@@ -279,7 +382,8 @@ export default function EmailCenterPage() {
 
   const baseOpenCases = useMemo(() => cases.filter((c) => c.status === "open" && meetsCaseFilters(c, assignee, q)), [cases, assignee, q])
   const baseClosedCases = useMemo(() => cases.filter((c) => c.status === "closed" && meetsCaseFilters(c, assignee, q)), [cases, assignee, q])
-  const baseReviewEmails = useMemo(() => emails.filter((e) => e.disposition === "needs_review" && meetsEmailFilters(e, q)), [emails, q])
+  const baseReviewEmails = useMemo(() => emails.filter((e) => e.disposition === "needs_review" && e.category_key !== "notification" && meetsEmailFilters(e, q)), [emails, q])
+  const baseNotificationEmails = useMemo(() => emails.filter((e) => e.category_key === "notification" && meetsEmailFilters(e, q)), [emails, q])
   const baseUpdateEmails = useMemo(() => emails.filter((e) => e.disposition === "update_only" && meetsEmailFilters(e, q)), [emails, q])
   const baseIgnoredEmails = useMemo(() => emails.filter((e) => e.disposition === "ignore" && meetsEmailFilters(e, q)), [emails, q])
 
@@ -291,13 +395,24 @@ export default function EmailCenterPage() {
   const openCases = useMemo(() => baseOpenCases.filter((c) => passesCompany(c.company_id)), [baseOpenCases, passesCompany])
   const closedCases = useMemo(() => baseClosedCases.filter((c) => passesCompany(c.company_id)), [baseClosedCases, passesCompany])
   const reviewEmails = useMemo(() => baseReviewEmails.filter((e) => passesCompany(e.company_id)), [baseReviewEmails, passesCompany])
+  const notificationEmails = useMemo(
+    () =>
+      baseNotificationEmails
+        .filter((e) => (notificationFilter === "active" ? !e.handled_at : !!e.handled_at))
+        .filter((e) => passesCompany(e.company_id)),
+    [baseNotificationEmails, notificationFilter, passesCompany]
+  )
   const updateEmails = useMemo(() => baseUpdateEmails.filter((e) => passesCompany(e.company_id)), [baseUpdateEmails, passesCompany])
-  const ignoredEmails = useMemo(() => baseIgnoredEmails.filter((e) => passesCompany(e.company_id)), [baseIgnoredEmails, passesCompany])
+  const ignoredEmails = useMemo(
+    () => baseIgnoredEmails.filter((e) => ignoredFilter !== "automated" || isAutomatedSender(e.sender_email)).filter((e) => passesCompany(e.company_id)),
+    [baseIgnoredEmails, ignoredFilter, passesCompany]
+  )
 
   const activeBase: { company_id: string | null }[] =
     tab === "inprogress" ? baseOpenCases
       : tab === "completed" ? baseClosedCases
       : tab === "review" ? baseReviewEmails
+      : tab === "notifications" ? baseNotificationEmails
       : tab === "update" ? baseUpdateEmails
       : tab === "ignored" ? baseIgnoredEmails
       : []
@@ -307,16 +422,26 @@ export default function EmailCenterPage() {
 
   const openCasesCount = useMemo(() => cases.filter((c) => c.status === "open").length, [cases])
   const closedCasesCount = useMemo(() => cases.filter((c) => c.status === "closed").length, [cases])
-  const reviewCount = useMemo(() => emails.filter((e) => e.disposition === "needs_review").length, [emails])
+  const reviewCount = useMemo(() => emails.filter((e) => e.disposition === "needs_review" && e.category_key !== "notification").length, [emails])
+  // The Notifications tab badge counts the active queue; handled rows are the audit trail, shown via
+  // the tab's "Handled" toggle, not the badge.
+  const notificationCount = useMemo(() => emails.filter((e) => e.category_key === "notification" && !e.handled_at).length, [emails])
+  const notificationHandledCount = useMemo(() => emails.filter((e) => e.category_key === "notification" && !!e.handled_at).length, [emails])
   const updateCount = useMemo(() => emails.filter((e) => e.disposition === "update_only").length, [emails])
   const ignoreCount = useMemo(() => emails.filter((e) => e.disposition === "ignore").length, [emails])
+  const automatedIgnoredCount = useMemo(() => emails.filter((e) => e.disposition === "ignore" && isAutomatedSender(e.sender_email)).length, [emails])
   const unassignedMailboxes = useMemo(() => accounts.filter((a) => !a.company_id).length, [accounts])
   const pushHealthy = accounts.some((a) => a.watch_expiry && new Date(a.watch_expiry).getTime() > Date.now())
 
   const isCaseTab = tab === "inprogress" || tab === "completed"
   const isListTab = tab !== "mailboxes" && tab !== "rules"
 
-  const emptyMessage = tab === "review" ? "Nothing needs review right now." : tab === "update" ? "No emails marked Update only." : "No ignored emails."
+  const emptyMessage = tab === "notifications"
+    ? notificationFilter === "active" ? "All important notifications are handled." : "Nothing handled yet."
+    : tab === "review" ? "Nothing needs review right now."
+    : tab === "update" ? "No emails marked Update only."
+    : ignoredFilter === "automated" ? "No auto-ignored automated emails."
+    : "No ignored emails."
 
   const tabTable = (embedded: boolean) => {
     if (isCaseTab) {
@@ -324,7 +449,7 @@ export default function EmailCenterPage() {
     }
     return (
       <EmailsTable
-        emails={tab === "review" ? reviewEmails : tab === "update" ? updateEmails : ignoredEmails}
+        emails={tab === "notifications" ? notificationEmails : tab === "review" ? reviewEmails : tab === "update" ? updateEmails : ignoredEmails}
         categories={categories}
         onOpen={(e) => setOpenEmailSeed(e)}
         onQuickClassify={quickClassify}
@@ -332,6 +457,8 @@ export default function EmailCenterPage() {
         loading={loading}
         emptyMessage={emptyMessage}
         embedded={embedded}
+        notificationsMode={tab === "notifications"}
+        onMarkHandled={markHandled}
       />
     )
   }
@@ -340,7 +467,7 @@ export default function EmailCenterPage() {
     <div className="flex flex-col h-[calc(100vh-4rem)] overflow-hidden bg-slate-50/50">
       {/* Row 1: identity + global actions */}
       <div className="border-b border-slate-200/80 bg-white px-4 py-2.5 antialiased flex items-center gap-x-3 gap-y-2 flex-wrap shrink-0">
-        <h1 className="text-2xl font-bold text-slate-900 tracking-tight leading-none">Email Center</h1>
+        <h1 className="text-2xl font-bold text-slate-900 tracking-tight leading-none">KRA Email Center</h1>
         <span className="text-sm font-semibold text-custom-blue bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
           KRA Correspondence
         </span>
@@ -388,6 +515,28 @@ export default function EmailCenterPage() {
             <History className="h-5 w-5" />
             Sync from date
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setReclassifyPrompt({})}
+            disabled={reclassifying || loading}
+            title="Re-run the current rules against the mails in Needs Review"
+            className={cn(
+              PILL_BUTTON_CLASS,
+              reclassifyDue
+                ? "relative border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                : undefined
+            )}
+          >
+            <Sparkles className={cn("h-5 w-5", reclassifyDue && "text-amber-500")} />
+            Reclassify
+            {reclassifyDue && (
+              <span className="absolute -top-2 -right-2 flex h-3.5 w-3.5" aria-hidden>
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex h-3.5 w-3.5 rounded-full bg-amber-500" />
+              </span>
+            )}
+          </Button>
         </div>
       </div>
 
@@ -406,6 +555,10 @@ export default function EmailCenterPage() {
             <TabsTrigger value="review" className={TAB_TRIGGER_CLASS}>
               Needs Review
               {reviewCount > 0 && <span className={URGENT_BADGE_CLASS}>{reviewCount}</span>}
+            </TabsTrigger>
+            <TabsTrigger value="notifications" className={TAB_TRIGGER_CLASS}>
+              Notifications
+              {notificationCount > 0 && <span className={URGENT_BADGE_CLASS}>{notificationCount}</span>}
             </TabsTrigger>
             <TabsTrigger value="update" className={TAB_TRIGGER_CLASS}>
               Update
@@ -427,6 +580,52 @@ export default function EmailCenterPage() {
         </Tabs>
 
         <div className="ml-auto flex items-center gap-2 flex-wrap">
+          {tab === "ignored" && (
+            <div className="flex items-center gap-1 p-1 rounded-lg border border-slate-200 bg-white">
+              <button
+                onClick={() => setIgnoredFilter("all")}
+                className={cn(
+                  "h-8 px-3 rounded-md text-base font-medium transition-colors whitespace-nowrap",
+                  ignoredFilter === "all" ? "bg-custom-blue text-white" : "text-slate-600 hover:bg-slate-100"
+                )}
+              >
+                All ({ignoreCount})
+              </button>
+              <button
+                onClick={() => setIgnoredFilter("automated")}
+                className={cn(
+                  "h-8 px-3 rounded-md text-base font-medium transition-colors whitespace-nowrap",
+                  ignoredFilter === "automated" ? "bg-custom-blue text-white" : "text-slate-600 hover:bg-slate-100"
+                )}
+                title="Auto-ignored automated mail from no-reply / alerts addresses"
+              >
+                Automated ({automatedIgnoredCount})
+              </button>
+            </div>
+          )}
+          {tab === "notifications" && (
+            <div className="flex items-center gap-1 p-1 rounded-lg border border-slate-200 bg-white">
+              <button
+                onClick={() => setNotificationFilter("active")}
+                className={cn(
+                  "h-8 px-3 rounded-md text-base font-medium transition-colors whitespace-nowrap",
+                  notificationFilter === "active" ? "bg-custom-blue text-white" : "text-slate-600 hover:bg-slate-100"
+                )}
+              >
+                Active ({notificationCount})
+              </button>
+              <button
+                onClick={() => setNotificationFilter("handled")}
+                title="The audit trail: who handled each notification, and when"
+                className={cn(
+                  "h-8 px-3 rounded-md text-base font-medium transition-colors whitespace-nowrap",
+                  notificationFilter === "handled" ? "bg-custom-blue text-white" : "text-slate-600 hover:bg-slate-100"
+                )}
+              >
+                Handled ({notificationHandledCount})
+              </button>
+            </div>
+          )}
           <div className="relative w-72">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
             <Input
@@ -489,7 +688,7 @@ export default function EmailCenterPage() {
       {/* Body — tables own their scrolling and fill whatever height is left */}
       <div className="px-3 py-3 flex-1 min-h-0 flex flex-col overflow-hidden">
         {tab === "rules" ? (
-          <RulesPanel rules={rules} source={rulesSource} categories={categories} loading={loading} search={search} onRulesChange={setRules} />
+          <RulesPanel rules={rules} source={rulesSource} categories={categories} loading={loading} search={search} onRulesChange={setRules} onRuleCreated={handleRuleCreated} />
         ) : tab === "mailboxes" ? (
           <MailboxesPanel
             accounts={accounts}
@@ -526,7 +725,7 @@ export default function EmailCenterPage() {
         onEmailChanged={mergeEmail}
         onCaseOpened={upsertCase}
         onOpenCase={(id) => { setOpenEmailSeed(null); setOpenCaseId(id) }}
-        onRuleCreated={(r) => setRules((prev) => [...prev, r])}
+        onRuleCreated={handleRuleCreated}
       />
       <SyncDialog
         open={syncFromOpen}
@@ -545,6 +744,40 @@ export default function EmailCenterPage() {
           setOpenCaseId(c.id)
         }}
       />
+
+      <AlertDialog open={!!reclassifyPrompt} onOpenChange={(o) => !o && !reclassifying && setReclassifyPrompt(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reclassify mails in Needs Review?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {reclassifyPrompt?.pattern
+                ? `The new ${reclassifyPrompt.is_ignore ? "ignore " : reclassifyPrompt.is_notify ? "important-notification " : ""}rule matches “${reclassifyPrompt.pattern}”. Run it against the mails currently in Needs Review now, so the ones it matches are ${reclassifyPrompt.is_ignore ? "ignored" : reclassifyPrompt.is_notify ? "flagged urgent" : "classified (and cases opened where needed)"} automatically?`
+                : "Run the current rules against the mails currently in Needs Review? The ones the rules match confidently are classified (and cases opened where needed), ignored, or flagged as important notifications — the rest stay in Needs Review."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {reclassifying && reclassifyProgress && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="font-medium text-slate-600">Reclassifying mails…</span>
+                <span className="text-slate-500 tabular-nums">{reclassifyProgress.done} of {reclassifyProgress.total}</span>
+              </div>
+              <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                <div
+                  className={cn("h-full rounded-full bg-custom-blue transition-all duration-300", reclassifyProgress.total === 0 && "animate-pulse")}
+                  style={{ width: `${reclassifyProgress.total ? Math.round((reclassifyProgress.done / reclassifyProgress.total) * 100) : 8}%` }}
+                />
+              </div>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={reclassifying}>Skip</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); runReclassify() }} disabled={reclassifying} className="bg-custom-blue hover:bg-custom-blue/90">
+              {reclassifying && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+              {reclassifying ? "Reclassifying…" : "Reclassify now"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

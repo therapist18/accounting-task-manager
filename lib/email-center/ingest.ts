@@ -5,14 +5,15 @@
 //                   and by the "Sync now" button / page open — all idempotent, one run per mailbox.
 //   ingestMessage() metadata first (sender + subject are enough for the rules), then a full fetch, PDF
 //                   read and DB write only for emails that belong to a KRA matter or need review.
-//                   Noise, acknowledgements and certificates are never stored — they stay in Gmail.
+//                   Noise, acknowledgements and certificates are never stored — they stay in Gmail,
+//                   and neither are emails matched by an ignore rule.
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { gmail_v1 } from "googleapis"
 import { getGmailClient, parseEmailHeaders } from "@/lib/gmail/client"
 import { extractWithAi } from "./ai"
 import { CATEGORY_BY_KEY, KRA_JOB_LEVEL, type CategoryDef } from "./categories"
-import { classifyByRules, detectApproval, extractPin, isKraSender } from "./rules"
+import { classifyByRules, detectApproval, extractPin, isAutomatedSender, isKraSender } from "./rules"
 import { loadSubjectRules } from "./rule-store"
 import {
   AUTO_CONFIDENCE_THRESHOLD as THRESHOLD,
@@ -130,7 +131,7 @@ async function findCaseByThread(sb: SupabaseClient, threadId: string | null | un
   return data
 }
 
-async function findOpenCaseByPin(sb: SupabaseClient, pin: string | null, companyId: string | null) {
+export async function findOpenCaseByPin(sb: SupabaseClient, pin: string | null, companyId: string | null) {
   if (!pin) return null
   let q = sb.from("email_case").select("*").eq("kra_pin", pin).eq("status", "open")
   if (companyId) q = q.eq("company_id", companyId)
@@ -254,16 +255,25 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
 
   // 2. Decide from sender + subject alone whether this email is worth a full fetch at all.
   if (direction === "outbound" && !threadCase) return "skipped" // our mail outside any KRA case
-  if (direction === "inbound" && !kra) {
-    const cheap = classifyByRules({ subject, body: snippet, senderEmail, threadHasCase: false, rules })
-    if (cheap?.categoryKey === "system_noise") return "skipped"
-  }
-  if (direction === "inbound" && kra && !threadCase) {
-    const cheap = classifyByRules({ subject, body: snippet, senderEmail, threadHasCase: false, rules })
-    const cat = cheap ? CATEGORY_BY_KEY.get(cheap.categoryKey) : null
-    // Confidently an informational KRA email (acknowledgement, certificate, statement): nothing to track.
-    if (cheap && cat && cheap.confidence >= THRESHOLD && cat.disposition === "update_only" && !cat.attaches_to_case) {
-      return "skipped"
+
+  // Automated mail from a non-KRA "no-reply"/"alerts" address, outside any case thread: auto-ignore
+  // it. Like a rule ignore this is decided from headers alone, but unlike one it is STORED — marked
+  // ignored, the same as hitting Ignore in the UI — so it lands under the ignored tab's "Automated"
+  // filter instead of disappearing entirely.
+  const autoIgnore = direction === "inbound" && !kra && !threadCase && isAutomatedSender(senderEmail)
+
+  if (direction === "inbound" && !autoIgnore) {
+    const cheap = classifyByRules({ subject, body: snippet, senderEmail, threadHasCase: !!threadCase, rules })
+    // Confident ignore rules are checked before classification and name no category: matching mail is
+    // never pulled into the app, whatever the sender. Below the threshold it still goes to review.
+    if (cheap?.action === "ignore" && cheap.confidence >= THRESHOLD) return "skipped"
+    if (!kra && cheap?.categoryKey === "system_noise") return "skipped"
+    if (kra && !threadCase && cheap && cheap.categoryKey) {
+      const cat = CATEGORY_BY_KEY.get(cheap.categoryKey)
+      // Confidently an informational KRA email (acknowledgement, certificate, statement): nothing to track.
+      if (cheap.confidence >= THRESHOLD && cat && cat.disposition === "update_only" && !cat.attaches_to_case) {
+        return "skipped"
+      }
     }
   }
 
@@ -322,6 +332,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   let disposition: Disposition
   let reviewReason: string | null = null
   let caseId: string | null = null
+  let notifyFlag = false
 
   if (direction === "outbound") {
     // BCL's reply inside a case thread: fills the "when BCL responds" columns.
@@ -346,9 +357,16 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
       await sb.from("email_case").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", threadCase!.id)
     }
     caseId = threadCase!.id
+  } else if (autoIgnore) {
+    // No-reply automated mail: never KRA, never opens a case or a review item. Store it marked
+    // ignored so staff can see what came in under the ignored tab's "No-reply" filter.
+    categoryKey = "system_noise"
+    confidence = 0.92
+    source = "rule"
+    disposition = "ignore"
   } else {
     const rule = classifyByRules({ subject, body: text, senderEmail, threadHasCase: !!threadCase, rules })
-    const ruleCat = rule ? CATEGORY_BY_KEY.get(rule.categoryKey) : null
+    const ruleCat = rule && rule.categoryKey ? CATEGORY_BY_KEY.get(rule.categoryKey) : null
     // AI only runs to extract PDF details (deadline, PIN, signing officer) for a category the rules
     // are already confident about — never to guess an uncertain category. An email the rules can't
     // confidently place always ends up in Needs Review regardless of what AI would say, so calling AI
@@ -366,7 +384,20 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
       })
     }
 
-    if (rule && rule.confidence >= THRESHOLD) {
+    if (rule && rule.action === "ignore") {
+      // An ignore rule matched. At/above the confidence threshold the mail is dropped (the cheap
+      // path already handles fresh inbox mail); below it the subject goes to Needs Review instead.
+      categoryKey = rule.confidence >= THRESHOLD ? "system_noise" : "other_kra"
+      confidence = rule.confidence
+      source = "rule"
+    } else if (rule && rule.action === "notify") {
+      // An important-notification rule matched: store it under the "notification" category (which
+      // carries the needs_review disposition) so someone sees it, but a case is never opened and
+      // there is no review questionnaire — it just needs attention.
+      categoryKey = "notification"
+      confidence = rule.confidence
+      source = "rule"
+    } else if (rule && rule.categoryKey && rule.confidence >= THRESHOLD) {
       categoryKey = rule.categoryKey
       confidence = rule.confidence
       source = ai ? "rule+ai" : "rule"
@@ -383,10 +414,17 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     const category = CATEGORY_BY_KEY.get(categoryKey) ?? CATEGORY_BY_KEY.get("other_kra")!
     disposition = category.disposition
 
-    if (confidence < THRESHOLD) {
+    // A notify match always lands in Needs Review flagged urgent — that IS its purpose. Don't let the
+    // low-confidence / non-KRA overrides below replace the reason or quietly demote it.
+    notifyFlag = rule?.action === "notify"
+    if (notifyFlag) {
+      reviewReason = "Important notification — requires attention."
+    }
+
+    if (confidence < THRESHOLD && !notifyFlag) {
       disposition = "needs_review"
       reviewReason = "Low classification confidence — please confirm."
-    } else if (!kra && categoryKey !== "system_noise") {
+    } else if (!kra && categoryKey !== "system_noise" && !notifyFlag) {
       disposition = "needs_review"
       reviewReason = "Sender is not KRA."
     }
@@ -456,8 +494,8 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     }
   }
 
-  // 4. Only matter emails and emails awaiting review are kept; everything else is dropped here.
-  if (!caseId && disposition !== "needs_review") return "skipped"
+  // 4. Matter emails, auto-ignored no-reply mail and emails awaiting review are kept; everything else is dropped here.
+  if (!caseId && disposition !== "needs_review" && disposition !== "ignore") return "skipped"
 
   for (const r of attachmentRows) {
     if (r.extraction_status === "pending") r.extraction_status = ai ? "done" : "skipped"
@@ -472,9 +510,11 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
       ? daysToDeadline !== null && daysToDeadline <= 7
         ? "urgent"
         : "high"
-      : disposition === "needs_review"
-        ? "normal"
-        : "low"
+      : notifyFlag
+        ? "urgent"
+        : disposition === "needs_review"
+          ? "normal"
+          : "low"
 
   const { error: upsertErr } = await sb.from("emails").upsert(
     {

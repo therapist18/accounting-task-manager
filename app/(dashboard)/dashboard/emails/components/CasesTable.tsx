@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { Pagination } from "./Pagination"
-import { SkeletonRows, SortTh, TD_CLASS, TH_CLASS, useSortedRows, zebraRow } from "./table"
+import { TableLoading, SortTh, TD_CLASS, TH_CLASS, useSortedRows, zebraRow } from "./table"
 import { APPROVAL_BADGE, APPROVAL_LABEL, caseMetrics, fmtDate, fmtDateTime, todayYmd, type CaseMetrics, type CaseRow } from "./shared"
 
 // Renders the "KRA CORESPONDENCE PLATFORM" Sheet1 layout: a two-level, colour-banded header
@@ -116,7 +116,7 @@ export function CasesTable({
             </tr>
           </thead>
           <tbody>
-            {loading && <SkeletonRows cols={21} />}
+            {loading && <TableLoading cols={21} />}
             {!loading && visibleRows.length === 0 && (
               <tr>
                 <td colSpan={21} className="py-20 text-center text-base text-slate-400">

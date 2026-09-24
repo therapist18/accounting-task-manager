@@ -5,7 +5,7 @@ import { parseRuleBody } from "@/lib/email-center/rule-validation"
 
 type Ctx = { params: Promise<{ id: string }> }
 
-const COLUMNS = "id, match_type, pattern, category_key, confidence, sort_order, is_active, notes, updated_at"
+const COLUMNS = "id, match_type, pattern, category_key, confidence, sort_order, is_active, notes, is_ignore, is_notify, sender_pattern, sender_match_type, updated_at"
 
 // PATCH /api/email-center/rules/:id — any subset of the rule's fields (e.g. just { is_active }).
 export async function PATCH(request: NextRequest, { params }: Ctx) {

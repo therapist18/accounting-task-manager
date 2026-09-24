@@ -23,7 +23,7 @@ export async function loadSubjectRules(sb: ReturnType<typeof getServiceClient>):
 
   const { data, error } = await sb
     .from(RULES_TABLE)
-    .select("id, match_type, pattern, category_key, confidence")
+    .select("id, match_type, pattern, category_key, confidence, is_ignore, is_notify, sender_pattern, sender_match_type")
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true })
@@ -43,6 +43,10 @@ export async function loadSubjectRules(sb: ReturnType<typeof getServiceClient>):
       pattern: r.pattern,
       category_key: r.category_key,
       confidence: Number(r.confidence),
+      is_ignore: !!r.is_ignore,
+      is_notify: !!r.is_notify,
+      sender_pattern: r.sender_pattern ?? undefined,
+      sender_match_type: (r.sender_match_type as RuleMatchType | undefined) ?? undefined,
     }))
 
   cache = { at: Date.now(), rules }

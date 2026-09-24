@@ -34,6 +34,9 @@ export const CATEGORIES: CategoryDef[] = [
   c("return_ack", "Return / Payment Acknowledgement", "#16a34a", "update_only"),
   c("certificate", "Certificate (WHT / TCC)", "#16a34a", "update_only"),
   c("statement", "Statement / Ledger", "#16a34a", "update_only"),
+  // A notify rule's category: matched email is stored, flagged urgent and left in Needs Review for
+  // someone to act on, but no KRA task/case is created (the rule exists for exactly that reason).
+  c("notification", "Important Notification", "#f59e0b", "needs_review"),
   c("system_noise", "System / Non-KRA", "#6b7280", "ignore"),
   c("other_kra", "Other KRA Correspondence", "#6b7280", "needs_review"),
 ]

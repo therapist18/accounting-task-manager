@@ -6,10 +6,16 @@
 // edited from the Email Center's Rules tab (loaded by rule-store.ts). DEFAULT_SUBJECT_RULES below is the
 // built-in list the table was seeded from — used only when the table is missing or unreachable.
 
-export interface RuleResult {
-  categoryKey: string
-  confidence: number
-}
+// A rule matches on subject and/or sender and names one of three behaviours:
+//   ignore   match is dropped entirely (never stored, never opens a case)
+//   notify   match is stored and flagged urgent in Needs Review — an important notification that
+//            needs attention but must NOT create a KRA task/case
+//   classify match is classified into its category (opens a case at high confidence when the
+//            category is case-creating)
+export type RuleResult =
+  | { action: "ignore"; categoryKey: null; confidence: number }
+  | { action: "notify"; categoryKey: null; confidence: number }
+  | { action: "classify"; categoryKey: string; confidence: number }
 
 const KRA_SENDER_RE = /@([a-z0-9-]+\.)*kra\.go\.ke\s*>?$/i
 // KRA PIN: A/P + 9 digits + letter (e.g. P052230924P)
@@ -32,6 +38,13 @@ export interface SubjectRule {
   pattern: string
   category_key: string
   confidence: number
+  is_ignore?: boolean
+  // An important-notification rule: store + flag (no task/case). Mutually exclusive with is_ignore.
+  is_notify?: boolean
+  // Optional sender filter (ignore/notify rules especially): match on the sender address. When
+  // empty the rule matches on subject only; when both are set both must match.
+  sender_pattern?: string
+  sender_match_type?: RuleMatchType
 }
 
 // First match wins, so order from most to least specific.
@@ -72,12 +85,50 @@ export function compileRule(rule: Pick<SubjectRule, "match_type" | "pattern">): 
   return re
 }
 
+// Whether an email's SUBJECT matches a rule. A rule with no subject pattern matches any subject.
+function matchesSubject(rule: SubjectRule, cleanSubject: string): boolean {
+  if (!rule.pattern || !rule.pattern.trim()) return true
+  return !!compileRule(rule)?.test(cleanSubject)
+}
+
+// Whether an email's SENDER matches a rule's optional sender filter. A rule with no sender filter
+// matches any sender.
+function matchesSender(rule: SubjectRule, senderEmail: string): boolean {
+  if (!rule.sender_pattern || !rule.sender_pattern.trim()) return true
+  const re = compileRule({ match_type: rule.sender_match_type ?? "contains", pattern: rule.sender_pattern })
+  if (!re) return false
+  return re.test(senderEmail.trim())
+}
+
 export function isKraSender(senderEmail: string): boolean {
   return KRA_SENDER_RE.test(senderEmail.trim())
 }
 
 export function isNoiseSender(senderEmail: string): boolean {
   return NOISE_SENDER_RES.some((re) => re.test(senderEmail))
+}
+
+// A "no-reply" address (noreply@x.com, no-reply@x.com, donotreply@x.com, ...). Automated mail from
+// these is never deliberately sent to a person, so ingestion auto-ignores it — stored under the
+// Ignored tab so it can still be seen, distinct from the noise senders above that are dropped
+// entirely. The Email Center reuses this same check to render the ignored tab's "Automated" filter.
+export function isNoReplySender(senderEmail: string): boolean {
+  const local = (senderEmail.trim().split("@")[0] ?? "").replace(/\+.*$/, "").trim().toLowerCase()
+  return /no[\W_]*reply|do[\W_]*not[\W_]*reply|donotreply/i.test(local)
+}
+
+// Alert-style addresses (alerts@x.com, alerts-noreply@x.com). Same treatment as no-reply: automated
+// mail, auto-ignored. Deliberately NOT "info@" — too many real company mailboxes use info@ as their
+// actual address, and those mails still need normal handling.
+export function isAlertSender(senderEmail: string): boolean {
+  const local = (senderEmail.trim().split("@")[0] ?? "").replace(/\+.*$/, "").trim().toLowerCase()
+  return /^(alerts?|alerts?[\W_]?noreply|noreply[\W_]?alerts?)$/i.test(local)
+}
+
+// Anything automated enough that ingestion should never ask a person to review it: no-reply and
+// alert-style senders. This is what auto-ignore actually runs on.
+export function isAutomatedSender(senderEmail: string): boolean {
+  return isNoReplySender(senderEmail) || isAlertSender(senderEmail)
 }
 
 export function extractPin(...texts: Array<string | null | undefined>): string | null {
@@ -121,21 +172,45 @@ export function classifyByRules(input: {
 }): RuleResult | null {
   const { subject, body, senderEmail, threadHasCase, rules = DEFAULT_SUBJECT_RULES } = input
 
+  const cleanSubject = subject.replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, "").trim()
+
+  // Ignore rules apply to every sender — they exist to keep noise (newsletters, automated mail,
+  // non-KRA senders that would otherwise sit in Needs Review) out of the app. They win over
+  // everything else, so matching email is never stored and never opens a case. A rule can match on
+  // subject, on the sender address, or both.
+  for (const rule of rules) {
+    if (rule.is_ignore) {
+      if (matchesSubject(rule, cleanSubject) && matchesSender(rule, senderEmail)) {
+        return { action: "ignore", categoryKey: null, confidence: rule.confidence }
+      }
+    }
+  }
+
+  // Notify rules: subject/sender-driven important notifications. Like ignore they apply to any
+  // sender and name no category; unlike ignore the mail is stored — flagged urgent in Needs Review
+  // so someone acts on it, with no KRA task/case opened.
+  for (const rule of rules) {
+    if (rule.is_notify) {
+      if (matchesSubject(rule, cleanSubject) && matchesSender(rule, senderEmail)) {
+        return { action: "notify", categoryKey: null, confidence: rule.confidence }
+      }
+    }
+  }
+
   if (isNoiseSender(senderEmail) && !isKraSender(senderEmail)) {
-    return { categoryKey: "system_noise", confidence: 0.92 }
+    return { action: "classify", categoryKey: "system_noise", confidence: 0.92 }
   }
   if (!isKraSender(senderEmail)) return null
 
-  const cleanSubject = subject.replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, "").trim()
-
   // A KRA reply on a thread we already track is most likely the answer to our extension request.
   if (threadHasCase && detectApproval(body)) {
-    return { categoryKey: "extension_response", confidence: 0.85 }
+    return { action: "classify", categoryKey: "extension_response", confidence: 0.85 }
   }
 
   for (const rule of rules) {
+    if (rule.is_ignore || rule.is_notify) continue
     const re = compileRule(rule)
-    if (re?.test(cleanSubject)) return { categoryKey: rule.category_key, confidence: rule.confidence }
+    if (re?.test(cleanSubject)) return { action: "classify", categoryKey: rule.category_key, confidence: rule.confidence }
   }
   return null
 }

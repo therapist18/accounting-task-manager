@@ -73,6 +73,11 @@ export interface EmailRow {
   kra_pin: string | null
   case_id: string | null
   category_key: string | null
+  // "Handled by" audit trail for important notifications: who worked it and when (never a KRA
+  // task/case). handled_at NULL = still active in the notifications basket.
+  handled_by_id?: string | null
+  handled_by_name?: string | null
+  handled_at?: string | null
   // Present on rows from the list endpoint, so the email dialog can render from the table row with no
   // fetch of its own; only the body (kept in Gmail, not the database) is loaded on open.
   to_addresses?: string | null
@@ -106,6 +111,9 @@ export interface AccountRow {
 
 // A subject -> category classification rule (email_classification_rules). `id` starts with "builtin-"
 // when the table doesn't exist yet and the built-in list is shown read-only.
+// A subject rule (email_classification_rules). `is_ignore` makes it an auto-ignore rule instead of a
+// classify rule. `id` starts with "builtin-" when the table doesn't exist yet and the built-in list
+// is shown read-only.
 export interface RuleRow {
   id: string
   match_type: "contains" | "regex"
@@ -115,6 +123,10 @@ export interface RuleRow {
   sort_order: number
   is_active: boolean
   notes: string | null
+  is_ignore: boolean
+  is_notify: boolean
+  sender_pattern: string | null
+  sender_match_type: "contains" | "regex" | null
   updated_at: string | null
 }
 

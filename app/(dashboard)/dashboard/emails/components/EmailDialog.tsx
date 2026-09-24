@@ -120,14 +120,31 @@ export function EmailDialog({
       onEmailChanged(shown.id, res.email_patch)
       if (res.case) onCaseOpened(res.case)
 
-      if (makeRule && categoryKey && rulePattern.trim()) {
+      if (makeRule && rulePattern.trim() && (disposition === "ignore" || categoryKey)) {
+        const isIgnoreRule = disposition === "ignore"
+        // An important-notification email (category "notification") is Remembered as a notify rule —
+        // flagged urgent in Needs Review, never a task/case. A real category turns it back into a
+        // classify rule.
+        const isNotifyRule = !isIgnoreRule && categoryKey === "notification"
         try {
           const created = await api<{ rule: RuleRow }>("/api/email-center/rules", {
             method: "POST",
-            body: JSON.stringify({ pattern: rulePattern.trim(), match_type: "contains", category_key: categoryKey, confidence: 0.9 }),
+            body: JSON.stringify(
+              isIgnoreRule
+                ? { pattern: rulePattern.trim(), match_type: "contains", is_ignore: true, confidence: 0.9 }
+                : isNotifyRule
+                  ? { pattern: rulePattern.trim(), match_type: "contains", is_notify: true, confidence: 0.9 }
+                  : { pattern: rulePattern.trim(), match_type: "contains", category_key: categoryKey, confidence: 0.9 }
+            ),
           })
           onRuleCreated?.(created.rule)
-          toast.success("Rule added — future emails with this subject are classified automatically.")
+          toast.success(
+            isIgnoreRule
+              ? "Rule added — future emails with this subject are ignored automatically."
+              : isNotifyRule
+                ? "Rule added — future emails like this are flagged urgent as important notifications."
+                : "Rule added — future emails with this subject are classified automatically."
+          )
         } catch (e: any) {
           toast.warning(`Classification saved, but the rule wasn't added: ${e.message}`)
         }
@@ -147,6 +164,10 @@ export function EmailDialog({
   const name = shown ? senderName(shown) : ""
   const outbound = shown?.direction === "outbound"
   const hasChange = !!shown && (disposition !== (shown.disposition ?? "") || categoryKey !== (shown.category_key ?? ""))
+  // "Treat as → Ignored" turns Remember this into an ignore rule: no category needed. An email whose
+  // category is "notification" (an important notification) is Remembered as a notify rule instead.
+  const useIgnoreRule = disposition === "ignore"
+  const useNotifyRule = !useIgnoreRule && categoryKey === "notification"
 
   return (
     <Dialog open={!!email} onOpenChange={(o) => !o && onClose()}>
@@ -316,17 +337,21 @@ export function EmailDialog({
 
               <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
                 <label className="flex items-start gap-2.5 cursor-pointer">
-                  <Checkbox checked={makeRule} onCheckedChange={(v) => setMakeRule(v === true)} disabled={!categoryKey} className="mt-0.5" />
+                  <Checkbox checked={makeRule} onCheckedChange={(v) => setMakeRule(v === true)} disabled={!categoryKey && !useIgnoreRule} className="mt-0.5" />
                   <span>
                     <span className="flex items-center gap-1.5 text-base font-medium text-slate-800"><Lightbulb className="h-4 w-4 text-amber-500" /> Remember this</span>
                     <span className="block text-sm text-slate-500 mt-0.5 leading-relaxed">
-                      {categoryKey
-                        ? "Classify future emails whose subject contains this text as the chosen category."
-                        : "Pick a category first to turn this into a rule."}
+                      {useIgnoreRule
+                        ? "Ignore future emails whose subject contains this text."
+                        : useNotifyRule
+                          ? "Flag future emails whose subject contains this text as important notifications — stored and urgent, no task or case."
+                          : categoryKey
+                            ? "Classify future emails whose subject contains this text as the chosen category."
+                            : "Pick a category — or set Treat as to “Ignored” to ignore these instead."}
                     </span>
                   </span>
                 </label>
-                {makeRule && categoryKey && (
+                {makeRule && (categoryKey || useIgnoreRule) && (
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-slate-600">Subject contains</label>
                     <Input value={rulePattern} onChange={(e) => setRulePattern(e.target.value)} className="h-10 text-base rounded-md border-slate-200" />
@@ -341,12 +366,13 @@ export function EmailDialog({
                   <dt className="text-slate-500">Company</dt>
                   <dd className="text-slate-800 font-medium break-words">{shown.company_name ?? <span className="text-red-500">Unassigned</span>}</dd>
                   {shown.kra_pin && (<><dt className="text-slate-500">KRA PIN</dt><dd className="text-slate-800 font-mono">{shown.kra_pin}</dd></>)}
-                  {shown.classification_source && (
+                  {(shown.classification_source || shown.disposition === "needs_review") && (
                     <>
                       <dt className="text-slate-500">Classified by</dt>
                       <dd className="text-slate-800 capitalize">
-                        {shown.classification_source}
-                        {shown.category_confidence !== null && ` · ${Math.round(shown.category_confidence * 100)}%`}
+                        {shown.disposition === "needs_review"
+                          ? "Needs review"
+                          : `${shown.classification_source}${shown.category_confidence !== null ? ` · ${Math.round(shown.category_confidence * 100)}%` : ""}`}
                       </dd>
                     </>
                   )}

@@ -5,7 +5,7 @@ import { Paperclip, Inbox, CornerUpLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { Pagination } from "./Pagination"
-import { HEAD_BLUE, SkeletonRows, SortTh, TD_CLASS, TH_CLASS, useSortedRows, zebraRow } from "./table"
+import { HEAD_BLUE, TableLoading, SortTh, TD_CLASS, TH_CLASS, useSortedRows, zebraRow } from "./table"
 import { DISPOSITION_BADGE, DISPOSITION_LABEL, fmtDateTime, type CategoryOption, type Disposition, type EmailRow } from "./shared"
 
 // The email tabs (Needs Review / Update / Ignored): one sortable, bordered, zebra-striped table with
@@ -23,7 +23,7 @@ const SORT_VALUE: Record<string, (e: EmailRow) => string | number> = {
   actions: (e) => (e.disposition === "needs_review" ? 0 : 1), // rows still awaiting a decision first
 }
 
-export function EmailsTable({
+export function   EmailsTable({
   emails,
   categories,
   onOpen,
@@ -32,6 +32,8 @@ export function EmailsTable({
   loading = false,
   emptyMessage = "Nothing needs review right now.",
   embedded = false,
+  notificationsMode = false,
+  onMarkHandled,
 }: {
   emails: EmailRow[]
   categories: CategoryOption[]
@@ -41,6 +43,10 @@ export function EmailsTable({
   loading?: boolean
   emptyMessage?: string
   embedded?: boolean
+  // The Notifications basket: rows carry handled_by/handled_at instead of a disposition label, and
+  // unhandled ones get a "Mark handled" action (worked like a task, never a KRA task/case).
+  notificationsMode?: boolean
+  onMarkHandled?: (e: EmailRow) => void
 }) {
   const [itemsPerPage, setItemsPerPage] = useState(50)
   const [page, setPage] = useState(0)
@@ -79,7 +85,7 @@ export function EmailsTable({
             </tr>
           </thead>
           <tbody>
-            {loading && <SkeletonRows cols={colCount} />}
+            {loading && <TableLoading cols={colCount} />}
             {!loading && visible.length === 0 && (
               <tr>
                 <td colSpan={colCount} className="py-20 text-center text-base text-slate-400">
@@ -92,7 +98,7 @@ export function EmailsTable({
               const cat = e.category_key ? byKey.get(e.category_key) : null
               const isUnread = !e.is_read
               return (
-                <tr key={e.id} onClick={() => onOpen(e)} className={cn("cursor-pointer transition-colors", zebraRow(index))}>
+                <tr key={e.id} onClick={() => onOpen(e)} className={cn("cursor-pointer transition-colors", zebraRow(index), e.handled_at && "opacity-60")}>
                   <td className={cn(TD_CLASS, "sticky left-0 z-20 bg-inherit text-center text-slate-400 font-medium tabular-nums border-r border-slate-200", isUnread && "border-l-4 border-l-custom-blue")}>
                     {start + index + 1}
                   </td>
@@ -137,12 +143,19 @@ export function EmailsTable({
                     ) : <span className="text-slate-300">—</span>}
                   </td>
                   <td className={cn(TD_CLASS, "whitespace-nowrap")}>
-                    {e.disposition ? (
+                    {e.handled_at ? (
+                      <>
+                        <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">Handled</span>
+                        <div className="text-sm text-emerald-700 mt-1">by {e.handled_by_name ?? "…"} · {fmtDateTime(e.handled_at, showTime)}</div>
+                      </>
+                    ) : e.category_key === "notification" ? (
+                      <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">Important</span>
+                    ) : e.disposition ? (
                       <span className={cn("text-sm font-semibold px-2.5 py-0.5 rounded-full border", DISPOSITION_BADGE[e.disposition])}>
                         {DISPOSITION_LABEL[e.disposition]}
                       </span>
                     ) : <span className="text-slate-300">—</span>}
-                    {e.classification_source && e.category_confidence !== null && (
+                    {!e.handled_at && e.disposition !== "needs_review" && e.classification_source && e.category_confidence !== null && (
                       <div className="text-sm text-slate-400 mt-1">{e.classification_source} · {Math.round(e.category_confidence * 100)}%</div>
                     )}
                   </td>
@@ -151,8 +164,15 @@ export function EmailsTable({
                   </td>
                   {showActions && (
                     <td className={TD_CLASS} onClick={(ev) => ev.stopPropagation()}>
-                      {e.disposition === "needs_review" ? (
+                      {e.handled_at ? (
+                        <span className="text-sm text-slate-300">—</span>
+                      ) : e.disposition === "needs_review" ? (
                         <div className="flex items-center gap-1.5">
+                          {notificationsMode && onMarkHandled && (
+                            <Button size="sm" className="h-8 px-2.5 rounded-md text-base font-semibold bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => onMarkHandled(e)}>
+                              Handled
+                            </Button>
+                          )}
                           <Button size="sm" variant="outline" className="h-8 px-2.5 rounded-md text-base font-medium border-slate-200 bg-white hover:bg-slate-100" onClick={() => onQuickClassify(e, "action_required")}>Action</Button>
                           <Button size="sm" variant="outline" className="h-8 px-2.5 rounded-md text-base font-medium border-slate-200 bg-white hover:bg-slate-100" onClick={() => onQuickClassify(e, "update_only")}>Update</Button>
                           <Button size="sm" variant="ghost" className="h-8 px-2.5 rounded-md text-base font-medium text-slate-500 hover:text-slate-800" onClick={() => onQuickClassify(e, "ignore")}>Ignore</Button>

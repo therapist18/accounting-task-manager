@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 // Table building blocks shared by every table in the Email Center (cases, emails, mailboxes), so
@@ -80,20 +80,15 @@ export function SortTh({
   )
 }
 
-// Loading placeholder rows for the table body — the toolbar and headers stay put while data loads, so
-// there is no full-page spinner, just the table filling in.
-export function SkeletonRows({ rows = 8, cols }: { rows?: number; cols: number }) {
+// Loading placeholder for the table body — the toolbar and headers stay put while data loads, so there
+// is no full-page spinner, just a centred spinner + label inside the table.
+export function TableLoading({ cols, label = "Loading…" }: { cols: number; label?: string }) {
   return (
-    <>
-      {Array.from({ length: rows }, (_, r) => (
-        <tr key={r} className={zebraRow(r)}>
-          {Array.from({ length: cols }, (_, c) => (
-            <td key={c} className={TD_CLASS}>
-              <div className="h-4 rounded bg-slate-200/80 animate-pulse" style={{ width: `${40 + ((r * 7 + c * 13) % 50)}%` }} />
-            </td>
-          ))}
-        </tr>
-      ))}
-    </>
+    <tr>
+      <td colSpan={cols} className="py-16 text-center">
+        <Loader2 className="h-8 w-8 animate-spin text-custom-blue mx-auto mb-3" />
+        <div className="text-base text-slate-400">{label}</div>
+      </td>
+    </tr>
   )
 }

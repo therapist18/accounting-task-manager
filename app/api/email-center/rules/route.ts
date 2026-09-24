@@ -4,7 +4,7 @@ import { DEFAULT_SUBJECT_RULES } from "@/lib/email-center/rules"
 import { RULES_TABLE, invalidateRulesCache } from "@/lib/email-center/rule-store"
 import { parseRuleBody } from "@/lib/email-center/rule-validation"
 
-const COLUMNS = "id, match_type, pattern, category_key, confidence, sort_order, is_active, notes, updated_at"
+const COLUMNS = "id, match_type, pattern, category_key, confidence, sort_order, is_active, notes, is_ignore, is_notify, sender_pattern, sender_match_type, updated_at"
 
 // GET /api/email-center/rules — every rule, in the order they are tried.
 // `source: "builtin"` means the table doesn't exist yet (migration not applied): the built-in list
@@ -28,6 +28,10 @@ export async function GET(request: NextRequest) {
         sort_order: (i + 1) * 10,
         is_active: true,
         notes: null,
+        is_ignore: false,
+        is_notify: false,
+        sender_pattern: null,
+        sender_match_type: null,
         updated_at: null,
       }))
       return NextResponse.json({ success: true, source: "builtin", rules })
