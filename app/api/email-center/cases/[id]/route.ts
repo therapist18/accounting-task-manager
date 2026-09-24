@@ -72,7 +72,7 @@ export async function GET(request: NextRequest, { params }: Ctx) {
 // (completed_by_id/at) — always the session user's id, never a name.
 export async function PATCH(request: NextRequest, { params }: Ctx) {
   try {
-    const { sb, actor } = await authorize(request)
+    const { sb, actor, user } = await authorize(request)
     const { id } = await params
     const body = (await request.json()) as Record<string, unknown>
 
@@ -127,8 +127,23 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
       }
     }
 
-    // Whoever records the response date is the responder, unless one is already recorded.
-    if (patch.respond_date && !current.respond_date && !current.responded_by_id) {
+    // Who is recorded as the responder is audit data — the server sets it (below), and only a SuperAdmin
+    // may override it by hand.
+    if ("responded_by_id" in body) {
+      if (!user.isSuperAdmin) {
+        return NextResponse.json({ success: false, error: "Only a SuperAdmin can change who responded." }, { status: 403 })
+      }
+      const by = body.responded_by_id ? String(body.responded_by_id) : null
+      if (by) {
+        const { data: responder } = await sb.from("scanner_users").select("id").eq("id", by).maybeSingle()
+        if (!responder) return NextResponse.json({ success: false, error: "Responder not found." }, { status: 400 })
+      }
+      patch.responded_by_id = by
+    }
+
+    // Whoever records the response date is the responder, unless one is already recorded (or a
+    // SuperAdmin just set it explicitly).
+    if (patch.respond_date && !current.respond_date && !current.responded_by_id && !("responded_by_id" in patch)) {
       patch.responded_by_id = actor.id
     }
 

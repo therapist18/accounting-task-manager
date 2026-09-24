@@ -86,8 +86,8 @@ export function CasesTable({
         <table className="min-w-[2300px] w-full border-separate border-spacing-0 text-base">
           <thead className="sticky top-0 z-30 bg-white shadow-xs">
             <tr>
-              <th rowSpan={2} className={cn(th, "w-11 sticky left-0 z-40 text-center bg-[#376bae] text-white border-white/20")}>#</th>
-              <SortTh id="client" rowSpan={2} sort={sort} onSort={handleSort} className="min-w-[220px] sticky left-11 z-40 text-left bg-[#376bae] hover:bg-[#376bae]/90 text-white border-white/20 border-r-2">
+              <SortTh tone="blue" id="#" rowSpan={2} sort={sort} onSort={handleSort} className="w-16 sticky left-0 z-40 text-center">#</SortTh>
+              <SortTh id="client" rowSpan={2} sort={sort} onSort={handleSort} className="min-w-[220px] sticky left-16 z-40 text-left bg-[#376bae] hover:bg-[#376bae]/90 text-white border-white/20 border-r-2">
                 Client / Ref
               </SortTh>
               <th colSpan={11} className="py-2 px-3 text-center bg-[#376bae] text-white font-semibold text-base border-b border-r border-white/20">From KRA email</th>
@@ -136,7 +136,7 @@ export function CasesTable({
                   <td className={cn(td, "sticky left-0 z-20 bg-inherit text-center text-slate-400 font-medium tabular-nums border-r border-slate-200")}>
                     {start + index + 1}
                   </td>
-                  <td className={cn(td, "sticky left-11 z-20 bg-inherit font-semibold text-slate-900 border-r-2 border-slate-300")}>
+                  <td className={cn(td, "sticky left-16 z-20 bg-inherit font-semibold text-slate-900 border-r-2 border-slate-300")}>
                     <div className="leading-snug text-slate-900 font-semibold">{c.company_name ?? <span className="text-red-500 font-normal">Unassigned company</span>}</div>
                     <div className="text-sm font-normal text-slate-500 mt-1">
                       {c.case_ref}{c.kra_pin ? ` · ${c.kra_pin}` : ""}

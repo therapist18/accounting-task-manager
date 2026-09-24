@@ -36,6 +36,7 @@ export function useSortedRows<T>(
   const [sort, setSort] = useState<SortState | null>(initial)
 
   const sorted = useMemo(() => {
+    if (sort?.key === "#") return sort.dir === "asc" ? rows : [...rows].reverse() // "#" = original order
     const accessor = sort ? accessors[sort.key] : null
     if (!sort || !accessor) return rows
     const dir = sort.dir === "asc" ? 1 : -1
@@ -45,7 +46,7 @@ export function useSortedRows<T>(
   }, [rows, sort])
 
   const toggle = (key: string) => {
-    if (!accessors[key]) return
+    if (key !== "#" && !accessors[key]) return
     setSort((cur) => (cur?.key === key ? { key, dir: cur.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }))
   }
 

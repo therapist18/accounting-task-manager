@@ -14,6 +14,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'GOOGLE_CLIENT_ID not configured' }, { status: 500 })
   }
 
+  // Optional: connecting FROM a company's row on the Mailboxes tab passes that company along (as OAuth
+  // `state`), so the callback links the new mailbox to it. Without it the mailbox is linked afterwards.
+  const company = request.nextUrl.searchParams.get('company')
+
   const scope = [
     'https://www.googleapis.com/auth/gmail.readonly',
     'https://www.googleapis.com/auth/userinfo.email',
@@ -30,7 +34,8 @@ export async function GET(request: NextRequest) {
     // select_account forces the account chooser every time, even when only one Google account is
     // signed into the browser — without it Google can silently reuse the last-picked account and
     // you'd reconnect the same mailbox instead of moving to the next one.
-    `prompt=${encodeURIComponent('consent select_account')}`
+    `prompt=${encodeURIComponent('consent select_account')}` +
+    (company ? `&state=${encodeURIComponent(company)}` : '')
 
   console.log('Redirecting to:', authUrl)
   return NextResponse.redirect(authUrl)

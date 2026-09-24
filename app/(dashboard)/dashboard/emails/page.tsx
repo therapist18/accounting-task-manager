@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, Clock, Columns3, Loader2, Plus, RefreshCw, RotateCcw, Search, Wifi, WifiOff } from "lucide-react"
+import { AlertTriangle, Clock, Columns3, History, Loader2, Plus, RefreshCw, RotateCcw, Search, Wifi, WifiOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -12,6 +12,7 @@ import { CasesTable } from "./components/CasesTable"
 import { EmailDialog } from "./components/EmailDialog"
 import { MailboxesPanel } from "./components/MailboxesPanel"
 import { RulesPanel } from "./components/RulesPanel"
+import { SyncDialog } from "./components/SyncDialog"
 import { CompanyPanels, matchesCompanySelection } from "./components/CompanyPanels"
 import { EmailsTable } from "./components/NeedsReview"
 import { fetchCompanies, type Company } from "../companies/database"
@@ -99,6 +100,10 @@ export default function EmailCenterPage() {
   // renders straight from it, so opening an email never waits on a request for its details.
   const [openEmailSeed, setOpenEmailSeed] = useState<EmailRow | null>(null)
   const [newCaseOpen, setNewCaseOpen] = useState(false)
+  // "Sync from date" dialog; presetIds is set when it is opened from one company's row.
+  const [syncFromOpen, setSyncFromOpen] = useState(false)
+  const [syncFromIds, setSyncFromIds] = useState<string[] | undefined>(undefined)
+  const [companiesLoading, setCompaniesLoading] = useState(true)
 
   // Companies and staff barely change within a session, unlike accounts, which "Refresh"/"Sync now"
   // want current. Only the very first overview call fetches them; every later one asks the server to
@@ -148,7 +153,17 @@ export default function EmailCenterPage() {
   // Loaded once, independent of Refresh/Sync now — the Needs Review sidebar's company list and
   // Client Category Filter don't need to be as fresh as accounts/cases/emails.
   useEffect(() => {
-    fetchCompanies().then(setFullCompanies).catch((e: any) => toast.error(e.message))
+    fetchCompanies().then(setFullCompanies).catch((e: any) => toast.error(e.message)).finally(() => setCompaniesLoading(false))
+  }, [])
+
+  // After a "Sync from date" run: reload what it pulled in, without the "Reloaded." toast.
+  const reloadQuietly = useCallback(() => {
+    loadAll().catch((e: any) => toast.error(e.message))
+  }, [loadAll])
+
+  const openSyncFrom = useCallback((ids?: string[]) => {
+    setSyncFromIds(ids)
+    setSyncFromOpen(true)
   }, [])
 
   const handleRefresh = useCallback(async () => {
@@ -288,11 +303,6 @@ export default function EmailCenterPage() {
       : []
   const activeCompanyIds = useMemo(() => activeBase.map((x) => x.company_id), [activeBase])
 
-  const filteredAccounts = useMemo(
-    () => (q ? accounts.filter((a) => `${a.email} ${a.label ?? ""} ${a.company_name ?? "not linked"} ${a.status} ${a.last_sync_error ?? ""}`.toLowerCase().includes(q)) : accounts),
-    [accounts, q]
-  )
-
   // ── counts, derived from what's already loaded — no separate server round trip for these ──
 
   const openCasesCount = useMemo(() => cases.filter((c) => c.status === "open").length, [cases])
@@ -373,6 +383,10 @@ export default function EmailCenterPage() {
           <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing || loading} className={PILL_BUTTON_CLASS} title="Check Gmail for new mail">
             {syncing ? <Loader2 className="h-5 w-5 animate-spin" /> : <RefreshCw className="h-5 w-5" />}
             Sync now
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => openSyncFrom()} disabled={loading} className={PILL_BUTTON_CLASS} title="Pull in older mail from a chosen date">
+            <History className="h-5 w-5" />
+            Sync from date
           </Button>
         </div>
       </div>
@@ -478,12 +492,14 @@ export default function EmailCenterPage() {
           <RulesPanel rules={rules} source={rulesSource} categories={categories} loading={loading} search={search} onRulesChange={setRules} />
         ) : tab === "mailboxes" ? (
           <MailboxesPanel
-            accounts={filteredAccounts}
-            companies={companies}
+            accounts={accounts}
+            companies={fullCompanies}
+            search={search}
             onAccountLinked={updateAccountCompany}
             onSynced={handleRefresh}
+            onSyncFrom={openSyncFrom}
             showTime={showTime}
-            loading={loading}
+            loading={loading || companiesLoading}
           />
         ) : byCompany ? (
           <CompanyPanels companies={fullCompanies} companyIds={activeCompanyIds} selected={sidebarCompany} onSelect={setSidebarCompany}>
@@ -511,6 +527,13 @@ export default function EmailCenterPage() {
         onCaseOpened={upsertCase}
         onOpenCase={(id) => { setOpenEmailSeed(null); setOpenCaseId(id) }}
         onRuleCreated={(r) => setRules((prev) => [...prev, r])}
+      />
+      <SyncDialog
+        open={syncFromOpen}
+        accounts={accounts}
+        presetIds={syncFromIds}
+        onClose={() => setSyncFromOpen(false)}
+        onFinished={reloadQuietly}
       />
       <NewCaseDialog
         open={newCaseOpen}

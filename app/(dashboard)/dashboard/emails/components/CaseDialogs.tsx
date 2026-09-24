@@ -17,9 +17,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { DateInput } from "@/components/ui/date-input"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
+import { dateFieldToIso } from "@/lib/dateUtils"
+import { useCurrentUser } from "@/lib/hooks/use-current-user"
 import {
   APPROVAL_BADGE,
   APPROVAL_LABEL,
@@ -62,14 +65,26 @@ function fetchCompany10Users(): Promise<StaffOption[]> {
 const FIELDS = [
   "notice_type", "kra_pin", "deadline_date", "contents", "attachments_summary", "signing_officer_name", "signing_officer_position",
   "respond_date", "respond_contents", "promised_date", "approval_status", "approval_date", "company_id",
-  "assigned_to_id",
+  "assigned_to_id", "responded_by_id",
 ] as const
 type FieldKey = (typeof FIELDS)[number]
 
+// Date columns are shown/typed as DD/MM/YYYY (DateInput) but stored and sent as YYYY-MM-DD; these are
+// compared and saved through dateFieldToIso so a half-typed date can never silently clear a field.
+const DATE_FIELD_LABELS: Partial<Record<FieldKey, string>> = {
+  deadline_date: "Deadline date",
+  respond_date: "Respond date",
+  promised_date: "Promised follow-up date",
+  approval_date: "Approval date",
+}
+const isDateField = (f: FieldKey) => f in DATE_FIELD_LABELS
+const comparable = (f: FieldKey, v: string) => (isDateField(f) ? dateFieldToIso(v) : v)
+
 const formFromRow = (row: CaseRow) =>
-  Object.fromEntries(FIELDS.map((f) => [f, (row as any)[f] ?? ""])) as Record<FieldKey, string>
+  Object.fromEntries(FIELDS.map((f) => [f, isDateField(f) ? String((row as any)[f] ?? "").slice(0, 10) : (row as any)[f] ?? ""])) as Record<FieldKey, string>
 
 const INPUT = "h-10 text-base rounded-md border-slate-200 bg-white"
+const INPUT_DISABLED = "disabled:opacity-100 disabled:bg-slate-100 disabled:text-slate-700 disabled:cursor-not-allowed"
 const TEXTAREA = "resize-none text-base rounded-md border-slate-200 bg-white leading-relaxed"
 
 function Field({ label, hint, className, children }: { label: string; hint?: string; className?: string; children: React.ReactNode }) {
@@ -112,6 +127,9 @@ export function CaseDialog({
   const [threadLoading, setThreadLoading] = useState(false)
   const [company10, setCompany10] = useState<StaffOption[]>([])
   const [tab, setTab] = useState("notice")
+  // "Responded by" is audit data the server fills in; only a SuperAdmin may override it.
+  const { user } = useCurrentUser()
+  const isSuperAdmin = !!user?.isSuperAdmin
 
   const initialRef = useRef(initialCase)
   initialRef.current = initialCase
@@ -177,13 +195,23 @@ export function CaseDialog({
     }
   }
 
-  const dirtyFields = row ? FIELDS.filter((f) => (form[f] ?? "") !== (((row as any)[f] ?? "") as string)) : []
+  const dirtyFields = row
+    ? FIELDS.filter((f) => comparable(f, form[f] ?? "") !== String(formFromRow(row)[f] ?? ""))
+    : []
   const dirty = dirtyFields.length > 0
 
   const save = async () => {
     if (!row || !dirty) return
     const changes: Record<string, string | null> = {}
-    for (const f of dirtyFields) changes[f] = form[f] === "" ? null : form[f]
+    for (const f of dirtyFields) {
+      if (isDateField(f)) {
+        const iso = dateFieldToIso(form[f])
+        if (iso === "invalid") return toast.error(`${DATE_FIELD_LABELS[f]} isn't a valid date — use DD/MM/YYYY.`)
+        changes[f] = iso || null
+      } else {
+        changes[f] = form[f] === "" ? null : form[f]
+      }
+    }
     await patch(changes, "Case updated.")
   }
 
@@ -302,7 +330,7 @@ export function CaseDialog({
                       <Input className={cn(INPUT, "font-mono")} value={form.kra_pin ?? ""} onChange={(e) => set("kra_pin", e.target.value)} />
                     </Field>
                     <Field label="Deadline date (KRA)">
-                      <Input type="date" className={INPUT} value={form.deadline_date ?? ""} onChange={(e) => set("deadline_date", e.target.value)} />
+                      <DateInput className={INPUT} value={form.deadline_date ?? ""} onChange={(v) => set("deadline_date", v)} />
                     </Field>
                     <Field label="Attached documents">
                       <Input className={INPUT} value={form.attachments_summary ?? ""} onChange={(e) => set("attachments_summary", e.target.value)} placeholder="e.g. letter.pdf, assessment.xlsx" />
@@ -322,18 +350,29 @@ export function CaseDialog({
                 <TabsContent value="response" className="mt-0">
                   <div className="grid md:grid-cols-2 gap-x-6 gap-y-5">
                     <Field label="Respond date">
-                      <Input type="date" className={INPUT} value={form.respond_date ?? ""} onChange={(e) => set("respond_date", e.target.value)} />
+                      <DateInput className={INPUT} value={form.respond_date ?? ""} onChange={(v) => set("respond_date", v)} />
                     </Field>
-                    <Field label="Responded by" hint="Recorded automatically when the respond date is first saved.">
-                      <p className="h-10 flex items-center text-base font-medium text-slate-800">
-                        {row?.respond_date ? row.responded_by_name ?? "BCL" : <span className="text-slate-400 font-normal">Not responded yet</span>}
-                      </p>
+                    <Field
+                      label="Responded by"
+                      hint={isSuperAdmin ? "Only a SuperAdmin can change who is recorded as the responder." : "Recorded automatically when the respond date is first saved."}
+                    >
+                      {isSuperAdmin ? (
+                        <SearchSelect
+                          className="w-full"
+                          value={form.responded_by_id ?? ""}
+                          onChange={(v) => set("responded_by_id", v)}
+                          placeholder="— Not recorded —"
+                          options={[{ value: "", label: "— Not recorded —" }, ...assignees.map((u) => ({ value: u.id, label: u.name }))]}
+                        />
+                      ) : (
+                        <Input disabled className={cn(INPUT, INPUT_DISABLED)} value={row?.respond_date ? row.responded_by_name ?? "BCL" : ""} placeholder="Not responded yet" />
+                      )}
                     </Field>
                     <Field label="Response contents" className="md:col-span-2">
                       <Textarea rows={5} className={TEXTAREA} value={form.respond_contents ?? ""} onChange={(e) => set("respond_contents", e.target.value)} />
                     </Field>
                     <Field label="Promised follow-up date">
-                      <Input type="date" className={INPUT} value={form.promised_date ?? ""} onChange={(e) => set("promised_date", e.target.value)} />
+                      <DateInput className={INPUT} value={form.promised_date ?? ""} onChange={(v) => set("promised_date", v)} />
                     </Field>
                     <Field label="Approval status">
                       <SearchSelect
@@ -344,7 +383,7 @@ export function CaseDialog({
                       />
                     </Field>
                     <Field label="Approval date">
-                      <Input type="date" className={INPUT} value={form.approval_date ?? ""} onChange={(e) => set("approval_date", e.target.value)} />
+                      <DateInput className={INPUT} value={form.approval_date ?? ""} onChange={(v) => set("approval_date", v)} />
                     </Field>
                   </div>
                 </TabsContent>
@@ -522,11 +561,15 @@ export function NewCaseDialog({
   const create = async () => {
     if (!form.company_id) return toast.error("Please choose a company.")
     if (!form.notice_type.trim() && !form.subject.trim()) return toast.error("Give the case a notice type or subject.")
+    const emailDate = dateFieldToIso(form.email_date)
+    const deadline = dateFieldToIso(form.deadline_date)
+    if (emailDate === "invalid") return toast.error("Date received isn't a valid date — use DD/MM/YYYY.")
+    if (deadline === "invalid") return toast.error("KRA deadline isn't a valid date — use DD/MM/YYYY.")
     setSaving(true)
     try {
       const res = await api<{ case: CaseRow }>("/api/email-center/cases", {
         method: "POST",
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, email_date: emailDate, deadline_date: deadline }),
       })
       toast.success("Case created successfully.")
       onCreated(res.case)
@@ -580,10 +623,10 @@ export function NewCaseDialog({
 
           <FormSection title="Dates & sender" description="When it arrived, when KRA wants a response, and who sent it.">
             <Field label="Date received">
-              <Input type="date" className={INPUT} value={form.email_date} onChange={(e) => set("email_date", e.target.value)} />
+              <DateInput className={INPUT} value={form.email_date} onChange={(v) => set("email_date", v)} />
             </Field>
             <Field label="KRA deadline">
-              <Input type="date" className={cn(INPUT, "border-amber-200 bg-amber-50/40")} value={form.deadline_date} onChange={(e) => set("deadline_date", e.target.value)} />
+              <DateInput className={cn(INPUT, "border-amber-200 bg-amber-50/40")} value={form.deadline_date} onChange={(v) => set("deadline_date", v)} />
             </Field>
             <Field label="KRA sender email / desk">
               <Input className={INPUT} value={form.kra_email_from} onChange={(e) => set("kra_email_from", e.target.value)} placeholder="e.g. itax@kra.go.ke" />

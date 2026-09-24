@@ -730,6 +730,92 @@ export async function syncAllAccounts(
   return results
 }
 
+// ─── sync from a chosen date ────────────────────────────────────────────────
+//
+// "Sync from date" lets staff pull in mail older than the automatic backfill window. It runs in two
+// steps so no single request outruns the platform's time limit and the UI can show real progress:
+//   listBackfillIds()      one cheap call: every message id since the date that isn't stored yet,
+//                          OLDEST FIRST (so a thread's first email opens its case before the follow-ups).
+//   ingestBackfillBatch()  the client sends those ids back a few at a time; each goes through the exact
+//                          same ingestMessage() as normal syncs, so classification, case opening and
+//                          attachment handling are identical. Already-stored mail is skipped, so
+//                          re-running or overlapping ranges is safe.
+// It never touches the mailbox's history cursor — normal incremental sync carries on unaffected.
+
+const MAX_BACKFILL_IDS = 3000
+export const BACKFILL_BATCH = 10
+
+async function loadActiveAccount(sb: SupabaseClient, accountId: string): Promise<AccountRow> {
+  const { data: account } = await sb.from("email_accounts").select("*").eq("id", accountId).maybeSingle()
+  if (!account) throw new Error("Mailbox not found.")
+  if (account.status !== "active" || !account.refresh_token) throw new Error(`${account.email} isn't connected — reconnect it first.`)
+  return account as AccountRow
+}
+
+export async function listBackfillIds(
+  sb: SupabaseClient,
+  accountId: string,
+  sinceYmd: string
+): Promise<{ email: string; ids: string[]; listed: number; capped: boolean }> {
+  const account = await loadActiveAccount(sb, accountId)
+  const gmail = gmailForAccount(account)
+
+  // Gmail's after: is evaluated at midnight Pacific time, so start a day early rather than risk missing
+  // that day's Kenyan-morning mail; the extra day is deduplicated below and by ingestMessage itself.
+  const start = new Date(`${sinceYmd}T00:00:00Z`)
+  start.setUTCDate(start.getUTCDate() - 1)
+  const q = `after:${start.getUTCFullYear()}/${start.getUTCMonth() + 1}/${start.getUTCDate()}`
+
+  const all: string[] = []
+  let pageToken: string | undefined
+  do {
+    const res = await gmail.users.messages.list({ userId: "me", q, maxResults: 500, pageToken })
+    all.push(...(res.data.messages ?? []).map((m) => m.id!).filter(Boolean))
+    pageToken = res.data.nextPageToken ?? undefined
+  } while (pageToken && all.length < MAX_BACKFILL_IDS)
+  const capped = !!pageToken
+  const listed = all.length
+
+  const done = new Set<string>()
+  for (let i = 0; i < all.length; i += 100) {
+    const chunk = all.slice(i, i + 100)
+    const { data } = await sb.from("emails").select("gmail_message_id").in("gmail_message_id", chunk).not("processed_at", "is", null)
+    for (const r of data ?? []) done.add((r as any).gmail_message_id)
+  }
+  const ids = all.filter((id) => !done.has(id)).reverse() // Gmail lists newest first -> oldest first
+
+  return { email: account.email, ids, listed, capped }
+}
+
+export async function ingestBackfillBatch(
+  sb: SupabaseClient,
+  accountId: string,
+  ids: string[],
+  budgetMs = 45_000
+): Promise<{ ingested: number; skipped: number; failed: number; remaining: string[]; errors: string[] }> {
+  const account = await loadActiveAccount(sb, accountId)
+  const ctx: Ctx = { sb, gmail: gmailForAccount(account), account }
+  const out = { ingested: 0, skipped: 0, failed: 0, remaining: [] as string[], errors: [] as string[] }
+  const started = Date.now()
+
+  for (let i = 0; i < ids.length; i++) {
+    if (Date.now() - started > budgetMs) {
+      out.remaining = ids.slice(i)
+      break
+    }
+    try {
+      const r = await ingestMessage(ctx, ids[i])
+      if (r === "ingested") out.ingested++
+      else out.skipped++
+    } catch (err: any) {
+      out.failed++
+      out.errors.push(`${ids[i]}: ${err?.message ?? err}`)
+      console.error("[email-center] backfill ingest failed", account.email, ids[i], err)
+    }
+  }
+  return out
+}
+
 // ─── Gmail push watch ───────────────────────────────────────────────────────
 
 // (Re)registers the Gmail push watch. Keeps the existing history_id so no messages between the last

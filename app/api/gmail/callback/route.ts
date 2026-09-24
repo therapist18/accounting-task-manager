@@ -14,6 +14,8 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
   const code = searchParams.get('code')
   const error = searchParams.get('error')
+  // Company the connect was started from (see /api/gmail/connect), if any. Verified below before use.
+  const stateCompanyId = searchParams.get('state')
 
   console.log('=== Gmail OAuth Callback ===')
   console.log('Code received:', !!code)
@@ -100,9 +102,16 @@ export async function GET(request: NextRequest) {
     console.log('Checking for existing record (email:', emailAddress, ')...')
     const { data: existing } = await sb
       .from('email_accounts')
-      .select('id')
+      .select('id, company_id')
       .eq('email', emailAddress)
       .maybeSingle()
+    const existingCompanyId = existing?.company_id ?? null
+
+    // Link the mailbox to the company it was connected from — but never silently move one that is
+    // already linked elsewhere; that's a deliberate change on the Mailboxes tab.
+    const { data: stateCompany } = stateCompanyId
+      ? await sb.from('acc_portal_company_duplicate').select('id').eq('id', stateCompanyId).maybeSingle()
+      : { data: null }
 
     let account: any
     let dbErr: any
@@ -111,7 +120,7 @@ export async function GET(request: NextRequest) {
       console.log('Existing account found — updating id:', existing.id)
       const { data, error } = await sb
         .from('email_accounts')
-        .update(accountPayload)
+        .update({ ...accountPayload, ...(stateCompany && !existingCompanyId ? { company_id: String(stateCompany.id) } : {}) })
         .eq('id', existing.id)
         .select()
         .single()
@@ -121,7 +130,7 @@ export async function GET(request: NextRequest) {
       console.log('No existing account — inserting new row...')
       const { data, error } = await sb
         .from('email_accounts')
-        .insert({ ...accountPayload, created_at: new Date().toISOString() })
+        .insert({ ...accountPayload, ...(stateCompany ? { company_id: String(stateCompany.id) } : {}), created_at: new Date().toISOString() })
         .select()
         .single()
       account = data

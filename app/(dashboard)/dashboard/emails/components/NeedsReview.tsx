@@ -20,6 +20,7 @@ const SORT_VALUE: Record<string, (e: EmailRow) => string | number> = {
   category: (e) => e.category_key ?? "",
   status: (e) => e.disposition ?? "",
   case: (e) => (e.case_id ? 1 : 0),
+  actions: (e) => (e.disposition === "needs_review" ? 0 : 1), // rows still awaiting a decision first
 }
 
 export function EmailsTable({
@@ -65,8 +66,8 @@ export function EmailsTable({
         <table className="min-w-[1500px] w-full border-separate border-spacing-0 text-base">
           <thead className="sticky top-0 z-30 bg-white shadow-xs">
             <tr>
-              <th className={cn(TH_CLASS, HEAD_BLUE, "w-11 sticky left-0 z-40 text-center")}>#</th>
-              <SortTh tone="blue" id="company" sort={sort} onSort={toggle} className="min-w-[210px] sticky left-11 z-40 text-left border-r-2">Company</SortTh>
+              <SortTh tone="blue" id="#" sort={sort} onSort={toggle} className="w-16 sticky left-0 z-40 text-center">#</SortTh>
+              <SortTh tone="blue" id="company" sort={sort} onSort={toggle} className="min-w-[210px] sticky left-16 z-40 text-left border-r-2">Company</SortTh>
               <SortTh tone="blue" id="from" sort={sort} onSort={toggle} className="min-w-[200px]">From</SortTh>
               <SortTh tone="blue" id="subject" sort={sort} onSort={toggle} className="min-w-[280px]">Subject</SortTh>
               <SortTh tone="blue" id="summary" sort={sort} onSort={toggle} className="min-w-[300px]">Summary</SortTh>
@@ -74,7 +75,7 @@ export function EmailsTable({
               <SortTh tone="blue" id="category" sort={sort} onSort={toggle} className="min-w-[140px]">Category</SortTh>
               <SortTh tone="blue" id="status" sort={sort} onSort={toggle} className="min-w-[130px]">Status</SortTh>
               <SortTh tone="blue" id="case" sort={sort} onSort={toggle} className="min-w-[90px]">Case</SortTh>
-              {showActions && <th className={cn(TH_CLASS, HEAD_BLUE, "min-w-[200px] text-left")}>Actions</th>}
+              {showActions && <SortTh tone="blue" id="actions" sort={sort} onSort={toggle} className="min-w-[200px] text-left">Actions</SortTh>}
             </tr>
           </thead>
           <tbody>
@@ -95,7 +96,7 @@ export function EmailsTable({
                   <td className={cn(TD_CLASS, "sticky left-0 z-20 bg-inherit text-center text-slate-400 font-medium tabular-nums border-r border-slate-200", isUnread && "border-l-4 border-l-custom-blue")}>
                     {start + index + 1}
                   </td>
-                  <td className={cn(TD_CLASS, "sticky left-11 z-20 bg-inherit border-r-2 border-slate-300")}>
+                  <td className={cn(TD_CLASS, "sticky left-16 z-20 bg-inherit border-r-2 border-slate-300")}>
                     <div className={cn("leading-snug", isUnread ? "font-bold text-slate-900" : "font-semibold text-slate-900")}>
                       {e.company_name ?? <span className="text-red-500 font-normal">Unassigned company</span>}
                     </div>

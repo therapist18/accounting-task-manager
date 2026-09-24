@@ -29,6 +29,7 @@ const SORT_VALUE: Record<string, (r: RuleRow) => string | number> = {
   category: (r) => r.category_key,
   confidence: (r) => r.confidence,
   active: (r) => (r.is_active ? 1 : 0),
+  actions: (r) => r.updated_at ?? "", // most recently edited last
 }
 
 const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -183,14 +184,14 @@ export function RulesPanel({
           <table className="w-full min-w-[1000px] border-separate border-spacing-0 text-base">
             <thead className="sticky top-0 z-30 bg-white shadow-xs">
               <tr>
-                <th className={cn(TH_CLASS, HEAD_BLUE, "w-11 text-center")}>#</th>
+                <SortTh tone="blue" id="#" sort={sort} onSort={toggle} className="w-16 text-center">#</SortTh>
                 <SortTh tone="blue" id="order" sort={sort} onSort={toggle} className="w-24 text-left">Order</SortTh>
                 <SortTh tone="blue" id="match" sort={sort} onSort={toggle} className="w-32 text-left">Match</SortTh>
                 <SortTh tone="blue" id="pattern" sort={sort} onSort={toggle} className="min-w-[320px] text-left">Subject pattern</SortTh>
                 <SortTh tone="blue" id="category" sort={sort} onSort={toggle} className="min-w-[240px] text-left">Category</SortTh>
                 <SortTh tone="blue" id="confidence" sort={sort} onSort={toggle} className="w-36 text-left">Confidence</SortTh>
                 <SortTh tone="blue" id="active" sort={sort} onSort={toggle} className="w-28 text-left">Active</SortTh>
-                <th className={cn(TH_CLASS, HEAD_BLUE, "w-28 border-r-0")}>Actions</th>
+                <SortTh tone="blue" id="actions" sort={sort} onSort={toggle} className="w-32 border-r-0 text-left">Actions</SortTh>
               </tr>
             </thead>
             <tbody>
