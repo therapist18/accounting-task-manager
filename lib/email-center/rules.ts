@@ -1,6 +1,10 @@
-// Deterministic KRA classification. KRA subjects are highly standardised, so a regex on the sender
+// Deterministic KRA classification. KRA subjects are highly standardised, so matching the sender
 // and subject is faster, free and more reliable than an LLM. Anything the rules are not sure about
-// falls through to the AI (see ai.ts) and, failing that, to Needs Review.
+// goes to Needs Review.
+//
+// The subject -> category rules are DATA: they live in the email_classification_rules table and are
+// edited from the Email Center's Rules tab (loaded by rule-store.ts). DEFAULT_SUBJECT_RULES below is the
+// built-in list the table was seeded from — used only when the table is missing or unreachable.
 
 export interface RuleResult {
   categoryKey: string
@@ -20,8 +24,18 @@ const NOISE_SENDER_RES = [
   /@(.*\.)?mailspring\./i,
 ]
 
-// [pattern, category key, confidence]. First match wins, so order from most to least specific.
-const SUBJECT_RULES: Array<[RegExp, string, number]> = [
+export type RuleMatchType = "contains" | "regex"
+
+export interface SubjectRule {
+  id?: string
+  match_type: RuleMatchType
+  pattern: string
+  category_key: string
+  confidence: number
+}
+
+// First match wins, so order from most to least specific.
+export const DEFAULT_SUBJECT_RULES: SubjectRule[] = ([
   [/notice of intention to verify/i, "verification_notice", 0.97],
   [/pre-?\s?assess?ment/i, "pre_assessment", 0.97],
   [/failure to (file|lodge)|non-?\s?fil(er|ing)|nil return.*(not|failure)/i, "failure_to_file", 0.95],
@@ -32,7 +46,31 @@ const SUBJECT_RULES: Array<[RegExp, string, number]> = [
   [/withholding (tax )?certificate|tax compliance certificate|\btcc\b/i, "certificate", 0.93],
   [/acknowledg(e)?ment|successfully (received|filed|submitted)|return (received|filed)|payment (receipt|confirmation)/i, "return_ack", 0.9],
   [/statement|ledger/i, "statement", 0.8],
-]
+] as Array<[RegExp, string, number]>).map(([re, category_key, confidence]) => ({
+  match_type: "regex" as const,
+  pattern: re.source,
+  category_key,
+  confidence,
+}))
+
+const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+// Compiled once per distinct rule; null = an invalid pattern, which is skipped instead of throwing
+// (a typo in one rule must never stop email ingestion).
+const compiled = new Map<string, RegExp | null>()
+
+export function compileRule(rule: Pick<SubjectRule, "match_type" | "pattern">): RegExp | null {
+  const key = `${rule.match_type}:${rule.pattern}`
+  if (compiled.has(key)) return compiled.get(key)!
+  let re: RegExp | null = null
+  try {
+    re = new RegExp(rule.match_type === "contains" ? escapeRegex(rule.pattern.trim()) : rule.pattern, "i")
+  } catch {
+    re = null
+  }
+  compiled.set(key, re)
+  return re
+}
 
 export function isKraSender(senderEmail: string): boolean {
   return KRA_SENDER_RE.test(senderEmail.trim())
@@ -79,8 +117,9 @@ export function classifyByRules(input: {
   body: string
   senderEmail: string
   threadHasCase: boolean
+  rules?: SubjectRule[]
 }): RuleResult | null {
-  const { subject, body, senderEmail, threadHasCase } = input
+  const { subject, body, senderEmail, threadHasCase, rules = DEFAULT_SUBJECT_RULES } = input
 
   if (isNoiseSender(senderEmail) && !isKraSender(senderEmail)) {
     return { categoryKey: "system_noise", confidence: 0.92 }
@@ -94,8 +133,9 @@ export function classifyByRules(input: {
     return { categoryKey: "extension_response", confidence: 0.85 }
   }
 
-  for (const [re, key, confidence] of SUBJECT_RULES) {
-    if (re.test(cleanSubject)) return { categoryKey: key, confidence }
+  for (const rule of rules) {
+    const re = compileRule(rule)
+    if (re?.test(cleanSubject)) return { categoryKey: rule.category_key, confidence: rule.confidence }
   }
   return null
 }

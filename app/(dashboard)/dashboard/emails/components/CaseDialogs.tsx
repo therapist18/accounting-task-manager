@@ -1,42 +1,44 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import {
-  CheckCircle2,
-  Loader2,
-  RotateCcw,
-  Building2,
-  Send,
-  Mail,
-  Paperclip,
   ArrowDownLeft,
   ArrowUpRight,
-  Clock,
-  User,
+  CheckCircle2,
   FileSpreadsheet,
-  Calendar,
-  Briefcase,
-  Hash,
   FolderPlus,
-  SendHorizontal,
-  FileText
+  Loader2,
+  Mail,
+  Paperclip,
+  RotateCcw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import {
+  APPROVAL_BADGE,
   APPROVAL_LABEL,
+  COUNT_BADGE_CLASS,
   SearchSelect,
+  TAB_LIST_CLASS,
+  TAB_TRIGGER_CLASS,
   api,
+  avatarTone,
+  daysBetween,
   fmtDate,
   fmtDateTime,
+  initials,
+  senderName,
+  todayYmd,
   type ApprovalStatus,
   type CaseRow,
   type CompanyOption,
+  type EmailRow,
   type StaffOption,
 } from "./shared"
 
@@ -57,16 +59,6 @@ function fetchCompany10Users(): Promise<StaffOption[]> {
   return company10Promise
 }
 
-interface ThreadEmail {
-  id: string
-  direction: "inbound" | "outbound"
-  subject: string
-  sender_email: string
-  snippet: string | null
-  received_at: string
-  has_attachments: boolean
-}
-
 const FIELDS = [
   "notice_type", "kra_pin", "deadline_date", "contents", "attachments_summary", "signing_officer_name", "signing_officer_position",
   "respond_date", "respond_contents", "promised_date", "approval_status", "approval_date", "company_id",
@@ -74,11 +66,31 @@ const FIELDS = [
 ] as const
 type FieldKey = (typeof FIELDS)[number]
 
+const formFromRow = (row: CaseRow) =>
+  Object.fromEntries(FIELDS.map((f) => [f, (row as any)[f] ?? ""])) as Record<FieldKey, string>
+
+const INPUT = "h-10 text-base rounded-md border-slate-200 bg-white"
+const TEXTAREA = "resize-none text-base rounded-md border-slate-200 bg-white leading-relaxed"
+
+function Field({ label, hint, className, children }: { label: string; hint?: string; className?: string; children: React.ReactNode }) {
+  return (
+    <div className={cn("space-y-1.5", className)}>
+      <Label className="text-sm font-medium text-slate-600">{label}</Label>
+      {children}
+      {hint && <p className="text-sm text-slate-400">{hint}</p>}
+    </div>
+  )
+}
+
 /* =========================================================================
    1. CASE DIALOG (View / Edit Existing Case)
-   ========================================================================= */
+   =========================================================================
+   Opens instantly from the case row the table already holds. The only request it makes is one
+   background call for what a list row can't carry: the thread's emails (already in the same shape as
+   the email list, so opening one needs no request for its details) and the audit names. */
 export function CaseDialog({
   caseId,
+  initialCase,
   companies,
   staff,
   onClose,
@@ -86,18 +98,27 @@ export function CaseDialog({
   onOpenEmail,
 }: {
   caseId: string | null
+  initialCase: CaseRow | null
   companies: CompanyOption[]
   staff: StaffOption[]
   onClose: () => void
   onCaseLoaded: (c: CaseRow) => void
-  onOpenEmail: (emailId: string) => void
+  onOpenEmail: (email: EmailRow) => void
 }) {
-  const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [row, setRow] = useState<CaseRow | null>(null)
   const [form, setForm] = useState<Record<FieldKey, string>>({} as Record<FieldKey, string>)
-  const [emails, setEmails] = useState<ThreadEmail[]>([])
+  const [emails, setEmails] = useState<EmailRow[]>([])
+  const [threadLoading, setThreadLoading] = useState(false)
   const [company10, setCompany10] = useState<StaffOption[]>([])
+  const [tab, setTab] = useState("notice")
+
+  const initialRef = useRef(initialCase)
+  initialRef.current = initialCase
+
+  // While closing (caseId null) the last case stays on screen for the exit animation; while switching to
+  // another case, hide the previous one until the new row is seeded.
+  const shown = row && (!caseId || row.id === caseId) ? row : null
 
   // Populate the Case Assignee dropdown from the BCL staff endpoint on first open; falls back to
   // the page-level staff list (overview) until that resolves or if it fails.
@@ -110,27 +131,35 @@ export function CaseDialog({
     return () => { alive = false }
   }, [caseId])
 
-  const load = useCallback(async () => {
+  // `resetForm` is false for the background enrich on open, so it never overwrites what the user has
+  // already started typing; it's true after a save/complete, when the form should mirror the server.
+  const load = useCallback(async (resetForm: boolean) => {
     if (!caseId) return
-    setLoading(true)
     try {
-      const res = await api<{ case: CaseRow; emails: ThreadEmail[] }>(`/api/email-center/cases/${caseId}`)
+      const res = await api<{ case: CaseRow; emails: EmailRow[] }>(`/api/email-center/cases/${caseId}`)
       setRow(res.case)
       setEmails(res.emails)
-      setForm(Object.fromEntries(FIELDS.map((f) => [f, (res.case as any)[f] ?? ""])) as Record<FieldKey, string>)
+      if (resetForm) setForm(formFromRow(res.case))
       onCaseLoaded(res.case)
     } catch (e: any) {
       toast.error(e.message)
-      onClose()
+      if (!initialRef.current) onClose()
     } finally {
-      setLoading(false)
+      setThreadLoading(false)
     }
   }, [caseId, onClose, onCaseLoaded])
 
   useEffect(() => {
-    setRow(null)
-    load()
-  }, [load])
+    if (!caseId) return
+    const seed = initialRef.current
+    setTab("notice")
+    setEmails([])
+    setThreadLoading(true)
+    setRow(seed)
+    if (seed) setForm(formFromRow(seed))
+    load(!seed)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [caseId])
 
   const set = (k: FieldKey, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
@@ -140,7 +169,7 @@ export function CaseDialog({
     try {
       await api(`/api/email-center/cases/${row.id}`, { method: "PATCH", body: JSON.stringify(body) })
       toast.success(success)
-      await load()
+      await load(true)
     } catch (e: any) {
       toast.error(e.message)
     } finally {
@@ -148,332 +177,299 @@ export function CaseDialog({
     }
   }
 
+  const dirtyFields = row ? FIELDS.filter((f) => (form[f] ?? "") !== (((row as any)[f] ?? "") as string)) : []
+  const dirty = dirtyFields.length > 0
+
   const save = async () => {
-    if (!row) return
+    if (!row || !dirty) return
     const changes: Record<string, string | null> = {}
-    for (const f of FIELDS) {
-      const before = ((row as any)[f] ?? "") as string
-      if ((form[f] ?? "") !== before) changes[f] = form[f] === "" ? null : form[f]
-    }
-    if (!Object.keys(changes).length) return toast.info("Nothing to save.")
+    for (const f of dirtyFields) changes[f] = form[f] === "" ? null : form[f]
     await patch(changes, "Case updated.")
   }
 
-  const closed = row?.status === "closed"
+  const closed = shown?.status === "closed"
+  const deadlineDays = shown?.deadline_date ? daysBetween(todayYmd(), shown.deadline_date) : null
+  const assignees = company10.length ? company10 : staff
 
   return (
     <Dialog open={!!caseId} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-5xl max-h-[90vh] p-0 gap-0 rounded-xl border border-slate-200 shadow-xl overflow-hidden bg-white flex flex-col">
-        {/* Header Banner */}
-        <div className="border-b border-slate-200/80 bg-white px-6 py-4 shrink-0">
-          <DialogHeader className="gap-1.5">
-            <div className="flex flex-wrap items-center justify-between gap-3 pr-8">
-              <div className="flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-custom-blue/10 text-custom-blue shrink-0">
-                  <FileSpreadsheet className="h-5 w-5" />
-                </span>
-                <div>
-                  <DialogTitle className="text-base sm:text-lg font-bold tracking-tight text-slate-900 flex items-center gap-2">
-                    <span>{row ? `${row.company_name ?? "Unassigned company"} — ${row.notice_type ?? row.subject}` : "KRA Case"}</span>
-                  </DialogTitle>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    KRA tax notice tracking, communication records, and response workflow.
-                  </p>
-                </div>
-              </div>
+      <DialogContent className="max-w-6xl w-[96vw] h-[90vh] p-0 gap-0 rounded-2xl border border-slate-200 shadow-xl overflow-hidden bg-white flex flex-col">
+        <DialogDescription className="sr-only">KRA tax notice tracking, communication records and response workflow.</DialogDescription>
 
-              {row && (
-                <div className="flex items-center gap-2">
-                  <span className={cn(
-                    "inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full border",
-                    closed
-                      ? "bg-slate-100 text-slate-700 border-slate-200"
-                      : "bg-emerald-50 text-emerald-700 border-emerald-200"
-                  )}>
-                    <span className={cn("h-1.5 w-1.5 rounded-full", closed ? "bg-slate-400" : "bg-emerald-500 animate-pulse")} />
-                    {closed ? "Closed" : "Active Case"}
-                  </span>
-                  <span className="font-mono text-xs px-2 py-0.5 bg-slate-50 border border-slate-200 rounded-md text-slate-600 font-medium">
-                    {row.case_ref}
-                  </span>
-                </div>
-              )}
+        {/* Header */}
+        <div className="flex items-center gap-4 border-b border-slate-200 bg-white pl-6 pr-14 py-4 shrink-0">
+          <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-custom-blue/10 text-custom-blue shrink-0">
+            <FileSpreadsheet className="h-6 w-6" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <DialogTitle className="text-2xl font-bold tracking-tight text-slate-900 truncate">
+              {shown ? `${shown.company_name ?? "Unassigned company"} — ${shown.notice_type ?? shown.subject ?? "Case"}` : "KRA case"}
+            </DialogTitle>
+            {shown && (
+              <p className="text-base text-slate-500 mt-0.5">
+                <span className="font-mono">{shown.case_ref}</span>
+                {shown.kra_pin && <> · PIN <span className="font-mono">{shown.kra_pin}</span></>}
+                {shown.email_date && <> · received {fmtDate(shown.email_date)}</>}
+              </p>
+            )}
+          </div>
+          {shown && (
+            <div className="flex items-center gap-2 shrink-0">
+              <span className={cn("inline-flex items-center gap-1.5 text-sm font-semibold px-3 py-1 rounded-full border", APPROVAL_BADGE[shown.approval_status])}>
+                {APPROVAL_LABEL[shown.approval_status]}
+              </span>
+              <span className={cn(
+                "inline-flex items-center gap-1.5 text-sm font-semibold px-3 py-1 rounded-full border",
+                closed ? "bg-slate-100 text-slate-700 border-slate-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"
+              )}>
+                <span className={cn("h-2 w-2 rounded-full", closed ? "bg-slate-400" : "bg-emerald-500")} />
+                {closed ? "Closed" : "Active"}
+              </span>
             </div>
-          </DialogHeader>
+          )}
         </div>
 
-        {/* Reference Context Row */}
-        {row && (
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 px-6 py-2.5 bg-slate-50/80 border-b border-slate-200/70 text-xs text-slate-500 shrink-0">
-            <div className="flex items-center gap-1.5">
-              <Building2 className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-              <span className="text-slate-400">Client:</span>
-              <span className="font-semibold text-slate-800">{row.company_name ?? "Unassigned"}</span>
+        {/* Key facts */}
+        {shown && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3 px-6 py-3.5 bg-slate-50 border-b border-slate-200 shrink-0">
+            <div className="min-w-0">
+              <p className="text-sm text-slate-500">Client</p>
+              <p className="text-base font-semibold text-slate-900 truncate">{shown.company_name ?? <span className="text-red-500">Unassigned</span>}</p>
             </div>
-            {row.kra_pin && (
-              <div className="flex items-center gap-1.5">
-                <Hash className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                <span className="text-slate-400">PIN:</span>
-                <span className="font-mono font-semibold text-slate-800">{row.kra_pin}</span>
-              </div>
-            )}
-            <div className="flex items-center gap-1.5">
-              <Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-              <span className="text-slate-400">From:</span>
-              <span className="font-medium text-slate-800 truncate max-w-xs">{row.kra_email_from}</span>
+            <div className="min-w-0">
+              <p className="text-sm text-slate-500">KRA sender</p>
+              <p className="text-base font-medium text-slate-800 truncate" title={shown.kra_email_from ?? ""}>{shown.kra_email_from || "—"}</p>
             </div>
-            {row.deadline_date && (
-              <div className="flex items-center gap-1.5">
-                <Calendar className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                <span className="text-slate-400">Deadline:</span>
-                <span className="font-semibold text-amber-700 tabular-nums">{fmtDate(row.deadline_date)}</span>
-              </div>
-            )}
+            <div className="min-w-0">
+              <p className="text-sm text-slate-500">Deadline</p>
+              <p className="text-base font-semibold tabular-nums flex items-center gap-2">
+                <span className={deadlineDays !== null && deadlineDays < 0 && !closed ? "text-red-600" : "text-slate-900"}>{shown.deadline_date ? fmtDate(shown.deadline_date) : "—"}</span>
+                {deadlineDays !== null && !closed && (
+                  <span className={cn(
+                    "text-sm font-semibold px-2 py-0.5 rounded-full border",
+                    deadlineDays < 0 ? "bg-red-50 text-red-700 border-red-200" : deadlineDays <= 7 ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                  )}>
+                    {deadlineDays < 0 ? `${-deadlineDays}d overdue` : deadlineDays === 0 ? "Due today" : `${deadlineDays}d left`}
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm text-slate-500">Subject</p>
+              <p className="text-base font-medium text-slate-800 truncate" title={shown.subject ?? ""}>{shown.subject || "—"}</p>
+            </div>
           </div>
         )}
 
-        {(loading || !row) && (
-          <div className="flex flex-col items-center justify-center py-24 text-slate-400 gap-3">
+        {!shown ? (
+          <div className="flex-1 flex items-center justify-center text-slate-400">
             <Loader2 className="w-6 h-6 animate-spin text-custom-blue" />
-            <span className="text-xs font-medium">Loading case details…</span>
           </div>
-        )}
-
-        {row && !loading && (
-          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5 bg-slate-50/40 custom-scrollbar">
-            {/* Subject Banner */}
-            <div className="flex items-start gap-3 bg-white border border-slate-200/80 rounded-xl p-3.5 text-xs text-slate-800 leading-relaxed shadow-xs">
-              <Mail className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">Email Subject</span>
-                <span className="font-medium text-slate-900">{row.subject}</span>
+        ) : (
+          <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
+            {/* Main: tabs */}
+            <Tabs value={tab} onValueChange={setTab} className="flex-1 min-w-0 min-h-0 flex flex-col">
+              <div className="px-6 pt-4 shrink-0">
+                <TabsList className={TAB_LIST_CLASS}>
+                  <TabsTrigger value="notice" className={TAB_TRIGGER_CLASS}>Notice from KRA</TabsTrigger>
+                  <TabsTrigger value="response" className={TAB_TRIGGER_CLASS}>BCL response</TabsTrigger>
+                  <TabsTrigger value="thread" className={TAB_TRIGGER_CLASS}>
+                    Email thread
+                    {emails.length > 0 && <span className={COUNT_BADGE_CLASS}>{emails.length}</span>}
+                  </TabsTrigger>
+                </TabsList>
               </div>
-            </div>
 
-            {/* Task Card: Assignment & Status Action */}
-            <div className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3.5 shadow-xs">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-lg bg-custom-blue/10 flex items-center justify-center text-custom-blue shrink-0">
-                    <User className="h-4 w-4" />
+              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-6 py-5">
+                <TabsContent value="notice" className="mt-0">
+                  <div className="grid md:grid-cols-2 gap-x-6 gap-y-5">
+                    <Field label="Company" className="md:col-span-2">
+                      <SearchSelect
+                        className="w-full"
+                        value={form.company_id ?? ""}
+                        onChange={(v) => {
+                          set("company_id", v)
+                          set("kra_pin", companies.find((c) => c.id === v)?.kra_pin ?? "")
+                        }}
+                        placeholder="— Unassigned —"
+                        options={[{ value: "", label: "— Unassigned —" }, ...companies.map((c) => ({ value: c.id, label: c.company_name }))]}
+                      />
+                    </Field>
+                    <Field label="Notice type">
+                      <Input className={INPUT} value={form.notice_type ?? ""} onChange={(e) => set("notice_type", e.target.value)} />
+                    </Field>
+                    <Field label="KRA PIN">
+                      <Input className={cn(INPUT, "font-mono")} value={form.kra_pin ?? ""} onChange={(e) => set("kra_pin", e.target.value)} />
+                    </Field>
+                    <Field label="Deadline date (KRA)">
+                      <Input type="date" className={INPUT} value={form.deadline_date ?? ""} onChange={(e) => set("deadline_date", e.target.value)} />
+                    </Field>
+                    <Field label="Attached documents">
+                      <Input className={INPUT} value={form.attachments_summary ?? ""} onChange={(e) => set("attachments_summary", e.target.value)} placeholder="e.g. letter.pdf, assessment.xlsx" />
+                    </Field>
+                    <Field label="Signing officer">
+                      <Input className={INPUT} value={form.signing_officer_name ?? ""} onChange={(e) => set("signing_officer_name", e.target.value)} />
+                    </Field>
+                    <Field label="Officer position">
+                      <Input className={INPUT} value={form.signing_officer_position ?? ""} onChange={(e) => set("signing_officer_position", e.target.value)} />
+                    </Field>
+                    <Field label="What KRA is asking for" hint="Periods, taxes, records — a short summary of the notice." className="md:col-span-2">
+                      <Textarea rows={5} className={TEXTAREA} value={form.contents ?? ""} onChange={(e) => set("contents", e.target.value)} />
+                    </Field>
                   </div>
-                  <div>
-                    <Label className="text-[11px] uppercase tracking-wider font-bold text-slate-500 block">
-                      Case Assignee
-                    </Label>
-                    <SearchSelect
-                      className="min-w-[240px] mt-1"
-                      value={form.assigned_to_id ?? ""}
-                      onChange={(v) => set("assigned_to_id", v)}
-                      placeholder="— Unassigned —"
-                      options={[
-                        { value: "", label: "— Unassigned —" },
-                        ...(company10.length ? company10 : staff).map((s) => ({ value: s.id, label: s.name })),
-                      ]}
-                    />
+                </TabsContent>
+
+                <TabsContent value="response" className="mt-0">
+                  <div className="grid md:grid-cols-2 gap-x-6 gap-y-5">
+                    <Field label="Respond date">
+                      <Input type="date" className={INPUT} value={form.respond_date ?? ""} onChange={(e) => set("respond_date", e.target.value)} />
+                    </Field>
+                    <Field label="Responded by" hint="Recorded automatically when the respond date is first saved.">
+                      <p className="h-10 flex items-center text-base font-medium text-slate-800">
+                        {row?.respond_date ? row.responded_by_name ?? "BCL" : <span className="text-slate-400 font-normal">Not responded yet</span>}
+                      </p>
+                    </Field>
+                    <Field label="Response contents" className="md:col-span-2">
+                      <Textarea rows={5} className={TEXTAREA} value={form.respond_contents ?? ""} onChange={(e) => set("respond_contents", e.target.value)} />
+                    </Field>
+                    <Field label="Promised follow-up date">
+                      <Input type="date" className={INPUT} value={form.promised_date ?? ""} onChange={(e) => set("promised_date", e.target.value)} />
+                    </Field>
+                    <Field label="Approval status">
+                      <SearchSelect
+                        className="w-full"
+                        value={form.approval_status ?? ""}
+                        onChange={(v) => set("approval_status", v)}
+                        options={(Object.keys(APPROVAL_LABEL) as ApprovalStatus[]).map((s) => ({ value: s, label: APPROVAL_LABEL[s] }))}
+                      />
+                    </Field>
+                    <Field label="Approval date">
+                      <Input type="date" className={INPUT} value={form.approval_date ?? ""} onChange={(e) => set("approval_date", e.target.value)} />
+                    </Field>
                   </div>
-                </div>
+                </TabsContent>
 
-                <div className="flex items-center gap-2 self-end sm:self-auto">
-                  {closed ? (
-                    <Button variant="outline" size="sm" disabled={saving} onClick={() => patch({ status: "open" }, "Case reopened.")} className="h-8 text-xs font-semibold gap-1.5 rounded-md border-slate-200">
-                      <RotateCcw className="w-3.5 h-3.5" /> Reopen Case
-                    </Button>
-                  ) : (
-                    <Button size="sm" disabled={saving} onClick={() => patch({ status: "closed" }, "Case marked complete.")} className="h-8 text-xs font-semibold gap-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Mark Complete
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              {/* Audit Trail */}
-              <div className="pt-2.5 border-t border-slate-100 text-[11px] text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span>Opened by <strong className="font-semibold text-slate-700">{row.created_by_name ?? "System"}</strong> on {fmtDate(row.email_date)}</span>
-                {row.assigned_to_name && (
-                  <>
-                    <span>·</span>
-                    <span>Assigned to <strong className="font-semibold text-slate-700">{row.assigned_to_name}</strong>{row.assigned_by_name ? ` by ${row.assigned_by_name}` : ""}{row.assigned_at ? ` (${fmtDateTime(row.assigned_at)})` : ""}</span>
-                  </>
-                )}
-                {closed && row.completed_by_name && (
-                  <>
-                    <span>·</span>
-                    <span>Completed by <strong className="font-semibold text-slate-700">{row.completed_by_name}</strong> ({fmtDateTime(row.completed_at)})</span>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* TWO COLUMN WORKSPACE */}
-            <div className="grid md:grid-cols-2 gap-5 items-start">
-              {/* Left Column: From KRA */}
-              <div className="rounded-xl border border-blue-200/80 bg-white p-4 space-y-3.5 shadow-xs">
-                <div className="flex items-center justify-between border-b border-blue-100 pb-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="h-6 w-6 rounded-md bg-blue-50 flex items-center justify-center text-custom-blue">
-                      <Building2 className="h-3.5 w-3.5" />
-                    </span>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-custom-blue">
-                      From KRA Notice
-                    </h4>
-                  </div>
-                </div>
-
-                <Field label="Company">
-                  <SearchSelect
-                    className="w-full"
-                    value={form.company_id ?? ""}
-                    onChange={(v) => {
-                      set("company_id", v)
-                      set("kra_pin", companies.find((c) => c.id === v)?.kra_pin ?? "")
-                    }}
-                    placeholder="— Unassigned —"
-                    options={[{ value: "", label: "— Unassigned —" }, ...companies.map((c) => ({ value: c.id, label: c.company_name }))]}
-                  />
-                </Field>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Notice Type">
-                    <Input className="h-8 text-xs rounded-md border-slate-200" value={form.notice_type ?? ""} onChange={(e) => set("notice_type", e.target.value)} />
-                  </Field>
-                  <Field label="KRA PIN">
-                    <Input className="h-8 font-mono text-xs rounded-md border-slate-200" value={form.kra_pin ?? ""} onChange={(e) => set("kra_pin", e.target.value)} />
-                  </Field>
-                </div>
-
-                <Field label="Deadline Date (KRA)">
-                  <Input type="date" className="h-8 text-xs rounded-md border-slate-200" value={form.deadline_date ?? ""} onChange={(e) => set("deadline_date", e.target.value)} />
-                </Field>
-
-                <Field label="Notice Contents / Details">
-                  <Textarea rows={3} className="resize-none text-xs rounded-md border-slate-200 leading-relaxed" value={form.contents ?? ""} onChange={(e) => set("contents", e.target.value)} />
-                </Field>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Signing Officer">
-                    <Input className="h-8 text-xs rounded-md border-slate-200" value={form.signing_officer_name ?? ""} onChange={(e) => set("signing_officer_name", e.target.value)} />
-                  </Field>
-                  <Field label="Officer Position">
-                    <Input className="h-8 text-xs rounded-md border-slate-200" value={form.signing_officer_position ?? ""} onChange={(e) => set("signing_officer_position", e.target.value)} />
-                  </Field>
-                </div>
-
-                <Field label="Attached Documents Summary">
-                  <Input className="h-8 text-xs rounded-md border-slate-200" value={form.attachments_summary ?? ""} onChange={(e) => set("attachments_summary", e.target.value)} placeholder="e.g. letter.pdf, assessment.xlsx" />
-                </Field>
-              </div>
-
-              {/* Right Column: BCL Response */}
-              <div className="rounded-xl border border-emerald-200/80 bg-white p-4 space-y-3.5 shadow-xs">
-                <div className="flex items-center justify-between border-b border-emerald-100 pb-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="h-6 w-6 rounded-md bg-emerald-50 flex items-center justify-center text-emerald-600">
-                      <Send className="h-3.5 w-3.5" />
-                    </span>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-700">
-                      When BCL Responds to KRA
-                    </h4>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Respond Date">
-                    <Input type="date" className="h-8 text-xs rounded-md border-slate-200" value={form.respond_date ?? ""} onChange={(e) => set("respond_date", e.target.value)} />
-                  </Field>
-                  <Field label="Responded By">
-                    <Input disabled className="h-8 text-xs rounded-md border-slate-200 bg-slate-50 font-medium text-slate-700" value={row.respond_date ? row.responded_by_name ?? "BCL" : ""} />
-                  </Field>
-                </div>
-
-                <Field label="Response Contents">
-                  <Textarea rows={3} className="resize-none text-xs rounded-md border-slate-200 leading-relaxed" value={form.respond_contents ?? ""} onChange={(e) => set("respond_contents", e.target.value)} />
-                </Field>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Promised Follow-up Date">
-                    <Input type="date" className="h-8 text-xs rounded-md border-slate-200" value={form.promised_date ?? ""} onChange={(e) => set("promised_date", e.target.value)} />
-                  </Field>
-                  <Field label="Approval Date">
-                    <Input type="date" className="h-8 text-xs rounded-md border-slate-200" value={form.approval_date ?? ""} onChange={(e) => set("approval_date", e.target.value)} />
-                  </Field>
-                </div>
-
-                <Field label="Approval Status">
-                  <SearchSelect
-                    className="w-full"
-                    value={form.approval_status ?? ""}
-                    onChange={(v) => set("approval_status", v)}
-                    options={(Object.keys(APPROVAL_LABEL) as ApprovalStatus[]).map((s) => ({ value: s, label: APPROVAL_LABEL[s] }))}
-                  />
-                </Field>
-              </div>
-            </div>
-
-            {/* Email Communications List */}
-            <div className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3 shadow-xs">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 pb-2 border-b border-slate-100">
-                <Mail className="h-3.5 w-3.5 text-custom-blue" />
-                <span>Thread History ({emails.length})</span>
-              </div>
-              <div className="space-y-2">
-                {emails.map((m) => {
-                  const isInbound = m.direction === "inbound"
-                  return (
-                    <button
-                      key={m.id}
-                      onClick={() => onOpenEmail(m.id)}
-                      className="group w-full flex items-center justify-between gap-4 p-3 rounded-lg border border-slate-200/80 bg-slate-50/50 hover:bg-slate-100/80 hover:border-slate-300 transition-all text-left"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className={`h-7 w-7 rounded-md flex items-center justify-center shrink-0 ${
-                          isInbound 
-                            ? "bg-blue-50 text-custom-blue" 
-                            : "bg-emerald-50 text-emerald-600"
-                        }`}>
-                          {isInbound ? <ArrowDownLeft className="h-4 w-4" /> : <ArrowUpRight className="h-4 w-4" />}
-                        </span>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-slate-800 group-hover:text-custom-blue transition-colors truncate">
-                              {m.subject}
-                            </span>
-                            {m.has_attachments && <Paperclip className="h-3 w-3 text-slate-400 shrink-0" />}
-                          </div>
-                          <p className="text-[11px] text-slate-400 truncate">{m.sender_email}</p>
+                <TabsContent value="thread" className="mt-0">
+                  <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden bg-white">
+                    {threadLoading && emails.length === 0 && Array.from({ length: 3 }, (_, i) => (
+                      <div key={i} className="flex items-center gap-3 px-4 py-3.5">
+                        <div className="h-10 w-10 rounded-full bg-slate-200/80 animate-pulse shrink-0" />
+                        <div className="flex-1 space-y-2">
+                          <div className="h-3.5 w-1/3 rounded bg-slate-200/80 animate-pulse" />
+                          <div className="h-3.5 w-2/3 rounded bg-slate-200/60 animate-pulse" />
                         </div>
                       </div>
-                      <div className="text-[11px] text-slate-400 whitespace-nowrap shrink-0 flex items-center gap-1 tabular-nums">
-                        <Clock className="h-3 w-3" />
-                        {fmtDateTime(m.received_at)}
+                    ))}
+                    {emails.map((m) => {
+                      const name = senderName(m)
+                      const inbound = m.direction === "inbound"
+                      return (
+                        <button
+                          key={m.id}
+                          onClick={() => onOpenEmail(m)}
+                          className="group w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-slate-50 transition-colors"
+                        >
+                          <span className={cn("h-10 w-10 rounded-full text-white flex items-center justify-center text-base font-semibold shrink-0", avatarTone(m.sender_email))}>
+                            {initials(name)}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className={cn("text-base truncate", m.is_read ? "font-medium text-slate-800" : "font-bold text-slate-900")}>{name}</span>
+                              <span className={cn("inline-flex items-center gap-0.5 text-sm shrink-0", inbound ? "text-custom-blue" : "text-emerald-600")}>
+                                {inbound ? <ArrowDownLeft className="h-4 w-4" /> : <ArrowUpRight className="h-4 w-4" />}
+                                {inbound ? "Received" : "Sent"}
+                              </span>
+                              {m.has_attachments && <Paperclip className="h-4 w-4 text-slate-400 shrink-0" />}
+                            </div>
+                            <p className="text-base text-slate-700 truncate group-hover:text-custom-blue transition-colors">{m.subject}</p>
+                            {m.snippet && <p className="text-sm text-slate-400 truncate">{m.snippet}</p>}
+                          </div>
+                          <span className="text-sm text-slate-500 whitespace-nowrap shrink-0 tabular-nums">{fmtDateTime(m.received_at, true)}</span>
+                        </button>
+                      )
+                    })}
+                    {!threadLoading && emails.length === 0 && (
+                      <div className="py-12 text-center text-base text-slate-400">
+                        <Mail className="h-8 w-8 mx-auto mb-2 text-slate-300" />
+                        No email messages are linked to this case.
                       </div>
-                    </button>
-                  )
-                })}
-                {!emails.length && (
-                  <div className="p-4 rounded-lg border border-dashed border-slate-200 text-center text-xs text-slate-400">
-                    No linked email messages recorded for this case.
+                    )}
                   </div>
-                )}
+                </TabsContent>
               </div>
-            </div>
+            </Tabs>
+
+            {/* Aside: assignment, status, history */}
+            <aside className="lg:w-80 shrink-0 border-t lg:border-t-0 lg:border-l border-slate-200 bg-slate-50 overflow-y-auto custom-scrollbar p-5 space-y-6">
+              <section className="space-y-3">
+                <h3 className="text-base font-semibold text-slate-800">Assignment</h3>
+                <Field label="Case assignee">
+                  <SearchSelect
+                    className="w-full"
+                    value={form.assigned_to_id ?? ""}
+                    onChange={(v) => set("assigned_to_id", v)}
+                    placeholder="— Unassigned —"
+                    options={[{ value: "", label: "— Unassigned —" }, ...assignees.map((s) => ({ value: s.id, label: s.name }))]}
+                  />
+                </Field>
+                {closed ? (
+                  <Button variant="outline" disabled={saving} onClick={() => patch({ status: "open" }, "Case reopened.")} className="w-full h-10 gap-2 rounded-md border-slate-300 bg-white text-base font-medium">
+                    <RotateCcw className="w-5 h-5" /> Reopen case
+                  </Button>
+                ) : (
+                  <Button disabled={saving} onClick={() => patch({ status: "closed" }, "Case marked complete.")} className="w-full h-10 gap-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-base font-semibold shadow-xs">
+                    <CheckCircle2 className="w-5 h-5" /> Mark complete
+                  </Button>
+                )}
+              </section>
+
+              <section className="space-y-3">
+                <h3 className="text-base font-semibold text-slate-800">History</h3>
+                <ol className="relative border-l border-slate-300 ml-1.5 space-y-4 text-base">
+                  <HistoryItem tone="blue" title="Case opened" detail={`${shown.created_by_name ?? (shown.created_by_id ? "Staff" : "System (from email)")} · ${fmtDate(shown.email_date)}`} />
+                  {shown.assigned_to_name && (
+                    <HistoryItem
+                      tone="blue"
+                      title={`Assigned to ${shown.assigned_to_name}`}
+                      detail={`${shown.assigned_by_name ? `by ${shown.assigned_by_name} · ` : ""}${fmtDateTime(shown.assigned_at, true)}`}
+                    />
+                  )}
+                  {shown.respond_date && (
+                    <HistoryItem tone="emerald" title="Response sent to KRA" detail={`${shown.responded_by_name ?? "BCL"} · ${fmtDate(shown.respond_date)}`} />
+                  )}
+                  {closed && shown.completed_at && (
+                    <HistoryItem tone="slate" title="Completed" detail={`${shown.completed_by_name ?? "Staff"} · ${fmtDateTime(shown.completed_at, true)}`} />
+                  )}
+                </ol>
+              </section>
+            </aside>
           </div>
         )}
 
         {/* Footer */}
-        {row && (
-          <div className="border-t border-slate-200 bg-slate-50/80 px-6 py-3 shrink-0 flex items-center justify-end gap-2.5">
-            <Button variant="ghost" size="sm" onClick={onClose} className="h-8 px-3 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-md">
-              Cancel
-            </Button>
-            <Button size="sm" onClick={save} disabled={saving} className="h-8 px-4 text-xs font-semibold bg-custom-blue hover:bg-custom-blue/90 text-white rounded-md shadow-xs gap-1.5">
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-              Save Changes
+        <div className="border-t border-slate-200 bg-white px-6 py-3.5 flex items-center gap-3 shrink-0">
+          {dirty && <span className="text-sm text-amber-700 font-medium">{dirtyFields.length} unsaved change{dirtyFields.length === 1 ? "" : "s"}</span>}
+          <div className="ml-auto flex items-center gap-2.5">
+            <Button variant="ghost" size="sm" onClick={onClose} className="h-11 px-5 text-base font-medium text-slate-600 hover:text-slate-900 rounded-lg">Close</Button>
+            <Button size="sm" onClick={save} disabled={saving || !dirty} className="h-11 px-6 text-base font-semibold bg-custom-blue hover:bg-custom-blue/90 text-white rounded-lg shadow-xs gap-2">
+              {saving && <Loader2 className="w-5 h-5 animate-spin" />}
+              Save changes
             </Button>
           </div>
-        )}
+        </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function HistoryItem({ tone, title, detail }: { tone: "blue" | "emerald" | "slate"; title: string; detail: string }) {
+  const dot = tone === "blue" ? "bg-custom-blue" : tone === "emerald" ? "bg-emerald-500" : "bg-slate-500"
+  return (
+    <li className="ml-4">
+      <span className={cn("absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full ring-4 ring-slate-50", dot)} />
+      <p className="font-medium text-slate-800 leading-snug">{title}</p>
+      <p className="text-sm text-slate-500">{detail}</p>
+    </li>
   )
 }
 
@@ -487,6 +483,18 @@ const NEW_CASE_FORM = {
   signing_officer_name: "", signing_officer_position: "",
 }
 type NewCaseFieldKey = keyof typeof NEW_CASE_FORM
+
+function FormSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+  return (
+    <section className="grid lg:grid-cols-[15rem_1fr] gap-x-10 gap-y-4">
+      <div>
+        <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+        <p className="text-sm text-slate-500 mt-1 leading-relaxed">{description}</p>
+      </div>
+      <div className="grid md:grid-cols-2 gap-x-6 gap-y-5">{children}</div>
+    </section>
+  )
+}
 
 export function NewCaseDialog({
   open,
@@ -532,241 +540,91 @@ export function NewCaseDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent className="max-w-3xl p-0 gap-0 border border-slate-200 shadow-xl rounded-xl overflow-hidden bg-white flex flex-col">
-        {/* Header */}
-        <div className="border-b border-slate-200/80 bg-white px-6 py-4 shrink-0">
-          <DialogHeader className="gap-1.5">
-            <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-custom-blue/10 text-custom-blue shrink-0">
-                <FolderPlus className="h-5 w-5" />
-              </span>
-              <div>
-                <DialogTitle className="text-base font-bold tracking-tight text-slate-900">
-                  Register Offline KRA Notice
-                </DialogTitle>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Record notices received via physical mail, hand delivery, or unlinked inboxes.
-                </p>
-              </div>
-            </div>
-          </DialogHeader>
-        </div>
+      <DialogContent className="max-w-5xl w-[96vw] max-h-[92vh] p-0 gap-0 border border-slate-200 shadow-xl rounded-2xl overflow-hidden bg-white flex flex-col">
+        <DialogDescription className="sr-only">Record a KRA notice received outside the connected mailboxes.</DialogDescription>
 
-        {/* Scrollable Form Body */}
-        <div className="max-h-[75vh] overflow-y-auto px-6 py-5 space-y-5 bg-slate-50/40 custom-scrollbar">
-          
-          {/* Section 1: Taxpayer & Notice Classification */}
-          <div className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3.5 shadow-xs">
-            <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
-              <Building2 className="h-3.5 w-3.5 text-custom-blue" />
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
-                Taxpayer & Notice Classification
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1 md:col-span-1">
-                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Company <span className="text-red-500">*</span></Label>
-                <SearchSelect
-                  className="w-full"
-                  value={form.company_id}
-                  onChange={(v) => {
-                    set("company_id", v)
-                    set("kra_pin", companies.find((c) => c.id === v)?.kra_pin ?? "")
-                  }}
-                  placeholder="Select company…"
-                  options={companies.map((c) => ({ value: c.id, label: c.company_name }))}
-                />
-              </div>
-
-              <div className="space-y-1 md:col-span-1">
-                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">KRA PIN</Label>
-                <div className="relative">
-                  <Hash className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                  <Input
-                    className="pl-8 h-8 font-mono text-xs tracking-wide rounded-md border-slate-200"
-                    value={form.kra_pin}
-                    onChange={(e) => set("kra_pin", e.target.value)}
-                    placeholder="P051..."
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1 md:col-span-1">
-                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Notice Type</Label>
-                <div className="relative">
-                  <FileText className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                  <Input
-                    className="pl-8 h-8 text-xs rounded-md border-slate-200"
-                    value={form.notice_type}
-                    onChange={(e) => set("notice_type", e.target.value)}
-                    placeholder="e.g. Pre-Assessment Notice"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1 md:col-span-1">
-                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Subject Line</Label>
-                <Input
-                  className="h-8 text-xs rounded-md border-slate-200"
-                  value={form.subject}
-                  onChange={(e) => set("subject", e.target.value)}
-                  placeholder="Official notice headline"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Section 2: Timeline & Origin */}
-          <div className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3.5 shadow-xs">
-            <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
-              <Clock className="h-3.5 w-3.5 text-amber-600" />
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
-                Dates & Ingestion Details
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Date Received</Label>
-                <div className="relative">
-                  <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                  <Input
-                    type="date"
-                    className="pl-8 h-8 text-xs rounded-md border-slate-200"
-                    value={form.email_date}
-                    onChange={(e) => set("email_date", e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center justify-between">
-                  <span>KRA Deadline</span>
-                  <span className="text-[10px] text-amber-600 font-semibold uppercase">Action Req.</span>
-                </Label>
-                <div className="relative">
-                  <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-amber-500" />
-                  <Input
-                    type="date"
-                    className="pl-8 h-8 text-xs font-semibold rounded-md border-amber-200 bg-amber-50/30 text-amber-900"
-                    value={form.deadline_date}
-                    onChange={(e) => set("deadline_date", e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">KRA Sender Email / Desk</Label>
-                <div className="relative">
-                  <Mail className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                  <Input
-                    className="pl-8 h-8 text-xs rounded-md border-slate-200"
-                    value={form.kra_email_from}
-                    onChange={(e) => set("kra_email_from", e.target.value)}
-                    placeholder="e.g. itax@kra.go.ke"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">KRA Email CC</Label>
-                <div className="relative">
-                  <SendHorizontal className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                  <Input
-                    className="pl-8 h-8 text-xs rounded-md border-slate-200"
-                    value={form.kra_email_cc}
-                    onChange={(e) => set("kra_email_cc", e.target.value)}
-                    placeholder="e.g. supervisor@kra.go.ke"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 3: Content & Authority */}
-          <div className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3.5 shadow-xs">
-            <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
-              <User className="h-3.5 w-3.5 text-emerald-600" />
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
-                Notice Content & Authority
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1 md:col-span-2">
-                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Notice Content Summary</Label>
-                <Textarea
-                  rows={3}
-                  className="resize-none text-xs rounded-md border-slate-200 leading-relaxed"
-                  value={form.contents}
-                  onChange={(e) => set("contents", e.target.value)}
-                  placeholder="Key issues, tax periods involved, assessments, demand amounts..."
-                />
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Signing Officer Name</Label>
-                <div className="relative">
-                  <User className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                  <Input
-                    className="pl-8 h-8 text-xs rounded-md border-slate-200"
-                    value={form.signing_officer_name}
-                    onChange={(e) => set("signing_officer_name", e.target.value)}
-                    placeholder="Officer full name"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Officer Position / Department</Label>
-                <div className="relative">
-                  <Briefcase className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                  <Input
-                    className="pl-8 h-8 text-xs rounded-md border-slate-200"
-                    value={form.signing_officer_position}
-                    onChange={(e) => set("signing_officer_position", e.target.value)}
-                    placeholder="e.g. Chief Tax Officer"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1 md:col-span-2">
-                <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Attached Documents Summary</Label>
-                <div className="relative">
-                  <Paperclip className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                  <Input
-                    className="pl-8 h-8 text-xs rounded-md border-slate-200"
-                    value={form.attachments_summary}
-                    onChange={(e) => set("attachments_summary", e.target.value)}
-                    placeholder="e.g. Assessment_Notice.pdf, Appendix_1.xlsx"
-                  />
-                </div>
-              </div>
-            </div>
+        <div className="flex items-center gap-4 border-b border-slate-200 pl-6 pr-14 py-4 shrink-0">
+          <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-custom-blue/10 text-custom-blue shrink-0">
+            <FolderPlus className="h-6 w-6" />
+          </span>
+          <div>
+            <DialogTitle className="text-2xl font-bold tracking-tight text-slate-900">Register offline KRA notice</DialogTitle>
+            <p className="text-base text-slate-500 mt-0.5">Record notices received by physical mail, hand delivery or an unlinked inbox.</p>
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="border-t border-slate-200 bg-slate-50/80 px-6 py-3 shrink-0 flex items-center justify-end gap-2.5">
-          <Button variant="ghost" size="sm" onClick={handleClose} disabled={saving} className="h-8 px-3 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-md">
+        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-8 py-7 space-y-8 divide-y divide-slate-100 [&>section:not(:first-child)]:pt-8">
+          <FormSection title="Client & notice" description="Who the notice is for and what kind of notice it is.">
+            <Field label="Company *" className="md:col-span-2">
+              <SearchSelect
+                className="w-full"
+                value={form.company_id}
+                onChange={(v) => {
+                  set("company_id", v)
+                  set("kra_pin", companies.find((c) => c.id === v)?.kra_pin ?? "")
+                }}
+                placeholder="Select company…"
+                options={companies.map((c) => ({ value: c.id, label: c.company_name }))}
+              />
+            </Field>
+            <Field label="Notice type">
+              <Input className={INPUT} value={form.notice_type} onChange={(e) => set("notice_type", e.target.value)} placeholder="e.g. Pre-Assessment Notice" />
+            </Field>
+            <Field label="KRA PIN">
+              <Input className={cn(INPUT, "font-mono")} value={form.kra_pin} onChange={(e) => set("kra_pin", e.target.value)} placeholder="P051…" />
+            </Field>
+            <Field label="Subject line" className="md:col-span-2">
+              <Input className={INPUT} value={form.subject} onChange={(e) => set("subject", e.target.value)} placeholder="Official notice headline" />
+            </Field>
+          </FormSection>
+
+          <FormSection title="Dates & sender" description="When it arrived, when KRA wants a response, and who sent it.">
+            <Field label="Date received">
+              <Input type="date" className={INPUT} value={form.email_date} onChange={(e) => set("email_date", e.target.value)} />
+            </Field>
+            <Field label="KRA deadline">
+              <Input type="date" className={cn(INPUT, "border-amber-200 bg-amber-50/40")} value={form.deadline_date} onChange={(e) => set("deadline_date", e.target.value)} />
+            </Field>
+            <Field label="KRA sender email / desk">
+              <Input className={INPUT} value={form.kra_email_from} onChange={(e) => set("kra_email_from", e.target.value)} placeholder="e.g. itax@kra.go.ke" />
+            </Field>
+            <Field label="KRA email CC">
+              <Input className={INPUT} value={form.kra_email_cc} onChange={(e) => set("kra_email_cc", e.target.value)} placeholder="e.g. supervisor@kra.go.ke" />
+            </Field>
+          </FormSection>
+
+          <FormSection title="Notice content" description="What the notice says and who signed it.">
+            <Field label="Summary" className="md:col-span-2">
+              <Textarea
+                rows={4}
+                className={TEXTAREA}
+                value={form.contents}
+                onChange={(e) => set("contents", e.target.value)}
+                placeholder="Key issues, tax periods involved, assessments, demand amounts…"
+              />
+            </Field>
+            <Field label="Signing officer name">
+              <Input className={INPUT} value={form.signing_officer_name} onChange={(e) => set("signing_officer_name", e.target.value)} placeholder="Officer full name" />
+            </Field>
+            <Field label="Officer position / department">
+              <Input className={INPUT} value={form.signing_officer_position} onChange={(e) => set("signing_officer_position", e.target.value)} placeholder="e.g. Chief Tax Officer" />
+            </Field>
+            <Field label="Attached documents" className="md:col-span-2">
+              <Input className={INPUT} value={form.attachments_summary} onChange={(e) => set("attachments_summary", e.target.value)} placeholder="e.g. Assessment_Notice.pdf, Appendix_1.xlsx" />
+            </Field>
+          </FormSection>
+        </div>
+
+        <div className="border-t border-slate-200 bg-white px-6 py-3.5 shrink-0 flex items-center justify-end gap-2.5">
+          <Button variant="ghost" size="sm" onClick={handleClose} disabled={saving} className="h-11 px-5 text-base font-medium text-slate-600 hover:text-slate-900 rounded-lg">
             Cancel
           </Button>
-          <Button size="sm" onClick={create} disabled={saving} className="h-8 px-4 text-xs font-semibold bg-custom-blue hover:bg-custom-blue/90 text-white rounded-md shadow-xs gap-1.5">
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-            Create Case
+          <Button size="sm" onClick={create} disabled={saving} className="h-11 px-6 text-base font-semibold bg-custom-blue hover:bg-custom-blue/90 text-white rounded-lg shadow-xs gap-2">
+            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
+            Create case
           </Button>
         </div>
       </DialogContent>
     </Dialog>
-  )
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{label}</Label>
-      {children}
-    </div>
   )
 }

@@ -25,6 +25,18 @@ export function fail(error: unknown, label: string) {
   )
 }
 
+// The attachments column stores server-side storage paths; the client only ever sees an index it can
+// download by (/api/email-center/emails/:id/attachments/:index) and whether that file was stored.
+export function clientAttachments(raw: unknown) {
+  return (Array.isArray(raw) ? raw : []).map((a: any, index: number) => ({
+    index,
+    filename: a.filename as string,
+    mime_type: (a.mime_type ?? null) as string | null,
+    size_bytes: (a.size_bytes ?? null) as number | null,
+    downloadable: !!a.storage_path,
+  }))
+}
+
 export async function companyNames(sb: ReturnType<typeof getServiceClient>, ids: Array<string | null | undefined>) {
   const unique = [...new Set(ids.filter((x): x is string => !!x))]
   const map = new Map<string, { name: string; kra_pin: string | null }>()

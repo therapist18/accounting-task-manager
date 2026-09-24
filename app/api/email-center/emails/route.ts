@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { authorize, companyNames, fail } from "@/lib/email-center/api"
+import { authorize, clientAttachments, companyNames, fail } from "@/lib/email-center/api"
 import { DISPOSITIONS } from "@/lib/email-center/types"
 
 // GET /api/email-center/emails?disposition=&company=&q=&limit=&offset=
@@ -18,7 +18,8 @@ export async function GET(request: NextRequest) {
       .select(
         `id, gmail_message_id, gmail_thread_id, company_id, direction, subject, sender_email, sender_name,
          snippet, ai_summary, priority, is_read, received_at, has_attachments, disposition,
-         classification_source, category_confidence, category_key, review_reason, kra_pin, case_id`,
+         classification_source, category_confidence, category_key, review_reason, kra_pin, case_id,
+         to_addresses, cc_addresses, attachments`,
         { count: "exact" }
       )
       .not("disposition", "is", null)
@@ -33,8 +34,11 @@ export async function GET(request: NextRequest) {
     if (error) throw new Error(error.message)
 
     const names = await companyNames(sb, (data ?? []).map((e: any) => e.company_id))
-    const emails = (data ?? []).map((e: any) => ({
+    // Everything the email dialog shows except the body (fetched from Gmail on demand) is returned
+    // here, so opening an email from the table needs no request of its own for its details.
+    const emails = (data ?? []).map(({ attachments, ...e }: any) => ({
       ...e,
+      attachments: clientAttachments(attachments),
       company_name: e.company_id ? names.get(String(e.company_id))?.name ?? null : null,
     }))
     return NextResponse.json({ success: true, emails, total: count ?? emails.length })

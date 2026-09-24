@@ -13,6 +13,7 @@ import { getGmailClient, parseEmailHeaders } from "@/lib/gmail/client"
 import { extractWithAi } from "./ai"
 import { CATEGORY_BY_KEY, KRA_JOB_LEVEL, type CategoryDef } from "./categories"
 import { classifyByRules, detectApproval, extractPin, isKraSender } from "./rules"
+import { loadSubjectRules } from "./rule-store"
 import {
   AUTO_CONFIDENCE_THRESHOLD as THRESHOLD,
   type Actor,
@@ -249,15 +250,16 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   const direction = labels.includes("SENT") && !labels.includes("INBOX") ? "outbound" : "inbound"
   const kra = isKraSender(senderEmail)
   const threadCase = await findCaseByThread(sb, threadId)
+  const rules = await loadSubjectRules(sb) // cached for a minute, so a batch of emails costs one query
 
   // 2. Decide from sender + subject alone whether this email is worth a full fetch at all.
   if (direction === "outbound" && !threadCase) return "skipped" // our mail outside any KRA case
   if (direction === "inbound" && !kra) {
-    const cheap = classifyByRules({ subject, body: snippet, senderEmail, threadHasCase: false })
+    const cheap = classifyByRules({ subject, body: snippet, senderEmail, threadHasCase: false, rules })
     if (cheap?.categoryKey === "system_noise") return "skipped"
   }
   if (direction === "inbound" && kra && !threadCase) {
-    const cheap = classifyByRules({ subject, body: snippet, senderEmail, threadHasCase: false })
+    const cheap = classifyByRules({ subject, body: snippet, senderEmail, threadHasCase: false, rules })
     const cat = cheap ? CATEGORY_BY_KEY.get(cheap.categoryKey) : null
     // Confidently an informational KRA email (acknowledgement, certificate, statement): nothing to track.
     if (cheap && cat && cheap.confidence >= THRESHOLD && cat.disposition === "update_only" && !cat.attaches_to_case) {
@@ -345,7 +347,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     }
     caseId = threadCase!.id
   } else {
-    const rule = classifyByRules({ subject, body: text, senderEmail, threadHasCase: !!threadCase })
+    const rule = classifyByRules({ subject, body: text, senderEmail, threadHasCase: !!threadCase, rules })
     const ruleCat = rule ? CATEGORY_BY_KEY.get(rule.categoryKey) : null
     // AI only runs to extract PDF details (deadline, PIN, signing officer) for a category the rules
     // are already confident about — never to guess an uncertain category. An email the rules can't

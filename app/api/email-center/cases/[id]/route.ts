@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { authorize, companyNames, fail, userNames } from "@/lib/email-center/api"
+import { authorize, clientAttachments, companyNames, fail, userNames } from "@/lib/email-center/api"
 import { APPROVAL_STATUSES } from "@/lib/email-center/types"
 
 type Ctx = { params: Promise<{ id: string }> }
@@ -16,7 +16,9 @@ const TEXT_FIELDS = [
   "kra_pin",
 ] as const
 
-// GET /api/email-center/cases/:id — the case and the emails in its thread.
+// GET /api/email-center/cases/:id — the case and the emails in its thread. Thread emails come back in
+// the same shape as the email list's rows (everything but the body, which lives in Gmail), so opening
+// one from the case dialog needs no request of its own for its details.
 export async function GET(request: NextRequest, { params }: Ctx) {
   try {
     const { sb } = await authorize(request)
@@ -27,7 +29,12 @@ export async function GET(request: NextRequest, { params }: Ctx) {
 
     const { data: emails } = await sb
       .from("emails")
-      .select("id, gmail_message_id, direction, subject, sender_email, snippet, received_at, has_attachments, disposition")
+      .select(
+        `id, gmail_message_id, gmail_thread_id, company_id, direction, subject, sender_email, sender_name,
+         snippet, ai_summary, priority, is_read, received_at, has_attachments, disposition,
+         classification_source, category_confidence, category_key, review_reason, kra_pin, case_id,
+         to_addresses, cc_addresses, attachments`
+      )
       .eq("case_id", id)
       .order("received_at", { ascending: true })
 
@@ -36,6 +43,7 @@ export async function GET(request: NextRequest, { params }: Ctx) {
       userNames(sb, [c.responded_by_id, c.assigned_to_id, c.assigned_by_id, c.completed_by_id, c.created_by_id]),
     ])
     const name = (uid: string | null) => (uid ? users.get(String(uid)) ?? null : null)
+    const companyName = c.company_id ? companies.get(String(c.company_id))?.name ?? null : null
 
     return NextResponse.json({
       success: true,
@@ -48,7 +56,11 @@ export async function GET(request: NextRequest, { params }: Ctx) {
         completed_by_name: name(c.completed_by_id),
         created_by_name: c.created_by_id ? name(c.created_by_id) : "System (from email)",
       },
-      emails: emails ?? [],
+      emails: (emails ?? []).map(({ attachments, ...e }: any) => ({
+        ...e,
+        attachments: clientAttachments(attachments),
+        company_name: e.company_id === c.company_id ? companyName : null,
+      })),
     })
   } catch (error) {
     return fail(error, "case GET")

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { authorize, companyNames, fail } from "@/lib/email-center/api"
+import { authorize, clientAttachments, companyNames, fail } from "@/lib/email-center/api"
 import { CATEGORY_BY_KEY } from "@/lib/email-center/categories"
 import { fetchMessageBody, openCaseFromEmail } from "@/lib/email-center/ingest"
 import { DISPOSITIONS, type Disposition } from "@/lib/email-center/types"
@@ -8,10 +8,24 @@ type Ctx = { params: Promise<{ id: string }> }
 
 // GET /api/email-center/emails/:id — the stored email plus its body, fetched from Gmail on demand
 // (bodies are not kept in the database).
+// GET /api/email-center/emails/:id?bodyOnly=1 — just the body. The email table already holds every
+// other field the dialog shows, so opening an email from it only needs this one Gmail-backed call.
 export async function GET(request: NextRequest, { params }: Ctx) {
   try {
     const { sb } = await authorize(request)
     const { id } = await params
+
+    if (new URL(request.url).searchParams.get("bodyOnly") === "1") {
+      const { data: row, error: rowErr } = await sb
+        .from("emails")
+        .select("account_id, gmail_message_id, snippet")
+        .eq("id", id)
+        .maybeSingle()
+      if (rowErr) throw new Error(rowErr.message)
+      if (!row) return NextResponse.json({ success: false, error: "Email not found." }, { status: 404 })
+      const body = await fetchMessageBody(sb, row.account_id, row.gmail_message_id)
+      return NextResponse.json({ success: true, body: body ?? row.snippet ?? "" })
+    }
 
     const { data: email, error } = await sb
       .from("emails")
@@ -24,13 +38,7 @@ export async function GET(request: NextRequest, { params }: Ctx) {
     // storage_path stays server-side; the client downloads by index through
     // /api/email-center/emails/:id/attachments/:index.
     const { attachments: raw, ...rest } = email
-    const attachments = (Array.isArray(raw) ? raw : []).map((a: any, index: number) => ({
-      index,
-      filename: a.filename,
-      mime_type: a.mime_type ?? null,
-      size_bytes: a.size_bytes ?? null,
-      downloadable: !!a.storage_path,
-    }))
+    const attachments = clientAttachments(raw)
 
     const body = await fetchMessageBody(sb, email.account_id, email.gmail_message_id)
 

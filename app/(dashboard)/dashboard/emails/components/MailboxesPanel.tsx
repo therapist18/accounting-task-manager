@@ -7,13 +7,25 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { Pagination } from "./Pagination"
+import { HEAD_BLUE, SkeletonRows, SortTh, TD_CLASS, TH_CLASS, useSortedRows, zebraRow } from "./table"
 import { PRIMARY_PILL_BUTTON_CLASS, SearchSelect, api, fmtDateTime, type AccountRow, type CompanyOption } from "./shared"
+
+const watchActive = (a: AccountRow) => (a.watch_expiry ? new Date(a.watch_expiry).getTime() > Date.now() : false)
+
+const SORT_VALUE: Record<string, (a: AccountRow) => string | number> = {
+  email: (a) => a.email,
+  company: (a) => a.company_name ?? "",
+  last_sync: (a) => a.last_synced_at ?? "",
+  push: (a) => (watchActive(a) ? 1 : 0),
+}
 
 export function MailboxesPanel({
   accounts,
   companies,
   onAccountLinked,
   onSynced,
+  showTime,
+  loading = false,
 }: {
   accounts: AccountRow[]
   companies: CompanyOption[]
@@ -23,6 +35,8 @@ export function MailboxesPanel({
   // An explicit, deliberate click ("sync this one mailbox") — the page does a real (light) reload
   // afterwards, since new mail may have just been pulled in.
   onSynced: () => void
+  showTime: boolean
+  loading?: boolean
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [itemsPerPage, setItemsPerPage] = useState(50)
@@ -30,10 +44,12 @@ export function MailboxesPanel({
 
   useEffect(() => setPage(0), [accounts, itemsPerPage])
 
-  const totalPages = Math.max(1, Math.ceil(accounts.length / itemsPerPage))
+  const { sort, sorted, toggle } = useSortedRows(accounts, SORT_VALUE, { key: "email", dir: "asc" })
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / itemsPerPage))
   const safePage = Math.min(page, totalPages - 1)
   const start = safePage * itemsPerPage
-  const visibleAccounts = accounts.slice(start, start + itemsPerPage)
+  const visibleAccounts = sorted.slice(start, start + itemsPerPage)
 
   const assign = async (a: AccountRow, companyId: string) => {
     setBusy(a.id)
@@ -67,52 +83,52 @@ export function MailboxesPanel({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl shadow-sm px-5 py-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-3">
+      <div className="shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl shadow-sm px-5 py-4">
         <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-800">Connected mailboxes</p>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-lg font-semibold text-slate-900">Connected mailboxes</p>
+          <p className="text-base text-slate-500 mt-1 max-w-3xl leading-relaxed">
             Each Gmail mailbox belongs to one company — that link is how incoming KRA emails are matched to a client.
             Connecting several? Google will ask you to pick or sign into the mailbox each time — just repeat "Connect Gmail account" for the next one.
           </p>
         </div>
         <a href="/api/gmail/connect" className="shrink-0">
-          <Button size="sm" className="h-8 px-3.5 text-xs font-semibold rounded-md shadow-xs bg-custom-blue hover:bg-custom-blue/90 text-white flex items-center gap-1.5">
-            <Plus className="w-3.5 h-3.5" /> Connect Gmail account
+          <Button size="sm" className={PRIMARY_PILL_BUTTON_CLASS}>
+            <Plus className="w-5 h-5" /> Connect Gmail account
           </Button>
         </a>
       </div>
 
-      <div className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden flex flex-col">
-        <div className="overflow-x-auto">
-          <table className="w-full border-separate border-spacing-0 text-xs">
-            <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 border-b border-slate-200">
+      <div className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
+        <div className="overflow-auto flex-1 min-h-0 custom-scrollbar">
+          <table className="w-full border-separate border-spacing-0 text-base">
+            <thead className="sticky top-0 z-30 bg-white shadow-xs">
               <tr>
-                <th className="text-center px-3.5 py-2.5 w-11 font-semibold uppercase tracking-wider border-b border-r border-slate-200 text-xs">#</th>
-                <th className="text-left px-3.5 py-2.5 font-semibold uppercase tracking-wider border-b border-r border-slate-200 text-xs">Mailbox</th>
-                <th className="text-left px-3.5 py-2.5 min-w-[240px] font-semibold uppercase tracking-wider border-b border-r border-slate-200 text-xs">Company</th>
-                <th className="text-left px-3.5 py-2.5 font-semibold uppercase tracking-wider border-b border-r border-slate-200 text-xs">Last sync</th>
-                <th className="text-left px-3.5 py-2.5 font-semibold uppercase tracking-wider border-b border-r border-slate-200 text-xs">Push</th>
-                <th className="px-3.5 py-2.5 border-b border-slate-200" />
+                <th className={cn(TH_CLASS, HEAD_BLUE, "w-11 text-center")}>#</th>
+                <SortTh tone="blue" id="email" sort={sort} onSort={toggle} className="text-left">Mailbox</SortTh>
+                <SortTh tone="blue" id="company" sort={sort} onSort={toggle} className="text-left min-w-[260px]">Company</SortTh>
+                <SortTh tone="blue" id="last_sync" sort={sort} onSort={toggle} className="text-left">Last sync</SortTh>
+                <SortTh tone="blue" id="push" sort={sort} onSort={toggle} className="text-left">Push</SortTh>
+                <th className={cn(TH_CLASS, HEAD_BLUE, "w-16 border-r-0")}>Sync</th>
               </tr>
             </thead>
             <tbody>
-              {visibleAccounts.map((a, index) => {
-                const watchActive = a.watch_expiry ? new Date(a.watch_expiry).getTime() > Date.now() : false
-                const isEven = index % 2 === 0
+              {loading && <SkeletonRows cols={6} />}
+              {!loading && visibleAccounts.map((a, index) => {
+                const live = watchActive(a)
                 return (
-                  <tr key={a.id} className={cn("transition-colors", isEven ? "bg-white hover:bg-slate-50/80" : "bg-slate-50/40 hover:bg-slate-100/70")}>
-                    <td className="px-3.5 py-2.5 text-center text-slate-400 tabular-nums border-b border-r border-slate-100">{start + index + 1}</td>
-                    <td className="px-3.5 py-2.5 border-b border-r border-slate-100">
-                      <div className="font-semibold text-slate-800">{a.email}</div>
+                  <tr key={a.id} className={cn("transition-colors", zebraRow(index))}>
+                    <td className={cn(TD_CLASS, "text-center text-slate-400 tabular-nums font-medium")}>{start + index + 1}</td>
+                    <td className={TD_CLASS}>
+                      <div className="font-semibold text-slate-900">{a.email}</div>
                       {a.last_sync_error && (
-                        <div className="flex items-center gap-1 text-[11px] text-red-600 max-w-xs mt-0.5" title={a.last_sync_error}>
-                          <AlertCircle className="w-3 h-3 shrink-0" />
+                        <div className="flex items-center gap-1 text-sm text-red-600 max-w-xs mt-0.5" title={a.last_sync_error}>
+                          <AlertCircle className="w-4 h-4 shrink-0" />
                           <span className="truncate">{a.last_sync_error}</span>
                         </div>
                       )}
                     </td>
-                    <td className="px-3.5 py-2.5 border-b border-r border-slate-100">
+                    <td className={TD_CLASS}>
                       <SearchSelect
                         className="w-full"
                         error={!a.company_id}
@@ -123,34 +139,34 @@ export function MailboxesPanel({
                         options={[{ value: "", label: "— Not linked —" }, ...companies.map((c) => ({ value: c.id, label: c.company_name }))]}
                       />
                     </td>
-                    <td className="px-3.5 py-2.5 text-xs text-slate-500 whitespace-nowrap tabular-nums border-b border-r border-slate-100">{a.last_synced_at ? fmtDateTime(a.last_synced_at) : "Never"}</td>
-                    <td className="px-3.5 py-2.5 whitespace-nowrap border-b border-r border-slate-100">
-                      {watchActive ? (
-                        <Badge variant="outline" className="text-[10px] font-semibold gap-1 bg-emerald-50 text-emerald-700 border-emerald-200 rounded-full px-2 py-0.5">
-                          <Wifi className="w-3 h-3" /> Live
+                    <td className={cn(TD_CLASS, "text-slate-600 whitespace-nowrap tabular-nums")}>{a.last_synced_at ? fmtDateTime(a.last_synced_at, showTime) : "Never"}</td>
+                    <td className={cn(TD_CLASS, "whitespace-nowrap")}>
+                      {live ? (
+                        <Badge variant="outline" className="text-sm font-semibold gap-1 bg-emerald-50 text-emerald-700 border-emerald-200 rounded-full px-2.5 py-0.5">
+                          <Wifi className="w-4 h-4" /> Live
                         </Badge>
                       ) : (
-                        <Badge variant="outline" className="text-[10px] font-medium gap-1 bg-slate-100 text-slate-500 border-slate-200 rounded-full px-2 py-0.5">
-                          <WifiOff className="w-3 h-3" /> Not watching
+                        <Badge variant="outline" className="text-sm font-medium gap-1 bg-slate-100 text-slate-500 border-slate-200 rounded-full px-2.5 py-0.5">
+                          <WifiOff className="w-4 h-4" /> Not watching
                         </Badge>
                       )}
                     </td>
-                    <td className="px-3.5 py-2.5 text-right border-b border-slate-100">
-                      <Button variant="outline" size="sm" className="h-7 w-7 p-0 rounded-md border-slate-200 hover:bg-slate-100" disabled={busy === a.id} onClick={() => sync(a)}>
-                        {busy === a.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5 text-slate-600" />}
+                    <td className={cn(TD_CLASS, "text-center border-r-0")}>
+                      <Button variant="outline" size="sm" className="h-10 w-10 p-0 rounded-md border-slate-200 hover:bg-slate-100" disabled={busy === a.id} onClick={() => sync(a)}>
+                        {busy === a.id ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCw className="w-5 h-5 text-slate-600" />}
                       </Button>
                     </td>
                   </tr>
                 )
               })}
-              {!accounts.length && (
-                <tr><td colSpan={6} className="py-12 text-center text-slate-400 text-xs">No mailboxes connected yet.</td></tr>
+              {!loading && !accounts.length && (
+                <tr><td colSpan={6} className="py-16 text-center text-slate-400 text-base">No mailboxes match.</td></tr>
               )}
             </tbody>
           </table>
         </div>
         <Pagination
-          totalItems={accounts.length}
+          totalItems={sorted.length}
           itemsPerPage={itemsPerPage}
           currentPage={safePage}
           onPageChange={setPage}
