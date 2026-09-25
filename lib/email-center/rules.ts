@@ -13,7 +13,8 @@
 //   classify match is classified into its category (opens a case at high confidence when the
 //            category is case-creating)
 export type RuleResult =
-  | { action: "ignore"; categoryKey: null; confidence: number }
+  // ruleId is the ignore rule that matched, so the Ignored tab can group what each rule caught.
+  | { action: "ignore"; categoryKey: null; confidence: number; ruleId?: string }
   | { action: "notify"; categoryKey: null; confidence: number }
   | { action: "classify"; categoryKey: string; confidence: number }
 
@@ -192,7 +193,7 @@ export function classifyByRules(input: {
   for (const rule of rules) {
     if (rule.is_ignore) {
       if (matchesSubject(rule, cleanSubject) && matchesSender(rule, senderEmail)) {
-        return { action: "ignore", categoryKey: null, confidence: rule.confidence }
+        return { action: "ignore", categoryKey: null, confidence: rule.confidence, ruleId: rule.id }
       }
     }
   }

@@ -78,6 +78,9 @@ export interface EmailRow {
   handled_by_id?: string | null
   handled_by_name?: string | null
   handled_at?: string | null
+  // The ignore rule that caused this email to be stored as ignored (null for auto-ignored no-reply
+  // mail and for mail ignored by hand).
+  matched_rule_id?: string | null
   // Present on rows from the list endpoint, so the email dialog can render from the table row with no
   // fetch of its own; only the body (kept in Gmail, not the database) is loaded on open.
   to_addresses?: string | null
@@ -108,6 +111,16 @@ export interface AccountRow {
   last_synced_at: string | null
   last_sync_error: string | null
 }
+
+// Sync errors that mean Google no longer accepts this mailbox's stored login (revoked, expired, password
+// changed, client secret rotated) — as opposed to a one-off failure on a single message. Only the person
+// who owns the mailbox can fix these, by connecting it again.
+const AUTH_FAILURE_RE = /invalid_grant|expired or revoked|invalid_client|unauthorized_client|invalid credentials|login required|unauthenticated/i
+
+// A mailbox that has stopped working until it is reconnected: no longer active, or its last sync was
+// refused by Google's token check.
+export const needsReconnect = (a: Pick<AccountRow, "status" | "last_sync_error">) =>
+  a.status !== "active" || (!!a.last_sync_error && AUTH_FAILURE_RE.test(a.last_sync_error))
 
 // A subject -> category classification rule (email_classification_rules). `id` starts with "builtin-"
 // when the table doesn't exist yet and the built-in list is shown read-only.

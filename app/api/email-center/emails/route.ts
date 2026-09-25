@@ -13,24 +13,27 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(Number(sp.get("limit") ?? 50) || 50, 200)
     const offset = Math.max(Number(sp.get("offset") ?? 0) || 0, 0)
 
-    let query = sb
-      .from("emails")
-      .select(
-        `id, gmail_message_id, gmail_thread_id, company_id, direction, subject, sender_email, sender_name,
+    // matched_rule_id (which ignore rule stored the mail) came with a later migration; without it the
+    // list still loads, just ungrouped.
+    const columns = `id, gmail_message_id, gmail_thread_id, company_id, direction, subject, sender_email, sender_name,
          snippet, ai_summary, priority, is_read, received_at, has_attachments, disposition,
          classification_source, category_confidence, category_key, review_reason, kra_pin, case_id,
-         to_addresses, cc_addresses, attachments, handled_by_id, handled_at`,
-        { count: "exact" }
-      )
-      .not("disposition", "is", null)
-      .order("received_at", { ascending: false })
-      .range(offset, offset + limit - 1)
+         to_addresses, cc_addresses, attachments, handled_by_id, handled_at`
+    const run = (select: string) => {
+      let query = sb
+        .from("emails")
+        .select(select, { count: "exact" })
+        .not("disposition", "is", null)
+        .order("received_at", { ascending: false })
+        .range(offset, offset + limit - 1)
+      if (disposition && (DISPOSITIONS as string[]).includes(disposition)) query = query.eq("disposition", disposition)
+      if (company) query = query.eq("company_id", company)
+      if (q) query = query.or(`subject.ilike.%${q}%,sender_email.ilike.%${q}%,snippet.ilike.%${q}%`)
+      return query
+    }
 
-    if (disposition && (DISPOSITIONS as string[]).includes(disposition)) query = query.eq("disposition", disposition)
-    if (company) query = query.eq("company_id", company)
-    if (q) query = query.or(`subject.ilike.%${q}%,sender_email.ilike.%${q}%,snippet.ilike.%${q}%`)
-
-    const { data, count, error } = await query
+    let { data, count, error } = await run(`${columns}, matched_rule_id`)
+    if (error && /matched_rule_id/i.test(error.message)) ({ data, count, error } = await run(columns))
     if (error) throw new Error(error.message)
 
     const names = await companyNames(sb, (data ?? []).map((e: any) => e.company_id))
@@ -46,5 +49,39 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, emails, total: count ?? emails.length })
   } catch (error) {
     return fail(error, "emails GET")
+  }
+}
+
+// DELETE /api/email-center/emails — remove ignored emails from the app (they stay in Gmail).
+// Body: { ids: string[] }. Only rows currently marked Ignored are deleted, so a stale selection can
+// never remove something that has since been reclassified into a case or the review queue.
+export async function DELETE(request: NextRequest) {
+  try {
+    const { sb } = await authorize(request)
+    const { ids } = (await request.json()) as { ids?: string[] }
+    const list = [...new Set((Array.isArray(ids) ? ids : []).map(String))].slice(0, 500)
+    if (!list.length) return NextResponse.json({ success: false, error: "No emails selected." }, { status: 400 })
+
+    const { data: rows, error: readErr } = await sb
+      .from("emails")
+      .select("id, attachments")
+      .in("id", list)
+      .eq("disposition", "ignore")
+    if (readErr) throw new Error(readErr.message)
+    const targets = rows ?? []
+    if (!targets.length) return NextResponse.json({ success: true, deleted: 0, ids: [] })
+
+    const paths = targets.flatMap((r: any) =>
+      (Array.isArray(r.attachments) ? r.attachments : []).map((a: any) => a?.storage_path).filter(Boolean)
+    )
+    if (paths.length) await sb.storage.from("email-attachments").remove(paths)
+
+    const targetIds = targets.map((r: any) => r.id)
+    const { error } = await sb.from("emails").delete().in("id", targetIds)
+    if (error) throw new Error(error.message)
+
+    return NextResponse.json({ success: true, deleted: targetIds.length, ids: targetIds })
+  } catch (error) {
+    return fail(error, "emails DELETE")
   }
 }

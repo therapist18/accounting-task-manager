@@ -34,6 +34,8 @@ export function   EmailsTable({
   embedded = false,
   notificationsMode = false,
   onMarkHandled,
+  selection,
+  onAllocate,
 }: {
   emails: EmailRow[]
   categories: CategoryOption[]
@@ -47,6 +49,11 @@ export function   EmailsTable({
   // unhandled ones get a "Mark handled" action (worked like a task, never a KRA task/case).
   notificationsMode?: boolean
   onMarkHandled?: (e: EmailRow) => void
+  // Row checkboxes (the Ignored tab). The header checkbox covers every row in `emails`, not just the
+  // current page.
+  selection?: { selected: Set<string>; onToggle: (id: string) => void; onToggleAll: (ids: string[], on: boolean) => void }
+  // Adds an Action dropdown (— / Action required / Update only / Ignored / Needs review) to each row.
+  onAllocate?: (e: EmailRow, d: Disposition) => void
 }) {
   const [itemsPerPage, setItemsPerPage] = useState(50)
   const [page, setPage] = useState(0)
@@ -60,8 +67,14 @@ export function   EmailsTable({
   const visible = sorted.slice(start, start + itemsPerPage)
 
   const byKey = new Map(categories.map((c) => [c.key, c]))
-  const showActions = emails.some((e) => e.disposition === "needs_review")
+  const showActions = !!onAllocate || emails.some((e) => e.disposition === "needs_review")
   const colCount = showActions ? 10 : 9
+  // The row checkbox lives in the sticky "#" column, which widens to make room — so the Company column
+  // that sticks beside it has to move over by the same amount.
+  const numWidth = selection ? "w-24 min-w-[6rem] max-w-[6rem]" : "w-16"
+  const companyLeft = selection ? "left-24" : "left-16"
+  const allSelected = !!selection && emails.length > 0 && emails.every((e) => selection.selected.has(e.id))
+  const someSelected = !!selection && !allSelected && emails.some((e) => selection.selected.has(e.id))
 
   return (
     <div className={cn(
@@ -72,8 +85,20 @@ export function   EmailsTable({
         <table className="min-w-[1500px] w-full border-separate border-spacing-0 text-base">
           <thead className="sticky top-0 z-30 bg-white shadow-xs">
             <tr>
-              <SortTh tone="blue" id="#" sort={sort} onSort={toggle} className="w-16 sticky left-0 z-40 text-center">#</SortTh>
-              <SortTh tone="blue" id="company" sort={sort} onSort={toggle} className="min-w-[210px] sticky left-16 z-40 text-left border-r-2">Company</SortTh>
+              <SortTh tone="blue" id="#" sort={sort} onSort={toggle} className={cn(numWidth, "sticky left-0 z-40 text-center")}>
+                {selection ? (
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={(el) => { if (el) el.indeterminate = someSelected }}
+                    onClick={(ev) => ev.stopPropagation()}
+                    onChange={(ev) => selection.onToggleAll(emails.map((e) => e.id), ev.target.checked)}
+                    title={allSelected ? "Clear selection" : `Select all ${emails.length}`}
+                    className="h-4 w-4 align-middle accent-white cursor-pointer"
+                  />
+                ) : "#"}
+              </SortTh>
+              <SortTh tone="blue" id="company" sort={sort} onSort={toggle} className={cn("min-w-[210px] sticky z-40 text-left border-r-2", companyLeft)}>Company</SortTh>
               <SortTh tone="blue" id="from" sort={sort} onSort={toggle} className="min-w-[200px]">From</SortTh>
               <SortTh tone="blue" id="subject" sort={sort} onSort={toggle} className="min-w-[280px]">Subject</SortTh>
               <SortTh tone="blue" id="summary" sort={sort} onSort={toggle} className="min-w-[300px]">Summary</SortTh>
@@ -99,10 +124,20 @@ export function   EmailsTable({
               const isUnread = !e.is_read
               return (
                 <tr key={e.id} onClick={() => onOpen(e)} className={cn("cursor-pointer transition-colors", zebraRow(index), e.handled_at && "opacity-60")}>
-                  <td className={cn(TD_CLASS, "sticky left-0 z-20 bg-inherit text-center text-slate-400 font-medium tabular-nums border-r border-slate-200", isUnread && "border-l-4 border-l-custom-blue")}>
-                    {start + index + 1}
+                  <td className={cn(TD_CLASS, numWidth, "sticky left-0 z-20 bg-inherit text-center text-slate-400 font-medium tabular-nums border-r border-slate-200", isUnread && "border-l-4 border-l-custom-blue")}>
+                    {selection ? (
+                      <div className="flex items-center justify-center gap-2" onClick={(ev) => ev.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selection.selected.has(e.id)}
+                          onChange={() => selection.onToggle(e.id)}
+                          className="h-4 w-4 accent-custom-blue cursor-pointer"
+                        />
+                        <span>{start + index + 1}</span>
+                      </div>
+                    ) : start + index + 1}
                   </td>
-                  <td className={cn(TD_CLASS, "sticky left-16 z-20 bg-inherit border-r-2 border-slate-300")}>
+                  <td className={cn(TD_CLASS, "sticky z-20 bg-inherit border-r-2 border-slate-300", companyLeft)}>
                     <div className={cn("leading-snug", isUnread ? "font-bold text-slate-900" : "font-semibold text-slate-900")}>
                       {e.company_name ?? <span className="text-red-500 font-normal">Unassigned company</span>}
                     </div>
@@ -164,7 +199,19 @@ export function   EmailsTable({
                   </td>
                   {showActions && (
                     <td className={TD_CLASS} onClick={(ev) => ev.stopPropagation()}>
-                      {e.handled_at ? (
+                      {onAllocate ? (
+                        <select
+                          value=""
+                          onChange={(ev) => { if (ev.target.value) onAllocate(e, ev.target.value as Disposition) }}
+                          className="h-8 rounded-md border border-slate-200 bg-white px-2 text-base font-medium text-slate-700 hover:bg-slate-50 cursor-pointer focus:outline-none focus:ring-1 focus:ring-custom-blue"
+                          title="Move this email to another tab"
+                        >
+                          <option value="">—</option>
+                          {(Object.keys(DISPOSITION_LABEL) as Disposition[]).map((d) => (
+                            <option key={d} value={d}>{DISPOSITION_LABEL[d]}</option>
+                          ))}
+                        </select>
+                      ) : e.handled_at ? (
                         <span className="text-sm text-slate-300">—</span>
                       ) : e.disposition === "needs_review" ? (
                         <div className="flex items-center gap-1.5">

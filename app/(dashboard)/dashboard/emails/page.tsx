@@ -14,16 +14,16 @@ import { cn } from "@/lib/utils"
 import { CaseDialog, NewCaseDialog } from "./components/CaseDialogs"
 import { CasesTable } from "./components/CasesTable"
 import { EmailDialog } from "./components/EmailDialog"
-import { MailboxesPanel } from "./components/MailboxesPanel"
+import { MailboxesPanel, type MailboxView } from "./components/MailboxesPanel"
+import { IgnoredPanel } from "./components/IgnoredPanel"
 import { RulesPanel } from "./components/RulesPanel"
 import { SyncDialog } from "./components/SyncDialog"
 import { CompanyPanels, matchesCompanySelection } from "./components/CompanyPanels"
 import { EmailsTable } from "./components/NeedsReview"
 import { fetchCompanies, fetchKraEmailCredentials, saveKraEmailPassword, type Company, type KraEmailCredentials } from "../companies/database"
-import { isAutomatedSender } from "@/lib/email-center/rules"
 import {
   COUNT_BADGE_CLASS, DISPOSITION_LABEL, PILL_BUTTON_ACTIVE_CLASS, PILL_BUTTON_CLASS, PRIMARY_PILL_BUTTON_CLASS, SearchSelect,
-  TAB_LIST_CLASS, TAB_TRIGGER_CLASS, URGENT_BADGE_CLASS, api,
+  TAB_LIST_CLASS, TAB_TRIGGER_CLASS, URGENT_BADGE_CLASS, api, needsReconnect,
   type AccountRow, type CaseRow, type CategoryOption, type CompanyOption,
   type Disposition, type EmailRow, type RuleRow, type StaffOption,
 } from "./components/shared"
@@ -94,8 +94,10 @@ export default function EmailCenterPage() {
   // tab; its selection is separate from the dropdown's, so switching modes never loses either one.
   const [byCompany, setByCompany] = useState(false)
   const [sidebarCompany, setSidebarCompany] = useState("")
-  // Within the Ignored tab, "Automated" shows only the auto-ignored automated mail (noreply@, alerts@).
-  const [ignoredFilter, setIgnoredFilter] = useState<"all" | "automated">("all")
+  // Which chip the Mailboxes tab is on. Lives here so the toolbar's failed-mailboxes indicator can jump
+  // straight to the "Needs reconnect" view; the nonce tells the panel a jump was requested.
+  const [mailboxView, setMailboxView] = useState<MailboxView>("all")
+  const [mailboxFocusNonce, setMailboxFocusNonce] = useState(0)
   // The Notifications basket is a work queue: "active" (default) is what needs someone to take it on,
   // "handled" is the audit trail of who worked each notification and when.
   const [notificationFilter, setNotificationFilter] = useState<"active" | "handled">("active")
@@ -385,6 +387,52 @@ export default function EmailCenterPage() {
     }
   }
 
+  // Moves emails to another tab from the Ignored panel (one from a row's dropdown, or a whole selection).
+  // Unlike quickClassify this never pops a case dialog open - with many emails that would be a wall of
+  // dialogs; action-required ones simply appear under In Progress.
+  const moveEmails = useCallback(async (targets: EmailRow[], disposition: Disposition) => {
+    let moved = 0
+    let opened = 0
+    let firstError: string | null = null
+    for (const email of targets) {
+      try {
+        const res = await api<{ email_patch: Partial<EmailRow>; case: CaseRow | null }>(
+          `/api/email-center/emails/${email.id}`,
+          { method: "PATCH", body: JSON.stringify({ disposition }) }
+        )
+        mergeEmail(email.id, res.email_patch)
+        if (res.case) {
+          upsertCase(res.case)
+          opened++
+        }
+        moved++
+      } catch (e: any) {
+        firstError ??= e.message
+      }
+    }
+    const label = DISPOSITION_LABEL[disposition].toLowerCase()
+    if (moved) toast.success(`${moved} email${moved === 1 ? "" : "s"} marked ${label}${opened ? ` - ${opened} case${opened === 1 ? "" : "s"} opened` : ""}.`)
+    if (firstError) toast.error(moved ? `${targets.length - moved} could not be moved: ${firstError}` : firstError)
+  }, [mergeEmail, upsertCase])
+
+  const deleteEmails = useCallback(async (targets: EmailRow[]) => {
+    const gone = new Set<string>()
+    try {
+      for (let i = 0; i < targets.length; i += 200) {
+        const res = await api<{ ids: string[] }>("/api/email-center/emails", {
+          method: "DELETE",
+          body: JSON.stringify({ ids: targets.slice(i, i + 200).map((e) => e.id) }),
+        })
+        res.ids.forEach((id) => gone.add(id))
+      }
+      toast.success(`${gone.size} email${gone.size === 1 ? "" : "s"} deleted.`)
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      if (gone.size) setEmails((prev) => prev.filter((e) => !gone.has(e.id)))
+    }
+  }, [])
+
   const closeCase = useCallback(() => setOpenCaseId(null), [])
   // Prefer the live copy in `emails` (kept current by local merges) over the row captured on open; emails
   // opened from a case thread that aren't in any tab just use the captured row.
@@ -427,10 +475,7 @@ export default function EmailCenterPage() {
     [baseNotificationEmails, notificationFilter, passesCompany]
   )
   const updateEmails = useMemo(() => baseUpdateEmails.filter((e) => passesCompany(e.company_id)), [baseUpdateEmails, passesCompany])
-  const ignoredEmails = useMemo(
-    () => baseIgnoredEmails.filter((e) => ignoredFilter !== "automated" || isAutomatedSender(e.sender_email)).filter((e) => passesCompany(e.company_id)),
-    [baseIgnoredEmails, ignoredFilter, passesCompany]
-  )
+  const ignoredEmails = useMemo(() => baseIgnoredEmails.filter((e) => passesCompany(e.company_id)), [baseIgnoredEmails, passesCompany])
 
   const activeBase: { company_id: string | null }[] =
     tab === "inprogress" ? baseOpenCases
@@ -453,8 +498,15 @@ export default function EmailCenterPage() {
   const notificationHandledCount = useMemo(() => emails.filter((e) => e.category_key === "notification" && !!e.handled_at).length, [emails])
   const updateCount = useMemo(() => emails.filter((e) => e.disposition === "update_only").length, [emails])
   const ignoreCount = useMemo(() => emails.filter((e) => e.disposition === "ignore").length, [emails])
-  const automatedIgnoredCount = useMemo(() => emails.filter((e) => e.disposition === "ignore" && isAutomatedSender(e.sender_email)).length, [emails])
   const unassignedMailboxes = useMemo(() => accounts.filter((a) => !a.company_id).length, [accounts])
+  // Mailboxes Google no longer accepts (token revoked/expired) - nothing syncs from them until they are
+  // connected again, so they get their own indicator in the toolbar.
+  const failedMailboxes = useMemo(() => accounts.filter(needsReconnect).length, [accounts])
+  const openFailedMailboxes = useCallback(() => {
+    setMailboxView("failed")
+    setMailboxFocusNonce((n) => n + 1)
+    setTab("mailboxes")
+  }, [])
   const pushHealthy = accounts.some((a) => a.watch_expiry && new Date(a.watch_expiry).getTime() > Date.now())
 
   const isCaseTab = tab === "inprogress" || tab === "completed"
@@ -464,16 +516,29 @@ export default function EmailCenterPage() {
     ? notificationFilter === "active" ? "All important notifications are handled." : "Nothing handled yet."
     : tab === "review" ? "Nothing needs review right now."
     : tab === "update" ? "No emails marked Update only."
-    : ignoredFilter === "automated" ? "No auto-ignored automated emails."
     : "No ignored emails."
 
   const tabTable = (embedded: boolean) => {
     if (isCaseTab) {
       return <CasesTable cases={tab === "inprogress" ? openCases : closedCases} onOpen={(c) => setOpenCaseId(c.id)} showTime={showTime} embedded={embedded} loading={loading} />
     }
+    if (tab === "ignored") {
+      return (
+        <IgnoredPanel
+          emails={ignoredEmails}
+          rules={rules}
+          categories={categories}
+          onOpen={(e) => setOpenEmailSeed(e)}
+          onMove={moveEmails}
+          onDelete={deleteEmails}
+          showTime={showTime}
+          loading={loading}
+        />
+      )
+    }
     return (
       <EmailsTable
-        emails={tab === "notifications" ? notificationEmails : tab === "review" ? reviewEmails : tab === "update" ? updateEmails : ignoredEmails}
+        emails={tab === "notifications" ? notificationEmails : tab === "review" ? reviewEmails : updateEmails}
         categories={categories}
         onOpen={(e) => setOpenEmailSeed(e)}
         onQuickClassify={quickClassify}
@@ -503,6 +568,21 @@ export default function EmailCenterPage() {
             {pushHealthy ? "Live Push" : "Polling"}
           </span>
         </div>
+
+        {failedMailboxes > 0 && (
+          <button
+            onClick={openFailedMailboxes}
+            className="inline-flex items-center gap-2 text-base font-medium text-red-700 bg-red-50 border border-red-200 rounded-full px-3 py-1 hover:bg-red-100 transition-colors"
+            title="Google no longer accepts these mailboxes' login, so nothing is syncing from them until they are reconnected"
+          >
+            <span className="relative flex h-2.5 w-2.5 shrink-0" aria-hidden>
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
+            </span>
+            {failedMailboxes} mailbox{failedMailboxes === 1 ? "" : "es"} failed
+            <span className="underline font-semibold">Fix →</span>
+          </button>
+        )}
 
         {unassignedMailboxes > 0 && (
           <button
@@ -594,7 +674,7 @@ export default function EmailCenterPage() {
             </TabsTrigger>
             <TabsTrigger value="mailboxes" className={TAB_TRIGGER_CLASS}>
               Mailboxes
-              {unassignedMailboxes > 0 && <span className={URGENT_BADGE_CLASS}>{unassignedMailboxes}</span>}
+              {(unassignedMailboxes > 0 || failedMailboxes > 0) && <span className={URGENT_BADGE_CLASS}>{unassignedMailboxes + failedMailboxes}</span>}
             </TabsTrigger>
             <TabsTrigger value="rules" className={TAB_TRIGGER_CLASS}>
               Rules
@@ -604,29 +684,6 @@ export default function EmailCenterPage() {
         </Tabs>
 
         <div className="ml-auto flex items-center gap-2 flex-wrap">
-          {tab === "ignored" && (
-            <div className="flex items-center gap-1 p-1 rounded-lg border border-slate-200 bg-white">
-              <button
-                onClick={() => setIgnoredFilter("all")}
-                className={cn(
-                  "h-8 px-3 rounded-md text-base font-medium transition-colors whitespace-nowrap",
-                  ignoredFilter === "all" ? "bg-custom-blue text-white" : "text-slate-600 hover:bg-slate-100"
-                )}
-              >
-                All ({ignoreCount})
-              </button>
-              <button
-                onClick={() => setIgnoredFilter("automated")}
-                className={cn(
-                  "h-8 px-3 rounded-md text-base font-medium transition-colors whitespace-nowrap",
-                  ignoredFilter === "automated" ? "bg-custom-blue text-white" : "text-slate-600 hover:bg-slate-100"
-                )}
-                title="Auto-ignored automated mail from no-reply / alerts addresses"
-              >
-                Automated ({automatedIgnoredCount})
-              </button>
-            </div>
-          )}
           {tab === "notifications" && (
             <div className="flex items-center gap-1 p-1 rounded-lg border border-slate-200 bg-white">
               <button
@@ -718,6 +775,9 @@ export default function EmailCenterPage() {
             accounts={accounts}
             companies={fullCompanies}
             kraCredentials={kraCredentials}
+            view={mailboxView}
+            onViewChange={setMailboxView}
+            focusNonce={mailboxFocusNonce}
             onKraPasswordSave={setKraPassword}
             search={search}
             onAccountLinked={updateAccountCompany}

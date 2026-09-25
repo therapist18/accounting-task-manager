@@ -14,7 +14,8 @@ import { cn } from "@/lib/utils"
 import { api, type AccountRow } from "./shared"
 
 // "Sync from date": pull in mail older than the automatic backfill window, for every connected mailbox or
-// just the ones picked. Per mailbox it lists the not-yet-stored messages since the date (oldest first),
+// just the ones picked, optionally only up to an end date (a period). Per mailbox it lists the not-yet-stored
+// messages in the period (oldest first),
 // then ingests them a few at a time — through the very same ingestion as normal syncs, so classification
 // and case opening behave identically and already-stored mail is simply skipped. Up to three mailboxes run
 // at once; "Stop" finishes the batch in flight and leaves the rest for another run.
@@ -22,6 +23,8 @@ import { api, type AccountRow } from "./shared"
 const BATCH = 10 // keep in step with BACKFILL_BATCH in lib/email-center/ingest.ts (the server accepts up to double)
 const PARALLEL_MAILBOXES = 3
 const LONG_RANGE_DAYS = 90
+// Gmail launched in 2004: a start date this early covers a mailbox from its very first email.
+const MAILBOX_START = "2004-04-01"
 
 type Status = "pending" | "listing" | "running" | "done" | "error" | "stopped"
 interface Progress {
@@ -60,6 +63,8 @@ export function SyncDialog({
   const eligible = useMemo(() => accounts.filter((a) => a.status === "active"), [accounts])
 
   const [since, setSince] = useState(formatDateToDMY(addDaysIso(todayIso(), -30)) ?? "")
+  // Optional end of the period; empty means "up to now".
+  const [until, setUntil] = useState("")
   const [scope, setScope] = useState<"all" | "selected">("all")
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [search, setSearch] = useState("")
@@ -85,7 +90,10 @@ export function SyncDialog({
 
   const sinceIso = dateFieldToIso(since)
   const sinceValid = sinceIso !== "" && sinceIso !== "invalid" && sinceIso <= todayIso()
-  const daysBack = sinceValid ? Math.round((Date.parse(todayIso()) - Date.parse(sinceIso)) / 86_400_000) : 0
+  const untilIso = until.trim() ? dateFieldToIso(until) : ""
+  const untilValid = untilIso === "" || (untilIso !== "invalid" && untilIso <= todayIso() && (!sinceValid || untilIso >= sinceIso))
+  // How much mail the period spans: from the start date to the end date (or today).
+  const daysBack = sinceValid ? Math.round((Date.parse(untilIso && untilIso !== "invalid" ? untilIso : todayIso()) - Date.parse(sinceIso)) / 86_400_000) : 0
 
   const targets = scope === "all" ? eligible : eligible.filter((a) => selected.has(a.id))
 
@@ -99,12 +107,12 @@ export function SyncDialog({
   const patch = (id: string, p: Partial<Progress>) =>
     setProgress((prev) => ({ ...prev, [id]: { ...(prev[id] ?? { status: "pending", total: 0, done: 0, ingested: 0, failed: 0 }), ...p } }))
 
-  async function runMailbox(acc: AccountRow, sinceDate: string) {
+  async function runMailbox(acc: AccountRow, sinceDate: string, untilDate: string) {
     try {
       patch(acc.id, { status: "listing" })
       const listed = await api<{ ids: string[]; capped: boolean }>("/api/email-center/sync/backfill", {
         method: "POST",
-        body: JSON.stringify({ accountId: acc.id, action: "list", since: sinceDate }),
+        body: JSON.stringify({ accountId: acc.id, action: "list", since: sinceDate, ...(untilDate ? { until: untilDate } : {}) }),
       })
       let queue = listed.ids
       patch(acc.id, { status: "running", total: queue.length, done: 0, ingested: 0, failed: 0, capped: listed.capped })
@@ -131,7 +139,8 @@ export function SyncDialog({
   }
 
   const start = async () => {
-    if (!sinceValid) return toast.error("Enter a valid date (DD/MM/YYYY) that isn't in the future.")
+    if (!sinceValid) return toast.error("Enter a valid start date (DD/MM/YYYY) that isn't in the future.")
+    if (!untilValid) return toast.error("The end date must be a valid date (DD/MM/YYYY) on or after the start date, and not in the future.")
     if (!targets.length) return toast.error("Choose at least one connected mailbox.")
     stopRef.current = false
     setFinished(false)
@@ -142,7 +151,7 @@ export function SyncDialog({
     const worker = async () => {
       while (queue.length && !stopRef.current) {
         const acc = queue.shift()!
-        await runMailbox(acc, sinceIso)
+        await runMailbox(acc, sinceIso, untilIso)
       }
     }
     await Promise.all(Array.from({ length: Math.min(PARALLEL_MAILBOXES, queue.length) }, worker))
@@ -179,31 +188,49 @@ export function SyncDialog({
           </span>
           <div>
             <DialogTitle className="text-2xl font-bold tracking-tight text-slate-900">Sync from date</DialogTitle>
-            <DialogDescription className="text-base text-slate-500 mt-0.5">Pull in older mail from Gmail, for all mailboxes or only the ones you pick.</DialogDescription>
+            <DialogDescription className="text-base text-slate-500 mt-0.5">Pull in older mail from Gmail for a period, for all mailboxes or only the ones you pick.</DialogDescription>
           </div>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-6 py-5 space-y-6">
-          {/* Date */}
+          {/* Period */}
           <section className="space-y-2.5">
-            <Label className="text-sm font-medium text-slate-600">Sync mail received since</Label>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="w-56">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="w-56 space-y-1.5">
+                <Label className="text-sm font-medium text-slate-600">From</Label>
                 <DateInput value={since} onChange={setSince} disabled={running} className="h-10 text-base rounded-md border-slate-200" />
               </div>
-              <div className="flex flex-wrap gap-2">
-                {PRESETS.map((p) => (
-                  <Button key={p.label} type="button" variant="outline" size="sm" disabled={running} onClick={() => setSince(formatDateToDMY(p.iso()) ?? "")} className="h-9 px-3 rounded-md border-slate-200 text-sm font-medium">
-                    {p.label}
-                  </Button>
-                ))}
+              <div className="w-56 space-y-1.5">
+                <Label className="text-sm font-medium text-slate-600">To <span className="text-slate-400 font-normal">— optional, blank = up to now</span></Label>
+                <DateInput value={until} onChange={setUntil} disabled={running} className="h-10 text-base rounded-md border-slate-200" />
               </div>
+              {until && (
+                <Button type="button" variant="ghost" size="sm" disabled={running} onClick={() => setUntil("")} className="h-10 px-3 text-sm text-slate-600">Clear end date</Button>
+              )}
             </div>
-            {since && !sinceValid && <p className="text-sm text-red-600">Enter a valid date as DD/MM/YYYY (not in the future).</p>}
-            {sinceValid && daysBack > LONG_RANGE_DAYS && (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                disabled={running}
+                onClick={() => { setSince(formatDateToDMY(MAILBOX_START) ?? ""); setUntil("") }}
+                className="h-9 px-3 rounded-md bg-custom-blue hover:bg-custom-blue/90 text-white text-sm font-semibold gap-1.5"
+                title="From the first email ever received up to the latest"
+              >
+                <History className="h-4 w-4" /> Entire mailbox
+              </Button>
+              {PRESETS.map((p) => (
+                <Button key={p.label} type="button" variant="outline" size="sm" disabled={running} onClick={() => { setSince(formatDateToDMY(p.iso()) ?? ""); setUntil("") }} className="h-9 px-3 rounded-md border-slate-200 text-sm font-medium">
+                  {p.label}
+                </Button>
+              ))}
+            </div>
+            {since && !sinceValid && <p className="text-sm text-red-600">Enter a valid start date as DD/MM/YYYY (not in the future).</p>}
+            {until && !untilValid && <p className="text-sm text-red-600">The end date must be a valid DD/MM/YYYY on or after the start date, and not in the future.</p>}
+            {sinceValid && untilValid && daysBack > LONG_RANGE_DAYS && (
               <p className="flex items-start gap-1.5 text-sm text-amber-700">
                 <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-                That's {daysBack} days back. A long range can take a while — keep this page open until it finishes. Mail already stored is skipped, so it's safe to stop and run it again.
+                That period spans {daysBack} days. A long range can take a while — keep this page open until it finishes. Mail already stored is skipped, so it's safe to stop and run it again.
               </p>
             )}
           </section>
@@ -295,8 +322,8 @@ export function SyncDialog({
                           {p.status === "stopped" && `Stopped at ${p.done} of ${p.total}`}
                           {p.status === "error" && <span className="text-red-600">{p.error}</span>}
                           {(p.status === "running" || p.status === "done") &&
-                            (p.total === 0 ? "Nothing new since that date" : `${p.done} of ${p.total} · ${p.ingested} new${p.failed ? ` · ${p.failed} failed` : ""}`)}
-                          {p.capped && " · very large range — run again to continue"}
+                            (p.total === 0 ? "Nothing new in that period" : `${p.done} of ${p.total} · ${p.ingested} new${p.failed ? ` · ${p.failed} failed` : ""}`)}
+                          {p.capped && " · very large period — only the newest 30,000 messages were listed; run again with an earlier end date for the rest"}
                         </span>
                       </span>
                     </div>
@@ -315,7 +342,7 @@ export function SyncDialog({
           ) : (
             <>
               <Button variant="ghost" size="sm" onClick={onClose} className="h-11 px-5 text-base font-medium text-slate-600 hover:text-slate-900 rounded-lg">{finished ? "Close" : "Cancel"}</Button>
-              <Button size="sm" onClick={start} disabled={!sinceValid || targets.length === 0} className="h-11 px-6 text-base font-semibold bg-custom-blue hover:bg-custom-blue/90 text-white rounded-lg shadow-xs gap-2">
+              <Button size="sm" onClick={start} disabled={!sinceValid || !untilValid || targets.length === 0} className="h-11 px-6 text-base font-semibold bg-custom-blue hover:bg-custom-blue/90 text-white rounded-lg shadow-xs gap-2">
                 <History className="w-5 h-5" /> {finished ? "Sync again" : `Sync ${targets.length} mailbox${targets.length === 1 ? "" : "es"}`}
               </Button>
             </>

@@ -262,11 +262,19 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   // filter instead of disappearing entirely.
   const autoIgnore = direction === "inbound" && !kra && !threadCase && isAutomatedSender(senderEmail)
 
+  // Set when a confident ignore rule matches: the mail is stored as ignored (headers only — no body,
+  // no attachments, no AI), tagged with the rule, so the Ignored tab can show what each rule caught.
+  let ruleIgnore: { ruleId: string; confidence: number } | null = null
+
   if (direction === "inbound" && !autoIgnore) {
     const cheap = classifyByRules({ subject, body: snippet, senderEmail, threadHasCase: !!threadCase, rules })
-    // Confident ignore rules are checked before classification and name no category: matching mail is
-    // never pulled into the app, whatever the sender. Below the threshold it still goes to review.
-    if (cheap?.action === "ignore" && cheap.confidence >= THRESHOLD) return "skipped"
+    // Confident ignore rules are checked before classification and name no category: whatever the
+    // sender, matching mail never opens a case or reaches review. Below the threshold it still goes
+    // to review.
+    if (cheap?.action === "ignore" && cheap.confidence >= THRESHOLD) {
+      if (!cheap.ruleId) return "skipped"
+      ruleIgnore = { ruleId: cheap.ruleId, confidence: cheap.confidence }
+    }
     if (!kra && cheap?.categoryKey === "system_noise") return "skipped"
     if (kra && !threadCase && cheap && cheap.categoryKey) {
       const cat = CATEGORY_BY_KEY.get(cheap.categoryKey)
@@ -278,7 +286,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   }
 
   // 3. Full fetch — KRA mail, our replies in a case, and unknown senders needing review.
-  const needsFull = direction === "outbound" || kra
+  const needsFull = (direction === "outbound" || kra) && !ruleIgnore
   const payload = needsFull
     ? (await gmail.users.messages.get({ userId: "me", id: messageId, format: "full" })).data.payload
     : undefined
@@ -357,6 +365,11 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
       await sb.from("email_case").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", threadCase!.id)
     }
     caseId = threadCase!.id
+  } else if (ruleIgnore) {
+    categoryKey = "system_noise"
+    confidence = ruleIgnore.confidence
+    source = "rule"
+    disposition = "ignore"
   } else if (autoIgnore) {
     // No-reply automated mail: never KRA, never opens a case or a review item. Store it marked
     // ignored so staff can see what came in under the ignored tab's "No-reply" filter.
@@ -516,8 +529,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
           ? "normal"
           : "low"
 
-  const { error: upsertErr } = await sb.from("emails").upsert(
-    {
+  const emailRow = {
       account_id: account.id,
       gmail_message_id: messageId,
       gmail_thread_id: threadId,
@@ -546,9 +558,15 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
       case_id: caseId,
       classified_at: new Date().toISOString(),
       processed_at: new Date().toISOString(),
-    },
-    { onConflict: "gmail_message_id" }
-  )
+  }
+  // matched_rule_id arrived in a later migration; if it isn't applied yet, save the email without the
+  // tag instead of failing the whole sync.
+  let { error: upsertErr } = await sb
+    .from("emails")
+    .upsert({ ...emailRow, matched_rule_id: ruleIgnore?.ruleId ?? null }, { onConflict: "gmail_message_id" })
+  if (upsertErr && /matched_rule_id/i.test(upsertErr.message)) {
+    ;({ error: upsertErr } = await sb.from("emails").upsert(emailRow, { onConflict: "gmail_message_id" }))
+  }
   if (upsertErr) throw new Error(`Could not save email ${messageId}: ${upsertErr.message}`)
 
   return "ingested"
@@ -772,17 +790,22 @@ export async function syncAllAccounts(
 
 // ─── sync from a chosen date ────────────────────────────────────────────────
 //
-// "Sync from date" lets staff pull in mail older than the automatic backfill window. It runs in two
-// steps so no single request outruns the platform's time limit and the UI can show real progress:
-//   listBackfillIds()      one cheap call: every message id since the date that isn't stored yet,
-//                          OLDEST FIRST (so a thread's first email opens its case before the follow-ups).
+// "Sync from date" lets staff pull in mail older than the automatic backfill window, optionally only up to
+// an end date (a period). It runs in two steps so no single request outruns the platform's time limit and
+// the UI can show real progress:
+//   listBackfillIds()      one cheap pass: the message ids in the period that aren't stored yet, OLDEST
+//                          FIRST (so a thread's first email opens its case before the follow-ups). At most
+//                          MAX_LIST_PAGES pages (30,000 messages, newest first) are listed; beyond that
+//                          `capped` is set and the OLDEST are left out - run the period again with an
+//                          earlier end date to reach them.
 //   ingestBackfillBatch()  the client sends those ids back a few at a time; each goes through the exact
 //                          same ingestMessage() as normal syncs, so classification, case opening and
 //                          attachment handling are identical. Already-stored mail is skipped, so
 //                          re-running or overlapping ranges is safe.
 // It never touches the mailbox's history cursor — normal incremental sync carries on unaffected.
 
-const MAX_BACKFILL_IDS = 3000
+// How far one listing pass walks: 500 ids per page, newest first.
+const MAX_LIST_PAGES = 60
 export const BACKFILL_BATCH = 10
 
 async function loadActiveAccount(sb: SupabaseClient, accountId: string): Promise<AccountRow> {
@@ -795,36 +818,51 @@ async function loadActiveAccount(sb: SupabaseClient, accountId: string): Promise
 export async function listBackfillIds(
   sb: SupabaseClient,
   accountId: string,
-  sinceYmd: string
+  sinceYmd: string,
+  untilYmd?: string
 ): Promise<{ email: string; ids: string[]; listed: number; capped: boolean }> {
   const account = await loadActiveAccount(sb, accountId)
   const gmail = gmailForAccount(account)
 
-  // Gmail's after: is evaluated at midnight Pacific time, so start a day early rather than risk missing
-  // that day's Kenyan-morning mail; the extra day is deduplicated below and by ingestMessage itself.
+  // Gmail's after:/before: are evaluated at midnight Pacific time. Start a day early so Kenyan-morning mail
+  // on the first day isn't missed, and end a day late (before: is exclusive) so the last day is complete;
+  // the few extra hours either side are harmless because already-stored mail is skipped.
+  const ymd = (d: Date) => `${d.getUTCFullYear()}/${d.getUTCMonth() + 1}/${d.getUTCDate()}`
   const start = new Date(`${sinceYmd}T00:00:00Z`)
   start.setUTCDate(start.getUTCDate() - 1)
-  const q = `after:${start.getUTCFullYear()}/${start.getUTCMonth() + 1}/${start.getUTCDate()}`
+  let q = `after:${ymd(start)}`
+  if (untilYmd) {
+    const end = new Date(`${untilYmd}T00:00:00Z`)
+    end.setUTCDate(end.getUTCDate() + 1)
+    q += ` before:${ymd(end)}`
+  }
 
-  const all: string[] = []
+  // Gmail lists newest first. Already-stored mail is dropped as we go; the rest is returned oldest first.
+  const pending: string[] = []
+  let listed = 0
+  let pages = 0
   let pageToken: string | undefined
   do {
     const res = await gmail.users.messages.list({ userId: "me", q, maxResults: 500, pageToken })
-    all.push(...(res.data.messages ?? []).map((m) => m.id!).filter(Boolean))
+    const pageIds = (res.data.messages ?? []).map((m) => m.id!).filter(Boolean)
+    listed += pageIds.length
+
+    const chunks: string[][] = []
+    for (let i = 0; i < pageIds.length; i += 100) chunks.push(pageIds.slice(i, i + 100))
+    const stored = await Promise.all(
+      chunks.map((chunk) =>
+        sb.from("emails").select("gmail_message_id").in("gmail_message_id", chunk).not("processed_at", "is", null)
+      )
+    )
+    const done = new Set<string>()
+    for (const { data } of stored) for (const r of data ?? []) done.add((r as any).gmail_message_id)
+    pending.push(...pageIds.filter((id) => !done.has(id)))
+
     pageToken = res.data.nextPageToken ?? undefined
-  } while (pageToken && all.length < MAX_BACKFILL_IDS)
-  const capped = !!pageToken
-  const listed = all.length
+    pages++
+  } while (pageToken && pages < MAX_LIST_PAGES)
 
-  const done = new Set<string>()
-  for (let i = 0; i < all.length; i += 100) {
-    const chunk = all.slice(i, i + 100)
-    const { data } = await sb.from("emails").select("gmail_message_id").in("gmail_message_id", chunk).not("processed_at", "is", null)
-    for (const r of data ?? []) done.add((r as any).gmail_message_id)
-  }
-  const ids = all.filter((id) => !done.has(id)).reverse() // Gmail lists newest first -> oldest first
-
-  return { email: account.email, ids, listed, capped }
+  return { email: account.email, ids: pending.reverse(), listed, capped: !!pageToken } // oldest first
 }
 
 export async function ingestBackfillBatch(

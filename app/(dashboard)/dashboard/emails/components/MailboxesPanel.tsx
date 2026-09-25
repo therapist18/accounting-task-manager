@@ -6,6 +6,10 @@ import { AlertCircle, Copy, Eye, EyeOff, Filter, History, Link2, Loader2, Pencil
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import ClientCategoryFilter from "@/app/generic-components/ClientCategoryFilter"
 import {
   companyMatchesCategoryFilters,
@@ -17,7 +21,7 @@ import type { Company, KraEmailCredentials } from "../../companies/database"
 import { Pagination } from "./Pagination"
 import { HEAD_BLUE, TableLoading, SortTh, TD_CLASS, TH_CLASS, useSortedRows, zebraRow } from "./table"
 import {
-  PILL_BUTTON_ACTIVE_CLASS, PILL_BUTTON_CLASS, PRIMARY_PILL_BUTTON_CLASS, SearchSelect, api, fmtDateTime,
+  PILL_BUTTON_ACTIVE_CLASS, PILL_BUTTON_CLASS, PRIMARY_PILL_BUTTON_CLASS, SearchSelect, api, fmtDateTime, needsReconnect,
   type AccountRow,
 } from "./shared"
 
@@ -27,7 +31,8 @@ import {
 // company are their own view (the "Unlinked mailboxes" chip), where they can be linked.
 
 type ConnState = "connected" | "reconnect" | "not_connected"
-type View = "all" | "connected" | "not_connected" | "unlinked"
+// "failed" = companies with a mailbox Google no longer accepts (needs reconnecting).
+export type MailboxView = "all" | "connected" | "not_connected" | "failed" | "unlinked"
 
 interface CompanyRowData {
   company: Company
@@ -35,6 +40,9 @@ interface CompanyRowData {
   kraPassword: string
   accounts: AccountRow[]
   state: ConnState
+  // Linked mailboxes that need reconnecting (revoked/expired token) - a company can be "connected"
+  // through one healthy mailbox and still have a broken one.
+  failing: number
   lastSync: string
   live: number
 }
@@ -161,6 +169,9 @@ export function MailboxesPanel({
   companies,
   kraCredentials,
   onKraPasswordSave,
+  view,
+  onViewChange,
+  focusNonce,
   search,
   onAccountLinked,
   onSynced,
@@ -175,6 +186,11 @@ export function MailboxesPanel({
   kraCredentials: Map<string, KraEmailCredentials>
   // Saves a password for a company that has none yet; rejects if the save fails.
   onKraPasswordSave: (companyId: string, password: string) => Promise<void>
+  // Which chip is open - owned by the page so the toolbar's failed-mailboxes indicator can open the
+  // "Needs reconnect" view. focusNonce bumps each time that indicator is clicked.
+  view: MailboxView
+  onViewChange: (view: MailboxView) => void
+  focusNonce: number
   search: string
   // Local merge — the company name is already known, so linking a mailbox never needs a network round
   // trip beyond the PATCH itself.
@@ -187,15 +203,22 @@ export function MailboxesPanel({
   showTime: boolean
   loading?: boolean
 }) {
-  const [view, setView] = useState<View>("all")
   const [categoryFilters, setCategoryFilters] = useState<FilterState | null>(DEFAULT_CATEGORY_FILTERS)
   const [categoryFilterOpen, setCategoryFilterOpen] = useState(false)
   const [revealPasswords, setRevealPasswords] = useState(false)
+  // A move/unlink waiting for the person to confirm it (toCompanyId null = unlink).
+  const [pendingReassign, setPendingReassign] = useState<{ account: AccountRow; fromName: string; toCompanyId: string | null } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [itemsPerPage, setItemsPerPage] = useState(50)
   const [page, setPage] = useState(0)
 
   const q = search.trim().toLowerCase()
+
+  // Jumping here from the failed-mailboxes indicator: drop the client-category filter too, so a failing
+  // mailbox on a company the default filter hides can't be missed.
+  useEffect(() => {
+    if (focusNonce > 0) setCategoryFilters(null)
+  }, [focusNonce])
 
   const accountsByCompany = useMemo(() => {
     const map = new Map<string, AccountRow[]>()
@@ -219,14 +242,15 @@ export function MailboxesPanel({
       .filter((c) => companyMatchesCategoryFilters(c, categoryFilters))
       .map((company) => {
         const linked = accountsByCompany.get(String(company.id)) ?? []
-        const active = linked.filter((a) => a.status === "active")
+        const healthy = linked.filter((a) => !needsReconnect(a))
         const creds = kraCredentials.get(String(company.id))
         return {
           company,
           kraEmail: (creds?.kra_email_address ?? company.kra_email_address ?? "").trim().toLowerCase(),
           kraPassword: creds?.kra_email_password ?? "",
           accounts: linked,
-          state: (active.length ? "connected" : linked.length ? "reconnect" : "not_connected") as ConnState,
+          state: (healthy.length ? "connected" : linked.length ? "reconnect" : "not_connected") as ConnState,
+          failing: linked.length - healthy.length,
           lastSync: linked.map((a) => a.last_synced_at ?? "").sort().pop() ?? "",
           live: linked.filter(watchActive).length,
         }
@@ -238,11 +262,16 @@ export function MailboxesPanel({
     all: baseRows.length,
     connected: baseRows.filter((r) => r.state === "connected").length,
     not_connected: baseRows.filter((r) => r.state !== "connected").length,
+    failed: baseRows.filter((r) => r.failing > 0).length,
     unlinked: unlinked.length,
   }
 
   const companyRows = useMemo(
-    () => (view === "connected" ? baseRows.filter((r) => r.state === "connected") : view === "not_connected" ? baseRows.filter((r) => r.state !== "connected") : baseRows),
+    () =>
+      view === "connected" ? baseRows.filter((r) => r.state === "connected")
+        : view === "not_connected" ? baseRows.filter((r) => r.state !== "connected")
+        : view === "failed" ? baseRows.filter((r) => r.failing > 0)
+        : baseRows,
     [baseRows, view]
   )
 
@@ -274,12 +303,18 @@ export function MailboxesPanel({
 
   // Moving or unlinking only changes where NEW mail is matched — emails and cases already pulled in
   // keep their company — so say so before doing it.
-  const reassign = (a: AccountRow, fromName: string, toCompanyId: string | null) => {
-    const toName = toCompanyId ? companies.find((c) => String(c.id) === toCompanyId)?.company_name ?? "the selected company" : null
-    const message = toName
-      ? `Move ${a.email} from ${fromName} to ${toName}?\n\nNew emails will be matched to ${toName}. Emails already synced stay with ${fromName}.`
-      : `Unlink ${a.email} from ${fromName}?\n\nNew emails won't be matched to any company until it is linked again. Emails already synced stay with ${fromName}.`
-    if (window.confirm(message)) assign(a, toCompanyId ?? "")
+  const reassign = (account: AccountRow, fromName: string, toCompanyId: string | null) =>
+    setPendingReassign({ account, fromName, toCompanyId })
+
+  const pendingToName = pendingReassign?.toCompanyId
+    ? companies.find((c) => String(c.id) === pendingReassign.toCompanyId)?.company_name ?? "the selected company"
+    : null
+
+  const confirmReassign = async () => {
+    if (!pendingReassign) return
+    const { account, toCompanyId } = pendingReassign
+    setPendingReassign(null)
+    await assign(account, toCompanyId ?? "")
   }
 
   // Syncs each of the given mailboxes in turn (a company can have more than one).
@@ -305,17 +340,18 @@ export function MailboxesPanel({
     }
   }
 
-  const activeAccounts = accounts.filter((a) => a.status === "active")
+  const activeAccounts = accounts.filter((a) => !needsReconnect(a))
   const linkOptions = useMemo(
     () => companies.map((c) => ({ value: String(c.id), label: c.company_name })),
     [companies]
   )
   const categoryActive = categoryFilters !== DEFAULT_CATEGORY_FILTERS
 
-  const VIEWS: Array<[View, string]> = [
+  const VIEWS: Array<[MailboxView, string]> = [
     ["all", "All companies"],
     ["connected", "Connected"],
     ["not_connected", "Not connected"],
+    ["failed", "Needs reconnect"],
     ["unlinked", "Unlinked mailboxes"],
   ]
 
@@ -350,7 +386,7 @@ export function MailboxesPanel({
             {VIEWS.map(([value, label]) => (
               <button
                 key={value}
-                onClick={() => setView(value)}
+                onClick={() => onViewChange(value)}
                 className={cn(
                   "h-9 px-3.5 rounded-md text-base font-medium flex items-center gap-2 transition-all",
                   view === value ? "bg-custom-blue text-white shadow-xs" : "text-slate-600 hover:text-slate-900 hover:bg-white/70"
@@ -359,7 +395,10 @@ export function MailboxesPanel({
                 {label}
                 <span className={cn(
                   "inline-flex items-center justify-center font-semibold tabular-nums px-1.5 py-0.5 rounded-full text-sm min-w-[1.25rem] leading-none",
-                  view === value ? "bg-white/20 text-white" : value === "unlinked" && counts.unlinked > 0 ? "bg-amber-500 text-white" : "bg-slate-200 text-slate-700"
+                  view === value ? "bg-white/20 text-white"
+                    : value === "unlinked" && counts.unlinked > 0 ? "bg-amber-500 text-white"
+                    : value === "failed" && counts.failed > 0 ? "bg-red-500 text-white"
+                    : "bg-slate-200 text-slate-700"
                 )}>
                   {counts[value]}
                 </span>
@@ -442,6 +481,12 @@ export function MailboxesPanel({
                             {r.accounts.map((a) => (
                               <div key={a.id}>
                                 <div className="text-slate-800 break-all">{a.email}</div>
+                                {needsReconnect(a) && (
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <Badge variant="outline" className="text-sm font-semibold bg-red-50 text-red-700 border-red-200 rounded-full px-2.5 py-0.5">Reconnect needed</Badge>
+                                    <a href={`/api/gmail/connect?company=${encodeURIComponent(cid)}`} className="text-sm font-semibold text-red-700 underline" title="Sign in to this Google account again to restore access">Reconnect</a>
+                                  </div>
+                                )}
                                 {a.last_sync_error && (
                                   <div className="flex items-center gap-1 text-sm text-red-600 mt-0.5" title={a.last_sync_error}>
                                     <AlertCircle className="w-4 h-4 shrink-0" />
@@ -484,15 +529,15 @@ export function MailboxesPanel({
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {connectedOnce ? (
                             <>
-                              <Button variant="outline" size="sm" disabled={busy === key || r.state !== "connected"} onClick={() => sync(key, r.accounts.filter((a) => a.status === "active"))} className="h-9 px-3 gap-1.5 rounded-md border-slate-200 text-base font-medium" title="Check Gmail for new mail now">
+                              <Button variant="outline" size="sm" disabled={busy === key || r.state !== "connected"} onClick={() => sync(key, r.accounts.filter((a) => !needsReconnect(a)))} className="h-9 px-3 gap-1.5 rounded-md border-slate-200 text-base font-medium" title="Check Gmail for new mail now">
                                 {busy === key ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4 text-slate-600" />} Sync
                               </Button>
-                              <Button variant="outline" size="sm" disabled={r.state !== "connected"} onClick={() => onSyncFrom(r.accounts.filter((a) => a.status === "active").map((a) => a.id))} className="h-9 px-3 gap-1.5 rounded-md border-slate-200 text-base font-medium" title="Pull in older mail from a chosen date">
+                              <Button variant="outline" size="sm" disabled={r.state !== "connected"} onClick={() => onSyncFrom(r.accounts.filter((a) => !needsReconnect(a)).map((a) => a.id))} className="h-9 px-3 gap-1.5 rounded-md border-slate-200 text-base font-medium" title="Pull in older mail from a chosen date">
                                 <History className="w-4 h-4 text-slate-600" /> From date
                               </Button>
-                              <a href={`/api/gmail/connect?company=${encodeURIComponent(cid)}`} title={r.state === "reconnect" ? "Sign in again to restore access" : "Connect another mailbox for this company"}>
-                                <Button variant="outline" size="sm" className={cn("h-9 px-3 gap-1.5 rounded-md text-base font-medium", r.state === "reconnect" ? "border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100" : "border-slate-200")}>
-                                  <Plus className="w-4 h-4" /> {r.state === "reconnect" ? "Reconnect" : "Mailbox"}
+                              <a href={`/api/gmail/connect?company=${encodeURIComponent(cid)}`} title={r.failing > 0 ? "Sign in again to restore access" : "Connect another mailbox for this company"}>
+                                <Button variant="outline" size="sm" className={cn("h-9 px-3 gap-1.5 rounded-md text-base font-medium", r.failing > 0 ? "border-red-300 text-red-800 bg-red-50 hover:bg-red-100" : "border-slate-200")}>
+                                  <Plus className="w-4 h-4" /> {r.failing > 0 ? "Reconnect" : "Mailbox"}
                                 </Button>
                               </a>
                             </>
@@ -546,6 +591,12 @@ export function MailboxesPanel({
                     <td className={cn(TD_CLASS, "text-center text-slate-400 tabular-nums font-medium")}>{start + index + 1}</td>
                     <td className={TD_CLASS}>
                       <div className="font-semibold text-slate-900">{a.email}</div>
+                      {needsReconnect(a) && (
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <Badge variant="outline" className="text-sm font-semibold bg-red-50 text-red-700 border-red-200 rounded-full px-2.5 py-0.5">Reconnect needed</Badge>
+                          <a href="/api/gmail/connect" className="text-sm font-semibold text-red-700 underline" title="Sign in to this Google account again to restore access">Reconnect</a>
+                        </div>
+                      )}
                       {a.last_sync_error && (
                         <div className="flex items-center gap-1 text-sm text-red-600 max-w-xs mt-0.5" title={a.last_sync_error}>
                           <AlertCircle className="w-4 h-4 shrink-0" />
@@ -567,7 +618,7 @@ export function MailboxesPanel({
                     <td className={cn(TD_CLASS, "text-slate-600 whitespace-nowrap tabular-nums")}>{a.last_synced_at ? fmtDateTime(a.last_synced_at, showTime) : "Never"}</td>
                     <td className={cn(TD_CLASS, "whitespace-nowrap")}><PushBadge live={watchActive(a)} /></td>
                     <td className={cn(TD_CLASS, "text-center border-r-0")}>
-                      <Button variant="outline" size="sm" className="h-10 w-10 p-0 rounded-md border-slate-200 hover:bg-slate-100" disabled={busy === `a-${a.id}` || a.status !== "active"} onClick={() => sync(`a-${a.id}`, [a])}>
+                      <Button variant="outline" size="sm" className="h-10 w-10 p-0 rounded-md border-slate-200 hover:bg-slate-100" disabled={busy === `a-${a.id}` || needsReconnect(a)} onClick={() => sync(`a-${a.id}`, [a])}>
                         {busy === `a-${a.id}` ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCw className="w-5 h-5 text-slate-600" />}
                       </Button>
                     </td>
@@ -593,6 +644,27 @@ export function MailboxesPanel({
           className="shrink-0 border-t border-slate-200"
         />
       </div>
+
+      <AlertDialog open={!!pendingReassign} onOpenChange={(o) => !o && setPendingReassign(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingToName ? `Move ${pendingReassign?.account.email} to ${pendingToName}?` : `Unlink ${pendingReassign?.account.email}?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingToName
+                ? `New emails will be matched to ${pendingToName}. Emails already synced stay with ${pendingReassign?.fromName}.`
+                : `New emails won't be matched to any company until it is linked again. Emails already synced stay with ${pendingReassign?.fromName}.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmReassign} className={pendingToName ? "bg-custom-blue hover:bg-custom-blue/90" : "bg-red-600 hover:bg-red-700"}>
+              {pendingToName ? "Move mailbox" : "Unlink"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
