@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, CheckCircle2, Info, Loader2, Mail, Pencil, Plus, Trash2, XCircle } from "lucide-react"
+import { AlertTriangle, Bell, CheckCircle2, EyeOff, Info, Loader2, Mail, Pencil, Plus, Tag, Trash2, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -56,6 +56,31 @@ function testWordings(matchType: string, wordings: string[], sample: string): { 
   }
   return { state: invalid ? "invalid" : "no" }
 }
+
+// One numbered section of the Add/Edit dialog: what to decide first comes first, and each step says what
+// it is for, so the form reads top to bottom as "what happens -> what to look for -> how sure -> extras".
+function Step({ n, title, hint, children }: { n: number; title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-4">
+      <div className="flex items-start gap-3">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-custom-blue text-sm font-bold text-white">{n}</span>
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold text-slate-900 leading-7">{title}</h3>
+          {hint && <p className="text-sm text-slate-500 -mt-0.5">{hint}</p>}
+        </div>
+      </div>
+      <div className="pl-10 space-y-5">{children}</div>
+    </section>
+  )
+}
+
+type RuleAction = "classify" | "ignore" | "notify"
+
+const ACTIONS: Array<{ value: RuleAction; title: string; hint: string; icon: typeof Tag; tone: string }> = [
+  { value: "classify", title: "Classify", hint: "Sort it into a KRA category — opens or updates a case.", icon: Tag, tone: "border-custom-blue bg-blue-50/60 ring-custom-blue" },
+  { value: "ignore", title: "Ignore", hint: "Send it to the Ignored tab, under this rule. No case is opened.", icon: EyeOff, tone: "border-slate-400 bg-slate-50 ring-slate-400" },
+  { value: "notify", title: "Flag as important", hint: "Keep it in Needs Review, marked urgent. No case is opened.", icon: Bell, tone: "border-amber-400 bg-amber-50 ring-amber-400" },
+]
 
 type Draft = {
   id: string | null
@@ -384,108 +409,111 @@ export function RulesPanel({
 
       {/* Add / edit */}
       <Dialog open={!!draft} onOpenChange={(o) => !o && !saving && setDraft(null)}>
-        <DialogContent className="max-w-2xl w-[96vw] max-h-[92vh] p-0 gap-0 border border-slate-200 shadow-xl rounded-2xl overflow-hidden bg-white flex flex-col">
-          <div className="border-b border-slate-200 pl-6 pr-14 py-4 shrink-0">
+        <DialogContent className="max-w-4xl w-[96vw] max-h-[94vh] p-0 gap-0 border border-slate-200 shadow-xl rounded-2xl overflow-hidden bg-white flex flex-col">
+          <div className="border-b border-slate-200 pl-8 pr-14 py-5 shrink-0">
             <DialogTitle className="text-2xl font-bold tracking-tight text-slate-900">{draft?.id ? "Edit rule" : "Add rule"}</DialogTitle>
-            <DialogDescription className="text-base text-slate-500 mt-0.5">Choose what to look for — a subject pattern, a sender, or both — and whether to classify the email, ignore it, or flag it as an important notification.</DialogDescription>
+            <DialogDescription className="text-base text-slate-500 mt-0.5">Decide what happens to matching emails, then what to look for.</DialogDescription>
           </div>
 
           {draft && (
-            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-6 py-5 space-y-5">
-              <div className="grid sm:grid-cols-[11rem_1fr] gap-x-5 gap-y-5">
-                <div className="space-y-1.5">
-                  <Label className="text-sm font-medium text-slate-600">Match type</Label>
-                  <SearchSelect
-                    className="w-full"
-                    value={draft.match_type}
-                    onChange={(v) => setDraft({ ...draft, match_type: v as Draft["match_type"] })}
-                    options={[{ value: "contains", label: "Contains text" }, { value: "regex", label: "Regular expression" }]}
-                  />
+            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-8 py-7 space-y-9">
+              {/* 1 - what the rule does. Everything below adapts to this choice. */}
+              <Step n={1} title="What should happen to matching emails?">
+                <div className="grid sm:grid-cols-3 gap-3">
+                  {ACTIONS.map((a) => {
+                    const current: RuleAction = draft.is_ignore ? "ignore" : draft.is_notify ? "notify" : "classify"
+                    const Icon = a.icon
+                    return (
+                      <button
+                        key={a.value}
+                        type="button"
+                        onClick={() => setDraft({ ...draft, is_ignore: a.value === "ignore", is_notify: a.value === "notify" })}
+                        className={cn(
+                          "text-left rounded-xl border px-4 py-3 transition-colors",
+                          current === a.value ? `${a.tone} ring-1` : "border-slate-200 bg-white hover:bg-slate-50"
+                        )}
+                      >
+                        <span className="flex items-center gap-2 text-base font-semibold text-slate-900"><Icon className="h-5 w-5 text-slate-600" /> {a.title}</span>
+                        <span className="block text-sm text-slate-500 mt-1 leading-snug">{a.hint}</span>
+                      </button>
+                    )
+                  })}
                 </div>
+              </Step>
+
+              {/* 2 - what to look for: sender (ignore / flag only), then subject */}
+              <Step
+                n={2}
+                title="Which emails does it match?"
+                hint={draft.is_ignore || draft.is_notify ? "Match on the sender, the subject, or both — when you fill in both, both must match." : "Classify rules apply to mail from KRA (@kra.go.ke) and match on the subject."}
+              >
+                {(draft.is_ignore || draft.is_notify) && (
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium text-slate-600">Sender <span className="text-slate-400 font-normal">— optional, blank = any sender</span></Label>
+                    <div className="grid sm:grid-cols-[1fr_11rem] gap-3">
+                      <Input
+                        className="h-10 text-base rounded-md border-slate-200 font-mono bg-white"
+                        value={draft.sender_pattern}
+                        onChange={(e) => setDraft({ ...draft, sender_pattern: e.target.value })}
+                        placeholder="e.g. admin.itax2@kra.go.ke"
+                      />
+                      <SearchSelect
+                        className="w-full"
+                        value={draft.sender_match_type}
+                        onChange={(v) => setDraft({ ...draft, sender_match_type: v as Draft["sender_match_type"] })}
+                        options={[{ value: "contains", label: "Contains text" }, { value: "regex", label: "Regular expression" }]}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-1.5">
-                  <Label className="text-sm font-medium text-slate-600">{draft.match_type === "regex" ? "Regular expressions" : "Subject wordings"} <span className="text-slate-400 font-normal">— one per line{(draft.is_ignore || draft.is_notify) && ", optional"}</span></Label>
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <Label className="text-sm font-medium text-slate-600">
+                      {draft.match_type === "regex" ? "Subject expressions" : "Subject wordings"}
+                      <span className="text-slate-400 font-normal"> — one per line{(draft.is_ignore || draft.is_notify) && ", optional if you set a sender"}</span>
+                    </Label>
+                    <div className="w-44">
+                      <SearchSelect
+                        className="w-full"
+                        value={draft.match_type}
+                        onChange={(v) => setDraft({ ...draft, match_type: v as Draft["match_type"] })}
+                        options={[{ value: "contains", label: "Contains text" }, { value: "regex", label: "Regular expression" }]}
+                      />
+                    </div>
+                  </div>
                   <Textarea
-                    rows={4}
+                    rows={5}
                     className={cn("text-base rounded-md border-slate-200 font-mono leading-relaxed", result === "invalid" && "border-red-300")}
                     value={draft.wordings}
                     onChange={(e) => setDraft({ ...draft, wordings: e.target.value })}
                     placeholder={draft.match_type === "regex"
                       ? "pre-?assess(ment)?\nnotice of pre.?assessment"
-                      : "Appointment Letter for Withholding VAT Agent\nNotice of intention to appoint as a withholding agent"}
+                      : "Payment against Payment Registration Number\nSuccessful completion of payment registration"}
                   />
                   <p className="text-sm text-slate-400">
-                    Put each way this kind of subject can be worded on its own line — the rule matches when the subject contains <span className="font-medium text-slate-500">any</span> of them. Not case-sensitive.
+                    The rule matches when the subject contains <span className="font-medium text-slate-500">any</span> line. Not case-sensitive.
                     {draft.match_type === "regex" ? " Each line is a JavaScript regular expression." : ""}
-                    {draft.is_ignore || draft.is_notify ? " Leave blank to match on the sender alone." : ""}
                   </p>
                 </div>
-              </div>
 
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-2">
-                <Label className="text-sm font-medium text-slate-600">Try it — paste a real subject</Label>
-                <Input className="h-10 text-base rounded-md border-slate-200 bg-white" value={sample} onChange={(e) => setSample(e.target.value)} placeholder="e.g. Re: Pre-Assessment Notice – ABC Ltd" />
-                <p className={cn(
-                  "text-base flex items-center gap-1.5 min-h-6",
-                  result === "match" && "text-emerald-700", result === "no" && "text-slate-500", result === "invalid" && "text-red-600"
-                )}>
-                  {result === "match" && (<><CheckCircle2 className="h-5 w-5" /> This subject would match{wordingCount > 1 && test.matched ? <> — via <span className="font-mono text-sm">{test.matched}</span></> : "."}</>)}
-                  {result === "no" && (<><XCircle className="h-5 w-5" /> This subject would not match.</>)}
-                  {result === "invalid" && (<><XCircle className="h-5 w-5" /> One of the lines isn't a valid regular expression.</>)}
-                </p>
-              </div>
-
-              <div className="grid sm:grid-cols-2 gap-3">
-                <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                  <Switch checked={draft.is_ignore} onCheckedChange={(v) => setDraft({ ...draft, is_ignore: v, is_notify: v ? false : draft.is_notify })} className="mt-0.5" />
-                  <span className="text-base text-slate-700">
-                    Ignore matching emails
-                    <span className="block text-sm text-slate-500 mt-0.5">Don't store them or open a case — matching emails stay in Gmail.</span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-                  <Switch checked={draft.is_notify} onCheckedChange={(v) => setDraft({ ...draft, is_notify: v, is_ignore: v ? false : draft.is_ignore })} className="mt-0.5" />
-                  <span className="text-base text-slate-700">
-                    Flag as an important notification
-                    <span className="block text-sm text-slate-500 mt-0.5">Store it and flag it urgent in Needs Review, so someone acts on it — no task or case is created.</span>
-                  </span>
-                </label>
-              </div>
-
-              {(draft.is_ignore || draft.is_notify) && (
-                <div className="grid sm:grid-cols-[11rem_1fr] gap-x-5 gap-y-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-medium text-slate-600">Sender match type</Label>
-                    <SearchSelect
-                      className="w-full"
-                      value={draft.sender_match_type}
-                      onChange={(v) => setDraft({ ...draft, sender_match_type: v as Draft["sender_match_type"] })}
-                      options={[{ value: "contains", label: "Contains text" }, { value: "regex", label: "Regular expression" }]}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-medium text-slate-600">Sender <span className="text-slate-400 font-normal">(optional)</span></Label>
-                    <Input
-                      className="h-10 text-base rounded-md border-slate-200 font-mono bg-white"
-                      value={draft.sender_pattern}
-                      onChange={(e) => setDraft({ ...draft, sender_pattern: e.target.value })}
-                      placeholder="e.g. marketing@sltd.co.ke"
-                    />
-                    <p className="text-sm text-slate-400">Only match mail from this sender address (not case-sensitive). Leave blank to match any sender.</p>
-                  </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-2">
+                  <Label className="text-sm font-medium text-slate-600">Try it — paste a real subject</Label>
+                  <Input className="h-10 text-base rounded-md border-slate-200 bg-white" value={sample} onChange={(e) => setSample(e.target.value)} placeholder="e.g. Re: Pre-Assessment Notice – ABC Ltd" />
+                  <p className={cn(
+                    "text-base flex items-center gap-1.5 min-h-6",
+                    result === "match" && "text-emerald-700", result === "no" && "text-slate-500", result === "invalid" && "text-red-600"
+                  )}>
+                    {result === "match" && (<><CheckCircle2 className="h-5 w-5" /> This subject would match{wordingCount > 1 && test.matched ? <> — via <span className="font-mono text-sm">{test.matched}</span></> : "."}</>)}
+                    {result === "no" && (<><XCircle className="h-5 w-5" /> This subject would not match.</>)}
+                    {result === "invalid" && (<><XCircle className="h-5 w-5" /> One of the lines isn't a valid regular expression.</>)}
+                  </p>
                 </div>
-              )}
+              </Step>
 
-              <div className="space-y-1.5">
-                <Label className="text-sm font-medium text-slate-600">Category</Label>
-                {draft.is_ignore ? (
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-500">
-                    Ignored emails aren't stored and never open a case — an ignore rule needs no category.
-                  </div>
-                ) : draft.is_notify ? (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-base text-slate-600">
-                    Notifications are stored and flagged urgent in Needs Review — no category needed, since a case is never created.
-                  </div>
-                ) : (
+              {/* 3 - the outcome detail: only a classify rule has a category to pick */}
+              {!draft.is_ignore && !draft.is_notify && (
+                <Step n={3} title="Which category?" hint="What kind of KRA email this is — the category decides whether a case is opened or updated.">
                   <SearchSelect
                     className="w-full"
                     value={draft.category_key}
@@ -493,35 +521,42 @@ export function RulesPanel({
                     placeholder="Choose a category…"
                     options={categories.map((c) => ({ value: c.key, label: c.name }))}
                   />
-                )}
-              </div>
+                </Step>
+              )}
 
-              <div className="grid sm:grid-cols-2 gap-x-5 gap-y-5">
-                <div className="space-y-1.5">
-                  <Label className="text-sm font-medium text-slate-600">Confidence (%)</Label>
-                  <Input type="number" min={0} max={100} className="h-10 text-base rounded-md border-slate-200" value={draft.confidence} onChange={(e) => setDraft({ ...draft, confidence: e.target.value })} />
-                  <p className="text-sm text-slate-400">80 or more is handled automatically; less goes to Needs Review.</p>
+              {/* Last - tuning and housekeeping */}
+              <Step
+                n={draft.is_ignore || draft.is_notify ? 3 : 4}
+                title="Settings"
+                hint="Usually fine as they are."
+              >
+                <div className="grid sm:grid-cols-2 gap-x-5 gap-y-5">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium text-slate-600">Confidence (%)</Label>
+                    <Input type="number" min={0} max={100} className="h-10 text-base rounded-md border-slate-200" value={draft.confidence} onChange={(e) => setDraft({ ...draft, confidence: e.target.value })} />
+                    <p className="text-sm text-slate-400">80 or more is handled automatically; less goes to Needs Review.</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium text-slate-600">Order</Label>
+                    <Input type="number" className="h-10 text-base rounded-md border-slate-200" value={draft.sort_order} onChange={(e) => setDraft({ ...draft, sort_order: e.target.value })} />
+                    <p className="text-sm text-slate-400">Lower numbers are tried first; the first match wins. Ignore rules are checked before notifications, which are checked before classification.</p>
+                  </div>
                 </div>
+
                 <div className="space-y-1.5">
-                  <Label className="text-sm font-medium text-slate-600">Order</Label>
-                  <Input type="number" className="h-10 text-base rounded-md border-slate-200" value={draft.sort_order} onChange={(e) => setDraft({ ...draft, sort_order: e.target.value })} />
-                  <p className="text-sm text-slate-400">Lower numbers are tried first; the first match wins. Ignore rules are checked before notifications, which are checked before classification.</p>
+                  <Label className="text-sm font-medium text-slate-600">Notes <span className="text-slate-400 font-normal">(optional)</span></Label>
+                  <Textarea rows={2} className="resize-none text-base rounded-md border-slate-200" value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} />
                 </div>
-              </div>
 
-              <div className="space-y-1.5">
-                <Label className="text-sm font-medium text-slate-600">Notes <span className="text-slate-400 font-normal">(optional)</span></Label>
-                <Textarea rows={2} className="resize-none text-base rounded-md border-slate-200" value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} />
-              </div>
-
-              <label className="flex items-center gap-3 cursor-pointer">
-                <Switch checked={draft.is_active} onCheckedChange={(v) => setDraft({ ...draft, is_active: v })} />
-                <span className="text-base text-slate-700">Rule is active</span>
-              </label>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <Switch checked={draft.is_active} onCheckedChange={(v) => setDraft({ ...draft, is_active: v })} />
+                  <span className="text-base text-slate-700">Rule is active</span>
+                </label>
+              </Step>
             </div>
           )}
 
-          <div className="border-t border-slate-200 bg-white px-6 py-3.5 shrink-0 flex items-center justify-end gap-2.5">
+          <div className="border-t border-slate-200 bg-white px-8 py-4 shrink-0 flex items-center justify-end gap-2.5">
             <Button variant="ghost" size="sm" onClick={() => setDraft(null)} disabled={saving} className="h-11 px-5 text-base font-medium text-slate-600 rounded-lg">Cancel</Button>
             <Button size="sm" onClick={save} disabled={saving} className="h-11 px-6 text-base font-semibold bg-custom-blue hover:bg-custom-blue/90 text-white rounded-lg shadow-xs gap-2">
               {saving && <Loader2 className="w-5 h-5 animate-spin" />} {draft?.id ? "Save rule" : "Add rule"}
