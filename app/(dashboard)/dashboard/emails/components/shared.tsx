@@ -118,6 +118,8 @@ export interface RuleRow {
   id: string
   match_type: "contains" | "regex"
   pattern: string
+  // Alternative subject wordings; the rule matches the primary pattern OR any of these.
+  extra_patterns: string[]
   category_key: string
   confidence: number
   sort_order: number

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { authorize, fail } from "@/lib/email-center/api"
 import { DEFAULT_SUBJECT_RULES } from "@/lib/email-center/rules"
-import { RULES_TABLE, invalidateRulesCache } from "@/lib/email-center/rule-store"
+import {
+  EXTRA_MIGRATION_MESSAGE, RULES_TABLE, RULE_COLUMNS, RULE_COLUMNS_BASE, invalidateRulesCache, isMissingExtraColumn, normalizeRuleRow,
+} from "@/lib/email-center/rule-store"
 import { parseRuleBody } from "@/lib/email-center/rule-validation"
 
-const COLUMNS = "id, match_type, pattern, category_key, confidence, sort_order, is_active, notes, is_ignore, is_notify, sender_pattern, sender_match_type, updated_at"
 
 // GET /api/email-center/rules — every rule, in the order they are tried.
 // `source: "builtin"` means the table doesn't exist yet (migration not applied): the built-in list
@@ -12,17 +13,18 @@ const COLUMNS = "id, match_type, pattern, category_key, confidence, sort_order, 
 export async function GET(request: NextRequest) {
   try {
     const { sb } = await authorize(request)
-    const { data, error } = await sb
-      .from(RULES_TABLE)
-      .select(COLUMNS)
-      .order("sort_order", { ascending: true })
-      .order("created_at", { ascending: true })
+    const read = (columns: string) =>
+      sb.from(RULES_TABLE).select(columns).order("sort_order", { ascending: true }).order("created_at", { ascending: true })
+    let { data, error } = await read(RULE_COLUMNS)
+    // Column from a later migration not there yet: read without it, every rule simply has no extra wordings.
+    if (isMissingExtraColumn(error)) ({ data, error } = await read(RULE_COLUMNS_BASE))
 
     if (error) {
       const rules = DEFAULT_SUBJECT_RULES.map((r, i) => ({
         id: `builtin-${i}`,
         match_type: r.match_type,
         pattern: r.pattern,
+        extra_patterns: [] as string[],
         category_key: r.category_key,
         confidence: r.confidence,
         sort_order: (i + 1) * 10,
@@ -36,7 +38,7 @@ export async function GET(request: NextRequest) {
       }))
       return NextResponse.json({ success: true, source: "builtin", rules })
     }
-    return NextResponse.json({ success: true, source: "database", rules: (data ?? []).map((r: any) => ({ ...r, confidence: Number(r.confidence) })) })
+    return NextResponse.json({ success: true, source: "database", rules: (data ?? []).map(normalizeRuleRow) })
   } catch (error) {
     return fail(error, "rules GET")
   }
@@ -56,11 +58,14 @@ export async function POST(request: NextRequest) {
       sortOrder = ((last?.[0]?.sort_order as number | undefined) ?? 0) + 10
     }
 
-    const { data, error } = await sb
-      .from(RULES_TABLE)
-      .insert({ ...parsed.value, sort_order: sortOrder, created_by_id: actor.id, updated_by_id: actor.id })
-      .select(COLUMNS)
-      .single()
+    const row = { ...parsed.value, sort_order: sortOrder, created_by_id: actor.id, updated_by_id: actor.id }
+    let { data, error } = await sb.from(RULES_TABLE).insert(row).select(RULE_COLUMNS).single()
+    if (isMissingExtraColumn(error)) {
+      // Migration not applied: a normal single-wording rule can still be saved; several wordings can't.
+      if (parsed.value.extra_patterns?.length) return NextResponse.json({ success: false, error: EXTRA_MIGRATION_MESSAGE }, { status: 409 })
+      const { extra_patterns: _omit, ...withoutExtras } = row
+      ;({ data, error } = await sb.from(RULES_TABLE).insert(withoutExtras).select(RULE_COLUMNS_BASE).single())
+    }
     if (error) {
       if ((error as any).code === "23505") {
         return NextResponse.json({ success: false, error: "A rule with this exact pattern already exists." }, { status: 409 })
@@ -68,7 +73,7 @@ export async function POST(request: NextRequest) {
       throw new Error(error.message)
     }
     invalidateRulesCache()
-    return NextResponse.json({ success: true, rule: { ...data, confidence: Number(data.confidence) } })
+    return NextResponse.json({ success: true, rule: normalizeRuleRow(data) })
   } catch (error) {
     return fail(error, "rules POST")
   }

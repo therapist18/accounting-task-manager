@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
-import { AlertCircle, Filter, History, Link2, Loader2, Plus, RefreshCw, Wifi, WifiOff } from "lucide-react"
+import { AlertCircle, Copy, Eye, EyeOff, Filter, History, Link2, Loader2, Pencil, Plus, RefreshCw, Unlink, Wifi, WifiOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import ClientCategoryFilter from "@/app/generic-components/ClientCategoryFilter"
 import {
   companyMatchesCategoryFilters,
@@ -12,7 +13,7 @@ import {
   type FilterState,
 } from "@/app/generic-components/companyCategoryFilters"
 import { cn } from "@/lib/utils"
-import type { Company } from "../../companies/database"
+import type { Company, KraEmailCredentials } from "../../companies/database"
 import { Pagination } from "./Pagination"
 import { HEAD_BLUE, TableLoading, SortTh, TD_CLASS, TH_CLASS, useSortedRows, zebraRow } from "./table"
 import {
@@ -30,6 +31,8 @@ type View = "all" | "connected" | "not_connected" | "unlinked"
 
 interface CompanyRowData {
   company: Company
+  kraEmail: string
+  kraPassword: string
   accounts: AccountRow[]
   state: ConnState
   lastSync: string
@@ -42,6 +45,8 @@ const STATE_RANK: Record<ConnState, number> = { connected: 0, reconnect: 1, not_
 
 const COMPANY_SORT: Record<string, (r: CompanyRowData) => string | number> = {
   company: (r) => r.company.company_name ?? "",
+  kra_email: (r) => r.kraEmail.toLowerCase(),
+  kra_password: (r) => (r.kraPassword ? 1 : 0),
   state: (r) => STATE_RANK[r.state],
   mailboxes: (r) => r.accounts.length,
   last_sync: (r) => r.lastSync,
@@ -75,9 +80,87 @@ function PushBadge({ live }: { live: boolean }) {
   )
 }
 
+// The password stays masked until its eye is clicked; copy works either way. With no password saved
+// the cell is an input; with one saved, the pencil turns it back into an input to change it.
+// `revealAll` is the toolbar's global toggle: flipping it sets every row, and a row's own eye can
+// still override it afterwards.
+function KraPassword({ value, revealAll, onSave }: { value: string; revealAll: boolean; onSave: (password: string) => Promise<void> }) {
+  const [shown, setShown] = useState(revealAll)
+  useEffect(() => setShown(revealAll), [revealAll])
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState("")
+  const [saving, setSaving] = useState(false)
+
+  if (!value || editing) {
+    const save = async () => {
+      const password = draft.trim()
+      if (!password) return
+      setSaving(true)
+      try {
+        await onSave(password)
+        toast.success("Password saved.")
+        setDraft("")
+        setEditing(false)
+      } catch (e: any) {
+        toast.error(e.message ?? "Could not save the password.")
+      } finally {
+        setSaving(false)
+      }
+    }
+    const cancel = () => { setDraft(""); setEditing(false) }
+    return (
+      <div className="flex items-center gap-1.5">
+        <Input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") save(); else if (e.key === "Escape" && editing) cancel() }}
+          placeholder={editing ? "New password" : "Enter password"}
+          disabled={saving}
+          autoComplete="off"
+          autoFocus={editing}
+          className="h-9 w-40 text-base font-mono"
+        />
+        <Button size="sm" onClick={save} disabled={saving || !draft.trim()} className="h-9 px-3 rounded-md bg-custom-blue hover:bg-custom-blue/90 text-white text-base font-medium">
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}
+        </Button>
+        {editing && (
+          <Button variant="outline" size="sm" onClick={cancel} disabled={saving} className="h-9 px-3 rounded-md border-slate-200 text-base font-medium">
+            Cancel
+          </Button>
+        )}
+      </div>
+    )
+  }
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value)
+      toast.success("Password copied.")
+    } catch {
+      toast.error("Could not copy to the clipboard.")
+    }
+  }
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="font-mono text-slate-800 break-all">{shown ? value : "•".repeat(Math.min(value.length, 12))}</span>
+      <button type="button" onClick={() => setShown((v) => !v)} className="p-1 rounded text-slate-500 hover:bg-slate-100 shrink-0" title={shown ? "Hide password" : "Show password"}>
+        {shown ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+      </button>
+      <button type="button" onClick={copy} className="p-1 rounded text-slate-500 hover:bg-slate-100 shrink-0" title="Copy password">
+        <Copy className="w-4 h-4" />
+      </button>
+      <button type="button" onClick={() => setEditing(true)} className="p-1 rounded text-slate-500 hover:bg-slate-100 shrink-0" title="Change password">
+        <Pencil className="w-4 h-4" />
+      </button>
+    </div>
+  )
+}
+
 export function MailboxesPanel({
   accounts,
   companies,
+  kraCredentials,
+  onKraPasswordSave,
   search,
   onAccountLinked,
   onSynced,
@@ -88,6 +171,10 @@ export function MailboxesPanel({
   accounts: AccountRow[]
   // Full company records (the Client Category Filter needs their ACC/IMM/Audit/Sheria dates).
   companies: Company[]
+  // company id → the KRA portal mailbox login stored on the company record.
+  kraCredentials: Map<string, KraEmailCredentials>
+  // Saves a password for a company that has none yet; rejects if the save fails.
+  onKraPasswordSave: (companyId: string, password: string) => Promise<void>
   search: string
   // Local merge — the company name is already known, so linking a mailbox never needs a network round
   // trip beyond the PATCH itself.
@@ -103,6 +190,7 @@ export function MailboxesPanel({
   const [view, setView] = useState<View>("all")
   const [categoryFilters, setCategoryFilters] = useState<FilterState | null>(DEFAULT_CATEGORY_FILTERS)
   const [categoryFilterOpen, setCategoryFilterOpen] = useState(false)
+  const [revealPasswords, setRevealPasswords] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [itemsPerPage, setItemsPerPage] = useState(50)
   const [page, setPage] = useState(0)
@@ -132,16 +220,19 @@ export function MailboxesPanel({
       .map((company) => {
         const linked = accountsByCompany.get(String(company.id)) ?? []
         const active = linked.filter((a) => a.status === "active")
+        const creds = kraCredentials.get(String(company.id))
         return {
           company,
+          kraEmail: (creds?.kra_email_address ?? company.kra_email_address ?? "").trim().toLowerCase(),
+          kraPassword: creds?.kra_email_password ?? "",
           accounts: linked,
           state: (active.length ? "connected" : linked.length ? "reconnect" : "not_connected") as ConnState,
           lastSync: linked.map((a) => a.last_synced_at ?? "").sort().pop() ?? "",
           live: linked.filter(watchActive).length,
         }
       })
-      .filter((r) => !q || `${r.company.company_name} ${r.company.kra_pin ?? ""} ${r.accounts.map((a) => a.email).join(" ")}`.toLowerCase().includes(q))
-  }, [companies, categoryFilters, accountsByCompany, q])
+      .filter((r) => !q || `${r.company.company_name} ${r.company.kra_pin ?? ""} ${r.kraEmail} ${r.accounts.map((a) => a.email).join(" ")}`.toLowerCase().includes(q))
+  }, [companies, kraCredentials, categoryFilters, accountsByCompany, q])
 
   const counts = {
     all: baseRows.length,
@@ -172,13 +263,23 @@ export function MailboxesPanel({
     setBusy(a.id)
     try {
       await api(`/api/email-center/accounts/${a.id}`, { method: "PATCH", body: JSON.stringify({ company_id: companyId || null }) })
-      toast.success(`${a.email} linked.`)
+      toast.success(companyId ? `${a.email} linked.` : `${a.email} unlinked.`)
       onAccountLinked(a.id, companyId || null)
     } catch (e: any) {
       toast.error(e.message)
     } finally {
       setBusy(null)
     }
+  }
+
+  // Moving or unlinking only changes where NEW mail is matched — emails and cases already pulled in
+  // keep their company — so say so before doing it.
+  const reassign = (a: AccountRow, fromName: string, toCompanyId: string | null) => {
+    const toName = toCompanyId ? companies.find((c) => String(c.id) === toCompanyId)?.company_name ?? "the selected company" : null
+    const message = toName
+      ? `Move ${a.email} from ${fromName} to ${toName}?\n\nNew emails will be matched to ${toName}. Emails already synced stay with ${fromName}.`
+      : `Unlink ${a.email} from ${fromName}?\n\nNew emails won't be matched to any company until it is linked again. Emails already synced stay with ${fromName}.`
+    if (window.confirm(message)) assign(a, toCompanyId ?? "")
   }
 
   // Syncs each of the given mailboxes in turn (a company can have more than one).
@@ -276,6 +377,17 @@ export function MailboxesPanel({
           >
             <Filter className="h-5 w-5" /> Client category
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setRevealPasswords((v) => !v)}
+            disabled={showingUnlinked}
+            className={cn(PILL_BUTTON_CLASS, revealPasswords && PILL_BUTTON_ACTIVE_CLASS)}
+            title={revealPasswords ? "Mask every KRA email password" : "Show every KRA email password"}
+          >
+            {revealPasswords ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+            {revealPasswords ? "Hide passwords" : "Show passwords"}
+          </Button>
           <ClientCategoryFilter
             open={categoryFilterOpen}
             onOpenChange={setCategoryFilterOpen}
@@ -292,20 +404,22 @@ export function MailboxesPanel({
       <div className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
         <div className="overflow-auto flex-1 min-h-0 custom-scrollbar">
           {!showingUnlinked ? (
-            <table className="w-full min-w-[1150px] border-separate border-spacing-0 text-base">
+            <table className="w-full min-w-[1650px] border-separate border-spacing-0 text-base">
               <thead className="sticky top-0 z-30 bg-white shadow-xs">
                 <tr>
                   <SortTh tone="blue" id="#" sort={companySort.sort} onSort={companySort.toggle} className="w-16 text-center">#</SortTh>
                   <SortTh tone="blue" id="company" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[260px]">Company</SortTh>
+                  <SortTh tone="blue" id="kra_email" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[240px]">KRA email</SortTh>
+                  <SortTh tone="blue" id="kra_password" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[200px]">KRA email password</SortTh>
                   <SortTh tone="blue" id="state" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[170px]">Status</SortTh>
-                  <SortTh tone="blue" id="mailboxes" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[260px]">Mailbox</SortTh>
+                  <SortTh tone="blue" id="mailboxes" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[340px]">Mailbox</SortTh>
                   <SortTh tone="blue" id="last_sync" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[150px]">Last sync</SortTh>
                   <SortTh tone="blue" id="push" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[150px]">Push</SortTh>
                   <SortTh tone="blue" id="actions" sort={companySort.sort} onSort={companySort.toggle} className="min-w-[250px] text-left border-r-0">Actions</SortTh>
                 </tr>
               </thead>
               <tbody>
-                {loading && <TableLoading cols={7} />}
+                {loading && <TableLoading cols={9} />}
                 {!loading && pageCompanyRows.map((r, index) => {
                   const cid = String(r.company.id)
                   const key = `c-${cid}`
@@ -317,6 +431,10 @@ export function MailboxesPanel({
                         <div className="font-semibold text-slate-900 leading-snug">{r.company.company_name}</div>
                         {r.company.kra_pin && <div className="text-sm text-slate-500 mt-0.5 font-mono">{r.company.kra_pin}</div>}
                       </td>
+                      <td className={TD_CLASS}>
+                        {r.kraEmail ? <div className="text-slate-800 break-all">{r.kraEmail}</div> : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className={TD_CLASS}><KraPassword value={r.kraPassword} revealAll={revealPasswords} onSave={(pw) => onKraPasswordSave(cid, pw)} /></td>
                       <td className={cn(TD_CLASS, "whitespace-nowrap")}><StateBadge state={r.state} /></td>
                       <td className={TD_CLASS}>
                         {connectedOnce ? (
@@ -330,6 +448,19 @@ export function MailboxesPanel({
                                     <span className="truncate max-w-[16rem]">{a.last_sync_error}</span>
                                   </div>
                                 )}
+                                <div className="flex items-center gap-1.5 mt-1">
+                                  <SearchSelect
+                                    className="w-48"
+                                    value=""
+                                    disabled={busy === a.id}
+                                    onChange={(companyId) => { if (companyId && companyId !== cid) reassign(a, r.company.company_name, companyId) }}
+                                    placeholder="Move to company…"
+                                    options={linkOptions.filter((o) => o.value !== cid)}
+                                  />
+                                  <Button variant="outline" size="sm" disabled={busy === a.id} onClick={() => reassign(a, r.company.company_name, null)} className="h-9 px-3 gap-1.5 rounded-md border-slate-200 text-base font-medium" title="Detach this mailbox from the company">
+                                    {busy === a.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Unlink className="w-4 h-4 text-slate-600" />} Unlink
+                                  </Button>
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -390,7 +521,7 @@ export function MailboxesPanel({
                   )
                 })}
                 {!loading && pageCompanyRows.length === 0 && (
-                  <tr><td colSpan={7} className="py-16 text-center text-slate-400 text-base">
+                  <tr><td colSpan={9} className="py-16 text-center text-slate-400 text-base">
                     {companies.length === 0 ? "No companies loaded." : "No companies match this filter."}
                   </td></tr>
                 )}

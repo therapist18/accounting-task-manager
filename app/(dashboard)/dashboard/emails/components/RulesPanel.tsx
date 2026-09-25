@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, CheckCircle2, Loader2, Mail, Pencil, Plus, Trash2, XCircle } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Info, Loader2, Mail, Pencil, Plus, Trash2, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -37,15 +37,24 @@ const SORT_VALUE: Record<string, (r: RuleRow) => string | number> = {
 
 const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
-// Same matching the server does (contains = escaped, case-insensitive), so the tester never disagrees with ingestion.
-function testRule(matchType: string, pattern: string, sample: string): "match" | "no" | "invalid" | "empty" {
-  if (!pattern.trim() || !sample.trim()) return "empty"
-  try {
-    const re = new RegExp(matchType === "contains" ? escapeRegex(pattern.trim()) : pattern, "i")
-    return re.test(sample) ? "match" : "no"
-  } catch {
-    return "invalid"
+// A rule's subject wordings, one per line in the editor: the first is the rule's primary pattern, the rest
+// are alternative wordings. The rule matches when ANY of them matches.
+const splitWordings = (text: string) => text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+
+// Same matching the server does (contains = escaped, case-insensitive, any wording), so the tester never
+// disagrees with ingestion. Reports which wording matched, which is what makes a long list easy to debug.
+function testWordings(matchType: string, wordings: string[], sample: string): { state: "match" | "no" | "invalid" | "empty"; matched?: string } {
+  if (!wordings.length || !sample.trim()) return { state: "empty" }
+  let invalid = false
+  for (const w of wordings) {
+    try {
+      const re = new RegExp(matchType === "contains" ? escapeRegex(w) : w, "i")
+      if (re.test(sample)) return { state: "match", matched: w }
+    } catch {
+      invalid = true
+    }
   }
+  return { state: invalid ? "invalid" : "no" }
 }
 
 type Draft = {
@@ -53,7 +62,8 @@ type Draft = {
   is_ignore: boolean
   is_notify: boolean
   match_type: "contains" | "regex"
-  pattern: string
+  // Subject wordings, one per line: the first is the rule's primary pattern, the rest are alternatives.
+  wordings: string
   sender_match_type: "contains" | "regex"
   sender_pattern: string
   category_key: string
@@ -64,7 +74,7 @@ type Draft = {
 }
 
 const emptyDraft = (nextOrder: number): Draft => ({
-  id: null, is_ignore: false, is_notify: false, match_type: "contains", pattern: "", sender_match_type: "contains", sender_pattern: "",
+  id: null, is_ignore: false, is_notify: false, match_type: "contains", wordings: "", sender_match_type: "contains", sender_pattern: "",
   category_key: "", confidence: "90", sort_order: String(nextOrder), notes: "", is_active: true,
 })
 
@@ -91,7 +101,7 @@ export function RulesPanel({
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return rules
-    return rules.filter((r) => `${r.pattern} ${r.sender_pattern ?? ""} ${catByKey.get(r.category_key)?.name ?? r.category_key} ${r.notes ?? ""}`.toLowerCase().includes(q))
+    return rules.filter((r) => `${r.pattern} ${(r.extra_patterns ?? []).join(" ")} ${r.sender_pattern ?? ""} ${catByKey.get(r.category_key)?.name ?? r.category_key} ${r.notes ?? ""}`.toLowerCase().includes(q))
   }, [rules, search, catByKey])
 
   const { sort, sorted, toggle } = useSortedRows(visible, SORT_VALUE, { key: "order", dir: "asc" })
@@ -100,6 +110,7 @@ export function RulesPanel({
   const [sample, setSample] = useState("")
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState<RuleRow | null>(null)
+  const [infoOpen, setInfoOpen] = useState(false)
 
   const nextOrder = (rules.reduce((max, r) => Math.max(max, r.sort_order), 0) || 0) + 10
 
@@ -107,7 +118,7 @@ export function RulesPanel({
   const openEdit = (r: RuleRow) => {
     setSample("")
     setDraft({
-      id: r.id, is_ignore: r.is_ignore, is_notify: r.is_notify, match_type: r.match_type, pattern: r.pattern,
+      id: r.id, is_ignore: r.is_ignore, is_notify: r.is_notify, match_type: r.match_type, wordings: [r.pattern, ...(r.extra_patterns ?? [])].filter(Boolean).join("\n"),
       sender_match_type: r.sender_match_type ?? "contains", sender_pattern: r.sender_pattern ?? "",
       category_key: r.category_key,
       confidence: String(Math.round(r.confidence * 100)), sort_order: String(r.sort_order), notes: r.notes ?? "", is_active: r.is_active,
@@ -116,7 +127,9 @@ export function RulesPanel({
 
   const save = async () => {
     if (!draft) return
-    if (!draft.pattern.trim() && !draft.sender_pattern.trim()) return toast.error("Set a subject pattern or a sender to match.")
+    const lines = splitWordings(draft.wordings)
+    if (!lines.length && !draft.sender_pattern.trim()) return toast.error("Add at least one subject wording, or a sender, to match.")
+    if (!draft.is_ignore && !draft.is_notify && !lines.length) return toast.error("A classify rule needs at least one subject wording.")
     if (!draft.is_ignore && !draft.is_notify && !draft.category_key) return toast.error("Choose a category.")
     const confidence = Number(draft.confidence) / 100
     if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) return toast.error("Confidence must be between 0 and 100.")
@@ -124,7 +137,8 @@ export function RulesPanel({
       is_ignore: draft.is_ignore,
       is_notify: draft.is_notify,
       match_type: draft.match_type,
-      pattern: draft.pattern.trim(),
+      pattern: lines[0] ?? "",
+      extra_patterns: lines.slice(1),
       sender_pattern: draft.sender_pattern.trim() || null,
       sender_match_type: draft.sender_match_type,
       // The table keeps category_key NOT NULL; ignore rules carry "system_noise" and notify rules
@@ -178,21 +192,23 @@ export function RulesPanel({
     }
   }
 
-  const result = draft ? testRule(draft.match_type, draft.pattern, sample) : "empty"
+  const wordingCount = draft ? splitWordings(draft.wordings).length : 0
+  const test = draft ? testWordings(draft.match_type, splitWordings(draft.wordings), sample) : { state: "empty" as const, matched: undefined }
+  const result = test.state
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3">
-      <div className="shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl shadow-sm px-5 py-4">
-        <div>
+      <div className="shrink-0 flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl shadow-sm px-5 py-3">
+        <div className="flex items-center gap-2.5">
           <p className="text-lg font-semibold text-slate-900">Classification rules</p>
-          <p className="text-base text-slate-500 mt-1 max-w-3xl leading-relaxed">
-            Each rule matches an email's subject (and, for ignore and notification rules, its
-            sender too). A <span className="font-medium text-slate-600">Classify</span> rule picks the email's category —
-            at 80% confidence or more it is handled automatically, below that it goes to Needs Review. An <span className="font-medium text-slate-600">Ignore</span> rule drops
-            matching email without storing it or opening a case — it stays in Gmail. An <span className="font-medium text-slate-600">Important notification</span> rule is stored and
-            flagged urgent in Needs Review but never creates a task or case. Rules are tried in order and the first match wins.
-            Changes apply to new emails only — emails already stored keep the classification they have.
-          </p>
+          <button
+            type="button"
+            onClick={() => setInfoOpen(true)}
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full border border-slate-200 bg-slate-50 text-base font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
+            title="How rules work"
+          >
+            <Info className="h-5 w-5 text-custom-blue" /> How rules work
+          </button>
         </div>
         <Button size="sm" onClick={openNew} disabled={readOnly} className={cn(PRIMARY_PILL_BUTTON_CLASS, "shrink-0")}>
           <Plus className="w-5 h-5" /> Add rule
@@ -222,7 +238,7 @@ export function RulesPanel({
                 <SortTh tone="blue" id="#" sort={sort} onSort={toggle} className="w-16 text-center">#</SortTh>
                 <SortTh tone="blue" id="order" sort={sort} onSort={toggle} className="w-24 text-left">Order</SortTh>
                 <SortTh tone="blue" id="match" sort={sort} onSort={toggle} className="w-32 text-left">Match</SortTh>
-                <SortTh tone="blue" id="pattern" sort={sort} onSort={toggle} className="min-w-[320px] text-left">Pattern / sender</SortTh>
+                <SortTh tone="blue" id="pattern" sort={sort} onSort={toggle} className="min-w-[320px] text-left">Subject wordings / sender</SortTh>
                 <SortTh tone="blue" id="category" sort={sort} onSort={toggle} className="min-w-[240px] text-left">Category</SortTh>
                 <SortTh tone="blue" id="confidence" sort={sort} onSort={toggle} className="w-36 text-left">Confidence</SortTh>
                 <SortTh tone="blue" id="active" sort={sort} onSort={toggle} className="w-28 text-left">Active</SortTh>
@@ -244,7 +260,12 @@ export function RulesPanel({
                       </span>
                     </td>
                     <td className={cn(TD_CLASS, "font-mono text-sm text-slate-800 break-all")}>
-                      {r.pattern || <span className="font-sans text-slate-400">Any subject</span>}
+                      {(() => {
+                        const wordings = [r.pattern, ...(r.extra_patterns ?? [])].filter(Boolean)
+                        return wordings.length
+                          ? wordings.map((w, i) => <div key={i}>{i > 0 && <span className="font-sans text-slate-400">or </span>}{w}</div>)
+                          : <span className="font-sans text-slate-400">Any subject</span>
+                      })()}
                       {r.sender_pattern && (
                         <div className="flex items-center gap-1.5 font-sans text-sm text-slate-500 mt-0.5">
                           <Mail className="h-3.5 w-3.5 shrink-0 text-slate-400" />
@@ -296,6 +317,71 @@ export function RulesPanel({
         </div>
       </div>
 
+      {/* How rules work */}
+      <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+        <DialogContent className="max-w-2xl w-[96vw] max-h-[92vh] p-0 gap-0 border border-slate-200 shadow-xl rounded-2xl overflow-hidden bg-white flex flex-col">
+          <div className="flex items-center gap-4 border-b border-slate-200 pl-6 pr-14 py-4 shrink-0">
+            <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-custom-blue/10 text-custom-blue shrink-0">
+              <Info className="h-6 w-6" />
+            </span>
+            <div>
+              <DialogTitle className="text-2xl font-bold tracking-tight text-slate-900">How rules work</DialogTitle>
+              <DialogDescription className="text-base text-slate-500 mt-0.5">What a rule matches, and what happens to an email when it does.</DialogDescription>
+            </div>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-6 py-5 space-y-5 text-base text-slate-700 leading-relaxed">
+            <section>
+              <h3 className="text-base font-semibold text-slate-900 mb-1.5">What a rule matches</h3>
+              <p>
+                A rule matches an email's <span className="font-medium text-slate-900">subject</span>. Ignore and notification rules can also match
+                the <span className="font-medium text-slate-900">sender</span> address, alone or together with the subject.
+                A rule can list <span className="font-medium text-slate-900">several subject wordings</span> — one per line — and it matches when the
+                subject contains <span className="font-medium text-slate-900">any one</span> of them.
+              </p>
+            </section>
+
+            <section>
+              <h3 className="text-base font-semibold text-slate-900 mb-2">What a rule does</h3>
+              <div className="grid gap-2.5">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="font-semibold text-slate-900">Classify</p>
+                  <p className="text-slate-600">Picks the email's category. At <span className="font-medium">80% confidence or more</span> it is handled automatically (a case is opened when the category calls for one); below that it goes to Needs Review.</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="font-semibold text-slate-900">Ignore</p>
+                  <p className="text-slate-600">Drops the email without storing it or opening a case. It stays in Gmail.</p>
+                </div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                  <p className="font-semibold text-slate-900">Important notification</p>
+                  <p className="text-slate-600">Stores the email and flags it urgent in Needs Review, but never creates a task or case.</p>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h3 className="text-base font-semibold text-slate-900 mb-1.5">Order</h3>
+              <p>
+                Rules are tried in order (lowest number first) and the <span className="font-medium text-slate-900">first match wins</span>, so put specific rules above general ones.
+                Ignore rules are checked before notifications, and notifications before classification.
+              </p>
+            </section>
+
+            <section>
+              <h3 className="text-base font-semibold text-slate-900 mb-1.5">When changes apply</h3>
+              <p>
+                Changes apply to <span className="font-medium text-slate-900">new emails only</span> — emails already stored keep the classification they have.
+                Use <span className="font-medium text-slate-900">Reclassify</span> in the toolbar to run what's currently in Needs Review through the updated rules.
+              </p>
+            </section>
+          </div>
+
+          <div className="border-t border-slate-200 bg-white px-6 py-3.5 shrink-0 flex items-center justify-end">
+            <Button size="sm" onClick={() => setInfoOpen(false)} className="h-11 px-6 text-base font-semibold bg-custom-blue hover:bg-custom-blue/90 text-white rounded-lg shadow-xs">Got it</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Add / edit */}
       <Dialog open={!!draft} onOpenChange={(o) => !o && !saving && setDraft(null)}>
         <DialogContent className="max-w-2xl w-[96vw] max-h-[92vh] p-0 gap-0 border border-slate-200 shadow-xl rounded-2xl overflow-hidden bg-white flex flex-col">
@@ -317,14 +403,21 @@ export function RulesPanel({
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-sm font-medium text-slate-600">{draft.match_type === "regex" ? "Regular expression" : "Subject contains"} <span className="text-slate-400 font-normal">{(draft.is_ignore || draft.is_notify) && "(optional)"}</span></Label>
-                  <Input
-                    className={cn("h-10 text-base rounded-md border-slate-200 font-mono", result === "invalid" && "border-red-300")}
-                    value={draft.pattern}
-                    onChange={(e) => setDraft({ ...draft, pattern: e.target.value })}
-                    placeholder={draft.match_type === "regex" ? "e.g. pre-?assess(ment)?" : "e.g. Notice of Intention to Verify"}
+                  <Label className="text-sm font-medium text-slate-600">{draft.match_type === "regex" ? "Regular expressions" : "Subject wordings"} <span className="text-slate-400 font-normal">— one per line{(draft.is_ignore || draft.is_notify) && ", optional"}</span></Label>
+                  <Textarea
+                    rows={4}
+                    className={cn("text-base rounded-md border-slate-200 font-mono leading-relaxed", result === "invalid" && "border-red-300")}
+                    value={draft.wordings}
+                    onChange={(e) => setDraft({ ...draft, wordings: e.target.value })}
+                    placeholder={draft.match_type === "regex"
+                      ? "pre-?assess(ment)?\nnotice of pre.?assessment"
+                      : "Appointment Letter for Withholding VAT Agent\nNotice of intention to appoint as a withholding agent"}
                   />
-                  <p className="text-sm text-slate-400">Not case-sensitive. {draft.match_type === "contains" ? "Matches anywhere in the subject." : "Uses JavaScript regular-expression syntax."}{draft.is_ignore || draft.is_notify ? " Leave blank to match on the sender alone." : ""}</p>
+                  <p className="text-sm text-slate-400">
+                    Put each way this kind of subject can be worded on its own line — the rule matches when the subject contains <span className="font-medium text-slate-500">any</span> of them. Not case-sensitive.
+                    {draft.match_type === "regex" ? " Each line is a JavaScript regular expression." : ""}
+                    {draft.is_ignore || draft.is_notify ? " Leave blank to match on the sender alone." : ""}
+                  </p>
                 </div>
               </div>
 
@@ -335,9 +428,9 @@ export function RulesPanel({
                   "text-base flex items-center gap-1.5 min-h-6",
                   result === "match" && "text-emerald-700", result === "no" && "text-slate-500", result === "invalid" && "text-red-600"
                 )}>
-                  {result === "match" && (<><CheckCircle2 className="h-5 w-5" /> This subject would match.</>)}
+                  {result === "match" && (<><CheckCircle2 className="h-5 w-5" /> This subject would match{wordingCount > 1 && test.matched ? <> — via <span className="font-mono text-sm">{test.matched}</span></> : "."}</>)}
                   {result === "no" && (<><XCircle className="h-5 w-5" /> This subject would not match.</>)}
-                  {result === "invalid" && (<><XCircle className="h-5 w-5" /> That isn't a valid regular expression.</>)}
+                  {result === "invalid" && (<><XCircle className="h-5 w-5" /> One of the lines isn't a valid regular expression.</>)}
                 </p>
               </div>
 

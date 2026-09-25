@@ -6,6 +6,7 @@ export interface RuleInput {
   is_notify?: boolean
   match_type?: RuleMatchType
   pattern?: string
+  extra_patterns?: string[]
   sender_pattern?: string
   sender_match_type?: RuleMatchType
   category_key?: string
@@ -35,6 +36,21 @@ export function parseRuleBody(
     if (pattern.length > 300) return { ok: false, error: "Pattern is too long (300 characters max)." }
     value.pattern = pattern
   }
+  if ("extra_patterns" in body) {
+    if (!Array.isArray(body.extra_patterns)) return { ok: false, error: "Extra wordings must be a list." }
+    const seen = new Set<string>()
+    const list: string[] = []
+    for (const raw of body.extra_patterns) {
+      const w = typeof raw === "string" ? raw.trim() : ""
+      if (!w) continue
+      if (w.length > 300) return { ok: false, error: "A wording is too long (300 characters max)." }
+      if (seen.has(w.toLowerCase())) continue
+      seen.add(w.toLowerCase())
+      list.push(w)
+    }
+    if (list.length > 30) return { ok: false, error: "Too many wordings for one rule (30 max)." }
+    value.extra_patterns = list
+  }
   if ("sender_pattern" in body) {
     const sender_pattern = typeof body.sender_pattern === "string" ? body.sender_pattern.trim() : ""
     if (sender_pattern.length > 300) return { ok: false, error: "Sender pattern is too long (300 characters max)." }
@@ -61,6 +77,13 @@ export function parseRuleBody(
   if ("is_active" in body) value.is_active = !!body.is_active
   if ("notes" in body) value.notes = typeof body.notes === "string" && body.notes.trim() ? body.notes.trim().slice(0, 500) : null
 
+  // A wording is a wording: if the primary one was left empty, the first extra becomes the primary, and
+  // one that just repeats the primary is dropped.
+  if (value.extra_patterns) {
+    if (!value.pattern && !partial && value.extra_patterns.length) value.pattern = value.extra_patterns.shift()
+    if (value.pattern) value.extra_patterns = value.extra_patterns.filter((w) => w.toLowerCase() !== value.pattern!.toLowerCase())
+  }
+
   if (!partial) {
     // Ignore and notify rules are not mutually exclusive flags from the API; the UI enforces that.
     if (value.is_ignore && value.is_notify) return { ok: false, error: "A rule can't both ignore and notify." }
@@ -82,6 +105,11 @@ export function parseRuleBody(
   if (value.pattern && value.match_type) {
     if (!compileRule({ match_type: value.match_type, pattern: value.pattern })) {
       return { ok: false, error: "That isn't a valid regular expression." }
+    }
+  }
+  if (value.extra_patterns?.length && value.match_type) {
+    for (const w of value.extra_patterns) {
+      if (!compileRule({ match_type: value.match_type, pattern: w })) return { ok: false, error: `"${w}" isn't a valid regular expression.` }
     }
   }
   if (value.sender_pattern) {

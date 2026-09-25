@@ -36,6 +36,9 @@ export interface SubjectRule {
   id?: string
   match_type: RuleMatchType
   pattern: string
+  // Alternative subject wordings for the same rule (same match_type). The rule matches when the subject
+  // matches its primary `pattern` OR any of these.
+  extra_patterns?: string[]
   category_key: string
   confidence: number
   is_ignore?: boolean
@@ -85,10 +88,18 @@ export function compileRule(rule: Pick<SubjectRule, "match_type" | "pattern">): 
   return re
 }
 
-// Whether an email's SUBJECT matches a rule. A rule with no subject pattern matches any subject.
+// Every subject wording a rule carries: its primary pattern plus any alternative wordings, trimmed and
+// without blanks.
+export function subjectWordings(rule: Pick<SubjectRule, "pattern" | "extra_patterns">): string[] {
+  return [rule.pattern, ...(rule.extra_patterns ?? [])].map((w) => (w ?? "").trim()).filter(Boolean)
+}
+
+// Whether an email's SUBJECT matches a rule: any one of its wordings is enough. A rule with no subject
+// wording at all matches any subject (a sender-only ignore/notify rule).
 function matchesSubject(rule: SubjectRule, cleanSubject: string): boolean {
-  if (!rule.pattern || !rule.pattern.trim()) return true
-  return !!compileRule(rule)?.test(cleanSubject)
+  const wordings = subjectWordings(rule)
+  if (!wordings.length) return true
+  return wordings.some((pattern) => !!compileRule({ match_type: rule.match_type, pattern })?.test(cleanSubject))
 }
 
 // Whether an email's SENDER matches a rule's optional sender filter. A rule with no sender filter
@@ -209,8 +220,10 @@ export function classifyByRules(input: {
 
   for (const rule of rules) {
     if (rule.is_ignore || rule.is_notify) continue
-    const re = compileRule(rule)
-    if (re?.test(cleanSubject)) return { action: "classify", categoryKey: rule.category_key, confidence: rule.confidence }
+    // A classify rule with no wording would match every subject — never let that happen.
+    if (subjectWordings(rule).length && matchesSubject(rule, cleanSubject)) {
+      return { action: "classify", categoryKey: rule.category_key, confidence: rule.confidence }
+    }
   }
   return null
 }

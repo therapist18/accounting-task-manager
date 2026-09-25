@@ -19,7 +19,7 @@ import { RulesPanel } from "./components/RulesPanel"
 import { SyncDialog } from "./components/SyncDialog"
 import { CompanyPanels, matchesCompanySelection } from "./components/CompanyPanels"
 import { EmailsTable } from "./components/NeedsReview"
-import { fetchCompanies, type Company } from "../companies/database"
+import { fetchCompanies, fetchKraEmailCredentials, saveKraEmailPassword, type Company, type KraEmailCredentials } from "../companies/database"
 import { isAutomatedSender } from "@/lib/email-center/rules"
 import {
   COUNT_BADGE_CLASS, DISPOSITION_LABEL, PILL_BUTTON_ACTIVE_CLASS, PILL_BUTTON_CLASS, PRIMARY_PILL_BUTTON_CLASS, SearchSelect,
@@ -110,6 +110,9 @@ export default function EmailCenterPage() {
   // client-side, not through /api/email-center. Loaded once; the category filter itself is a
   // client-side predicate, so no refetch is needed as filters change.
   const [fullCompanies, setFullCompanies] = useState<Company[]>([])
+  // Each company's KRA portal mailbox login (kra_email_address / kra_email_password), shown on the
+  // Mailboxes tab. Loaded separately so the password isn't part of the shared company records.
+  const [kraCredentials, setKraCredentials] = useState<Map<string, KraEmailCredentials>>(new Map())
   const [categories, setCategories] = useState<CategoryOption[]>([])
   const [staff, setStaff] = useState<StaffOption[]>([])
   const [cases, setCases] = useState<CaseRow[]>([])
@@ -189,6 +192,7 @@ export default function EmailCenterPage() {
   // Client Category Filter don't need to be as fresh as accounts/cases/emails.
   useEffect(() => {
     fetchCompanies().then(setFullCompanies).catch((e: any) => toast.error(e.message)).finally(() => setCompaniesLoading(false))
+    fetchKraEmailCredentials().then(setKraCredentials).catch((e: any) => toast.error(`Could not load KRA email credentials: ${e.message}`))
   }, [])
 
   // After a "Sync from date" run: reload what it pulled in, without the "Reloaded." toast.
@@ -282,6 +286,14 @@ export default function EmailCenterPage() {
     setReclassifyPrompt({ pattern: rule.pattern, is_ignore: rule.is_ignore, is_notify: rule.is_notify })
   }, [])
 
+  // A wording was added to an existing rule from the email dialog: same follow-up as a new rule — offer to
+  // re-run Needs Review through it.
+  const handleRuleUpdated = useCallback((rule: RuleRow, addedWording: string) => {
+    setRules((prev) => prev.map((r) => (r.id === rule.id ? rule : r)))
+    setReclassifyDue(true)
+    setReclassifyPrompt({ pattern: addedWording, is_ignore: rule.is_ignore, is_notify: rule.is_notify })
+  }, [])
+
   const runReclassify = async () => {
     setReclassifying(true)
     setReclassifyProgress({ done: 0, total: 0 })
@@ -325,6 +337,18 @@ export default function EmailCenterPage() {
       setReclassifyPrompt(null)
     }
   }
+
+  // Throws on failure so the Mailboxes tab's input can stay open; the local map is only updated once
+  // the database has the password.
+  const setKraPassword = useCallback(async (companyId: string, password: string) => {
+    await saveKraEmailPassword(companyId, password)
+    setKraCredentials((prev) => {
+      const next = new Map(prev)
+      const existing = next.get(companyId)
+      next.set(companyId, { kra_email_address: existing?.kra_email_address ?? null, kra_email_password: password })
+      return next
+    })
+  }, [])
 
   const updateAccountCompany = useCallback((accountId: string, companyId: string | null) => {
     const companyName = companyId ? companies.find((c) => c.id === companyId)?.company_name ?? null : null
@@ -693,6 +717,8 @@ export default function EmailCenterPage() {
           <MailboxesPanel
             accounts={accounts}
             companies={fullCompanies}
+            kraCredentials={kraCredentials}
+            onKraPasswordSave={setKraPassword}
             search={search}
             onAccountLinked={updateAccountCompany}
             onSynced={handleRefresh}
@@ -726,6 +752,8 @@ export default function EmailCenterPage() {
         onCaseOpened={upsertCase}
         onOpenCase={(id) => { setOpenEmailSeed(null); setOpenCaseId(id) }}
         onRuleCreated={handleRuleCreated}
+        rules={rules}
+        onRuleUpdated={handleRuleUpdated}
       />
       <SyncDialog
         open={syncFromOpen}

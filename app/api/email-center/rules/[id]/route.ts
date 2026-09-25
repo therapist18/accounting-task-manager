@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { authorize, fail } from "@/lib/email-center/api"
-import { RULES_TABLE, invalidateRulesCache } from "@/lib/email-center/rule-store"
+import {
+  EXTRA_MIGRATION_MESSAGE, RULES_TABLE, RULE_COLUMNS, RULE_COLUMNS_BASE, invalidateRulesCache, isMissingExtraColumn, normalizeRuleRow,
+} from "@/lib/email-center/rule-store"
 import { parseRuleBody } from "@/lib/email-center/rule-validation"
 
 type Ctx = { params: Promise<{ id: string }> }
 
-const COLUMNS = "id, match_type, pattern, category_key, confidence, sort_order, is_active, notes, is_ignore, is_notify, sender_pattern, sender_match_type, updated_at"
 
 // PATCH /api/email-center/rules/:id — any subset of the rule's fields (e.g. just { is_active }).
 export async function PATCH(request: NextRequest, { params }: Ctx) {
@@ -27,12 +28,14 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
       if (!check.ok) return NextResponse.json({ success: false, error: check.error }, { status: 400 })
     }
 
-    const { data, error } = await sb
-      .from(RULES_TABLE)
-      .update({ ...parsed.value, updated_by_id: actor.id, updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .select(COLUMNS)
-      .maybeSingle()
+    const changes = { ...parsed.value, updated_by_id: actor.id, updated_at: new Date().toISOString() }
+    let { data, error } = await sb.from(RULES_TABLE).update(changes).eq("id", id).select(RULE_COLUMNS).maybeSingle()
+    if (isMissingExtraColumn(error)) {
+      // Migration not applied: clearing/keeping an empty list is harmless to drop, real extra wordings can't be saved.
+      if (parsed.value.extra_patterns?.length) return NextResponse.json({ success: false, error: EXTRA_MIGRATION_MESSAGE }, { status: 409 })
+      const { extra_patterns: _omit, ...withoutExtras } = changes
+      ;({ data, error } = await sb.from(RULES_TABLE).update(withoutExtras).eq("id", id).select(RULE_COLUMNS_BASE).maybeSingle())
+    }
     if (error) {
       if ((error as any).code === "23505") {
         return NextResponse.json({ success: false, error: "A rule with this exact pattern already exists." }, { status: 409 })
@@ -41,7 +44,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     }
     if (!data) return NextResponse.json({ success: false, error: "Rule not found." }, { status: 404 })
     invalidateRulesCache()
-    return NextResponse.json({ success: true, rule: { ...data, confidence: Number(data.confidence) } })
+    return NextResponse.json({ success: true, rule: normalizeRuleRow(data) })
   } catch (error) {
     return fail(error, "rule PATCH")
   }

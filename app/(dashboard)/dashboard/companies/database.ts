@@ -80,6 +80,39 @@ export async function fetchCompanies(): Promise<Company[]> {
   }
 }
 
+export type KraEmailCredentials = {
+  kra_email_address: string | null
+  kra_email_password: string | null
+}
+
+// Kept out of fetchCompanies on purpose: the password should only be loaded by the screens that
+// actually show it, not carried along in every module's company list.
+export async function fetchKraEmailCredentials(): Promise<Map<string, KraEmailCredentials>> {
+  const { data, error } = await supabase
+    .from('acc_portal_company_duplicate')
+    .select('id, kra_email_address, kra_email_password')
+
+  if (error) throw error
+
+  const map = new Map<string, KraEmailCredentials>()
+  for (const row of (data || []) as any[]) {
+    map.set(String(row.id), {
+      kra_email_address: row.kra_email_address ? String(row.kra_email_address).trim().toLowerCase() : null,
+      kra_email_password: row.kra_email_password ?? null,
+    })
+  }
+  return map
+}
+
+export async function saveKraEmailPassword(companyId: string | number, password: string): Promise<void> {
+  const { error } = await supabase
+    .from('acc_portal_company_duplicate')
+    .update({ kra_email_password: password })
+    .eq('id', companyId)
+
+  if (error) throw error
+}
+
 export async function fetchCompanyById(id: string | number): Promise<Company | null> {
   try {
     const { data, error } = await supabase

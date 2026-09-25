@@ -45,6 +45,8 @@ export function EmailDialog({
   onCaseOpened,
   onOpenCase,
   onRuleCreated,
+  rules = [],
+  onRuleUpdated,
 }: {
   email: EmailRow | null
   categories: CategoryOption[]
@@ -53,6 +55,10 @@ export function EmailDialog({
   onCaseOpened: (c: CaseRow) => void
   onOpenCase: (caseId: string) => void
   onRuleCreated?: (rule: RuleRow) => void
+  // Existing rules, so "Remember this" can add this subject as another wording of one instead of always
+  // creating a new rule; onRuleUpdated gets the saved rule and the wording that was added.
+  rules?: RuleRow[]
+  onRuleUpdated?: (rule: RuleRow, addedWording: string) => void
 }) {
   // Keep the last email around so the content doesn't blank out during the dialog's close animation.
   const lastRef = useRef<EmailRow | null>(null)
@@ -66,6 +72,8 @@ export function EmailDialog({
   const [categoryKey, setCategoryKey] = useState("")
   const [makeRule, setMakeRule] = useState(false)
   const [rulePattern, setRulePattern] = useState("")
+  // "" = create a new rule; otherwise the id of an existing rule to add this wording to.
+  const [addToRuleId, setAddToRuleId] = useState("")
   const [saving, setSaving] = useState(false)
 
   // Read through refs so the effect runs once per opened email, not on every local merge of the row.
@@ -82,6 +90,7 @@ export function EmailDialog({
     setDisposition(row.disposition ?? "")
     setCategoryKey(row.category_key ?? "")
     setMakeRule(false)
+    setAddToRuleId("")
     setRulePattern(cleanSubject(row.subject ?? ""))
 
     if (!row.is_read) {
@@ -126,7 +135,23 @@ export function EmailDialog({
         // flagged urgent in Needs Review, never a task/case. A real category turns it back into a
         // classify rule.
         const isNotifyRule = !isIgnoreRule && categoryKey === "notification"
+        const target = addToRuleId ? rules.find((r) => r.id === addToRuleId) : undefined
         try {
+          if (target) {
+            // Another way of wording a subject this rule already handles: widen it instead of adding a rule.
+            const wording = rulePattern.trim()
+            const known = [target.pattern, ...(target.extra_patterns ?? [])].some((w) => w.trim().toLowerCase() === wording.toLowerCase())
+            if (known) {
+              toast.info("That wording is already part of the rule.")
+            } else {
+              const updated = await api<{ rule: RuleRow }>(`/api/email-center/rules/${target.id}`, {
+                method: "PATCH",
+                body: JSON.stringify({ extra_patterns: [...(target.extra_patterns ?? []), wording] }),
+              })
+              onRuleUpdated?.(updated.rule, wording)
+              toast.success("Wording added to the existing rule — future emails like this are handled by it.")
+            }
+          } else {
           const created = await api<{ rule: RuleRow }>("/api/email-center/rules", {
             method: "POST",
             body: JSON.stringify(
@@ -145,6 +170,7 @@ export function EmailDialog({
                 ? "Rule added — future emails like this are flagged urgent as important notifications."
                 : "Rule added — future emails with this subject are classified automatically."
           )
+          }
         } catch (e: any) {
           toast.warning(`Classification saved, but the rule wasn't added: ${e.message}`)
         }
@@ -168,6 +194,14 @@ export function EmailDialog({
   // category is "notification" (an important notification) is Remembered as a notify rule instead.
   const useIgnoreRule = disposition === "ignore"
   const useNotifyRule = !useIgnoreRule && categoryKey === "notification"
+  // Existing rules of the same kind this subject could be added to. Only plain-text ("contains") rules:
+  // the subject is added as-is, and in a regex rule it would be read as a pattern.
+  const candidateRules = rules.filter(
+    (r) =>
+      !r.id.startsWith("builtin-") &&
+      r.match_type === "contains" &&
+      (useIgnoreRule ? r.is_ignore : useNotifyRule ? r.is_notify : !r.is_ignore && !r.is_notify && r.category_key === categoryKey)
+  )
 
   return (
     <Dialog open={!!email} onOpenChange={(o) => !o && onClose()}>
@@ -351,9 +385,27 @@ export function EmailDialog({
                     </span>
                   </span>
                 </label>
+                {makeRule && (categoryKey || useIgnoreRule) && candidateRules.length > 0 && (
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-slate-600">Save as</label>
+                    <SearchSelect
+                      className="w-full"
+                      value={addToRuleId}
+                      onChange={setAddToRuleId}
+                      options={[
+                        { value: "", label: "A new rule" },
+                        ...candidateRules.map((r) => ({
+                          value: r.id,
+                          label: `Add to: ${r.pattern || "any subject"}${r.extra_patterns?.length ? ` (+${r.extra_patterns.length} more)` : ""}`,
+                        })),
+                      ]}
+                    />
+                    <p className="text-sm text-slate-400">Adding it to an existing rule keeps every wording of one kind of notice together.</p>
+                  </div>
+                )}
                 {makeRule && (categoryKey || useIgnoreRule) && (
                   <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-slate-600">Subject contains</label>
+                    <label className="text-sm font-medium text-slate-600">{addToRuleId ? "Wording to add" : "Subject contains"}</label>
                     <Input value={rulePattern} onChange={(e) => setRulePattern(e.target.value)} className="h-10 text-base rounded-md border-slate-200" />
                     <p className="text-sm text-slate-400">Trim it to the part that identifies this kind of notice.</p>
                   </div>
