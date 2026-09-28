@@ -17,3 +17,7 @@ okay - so my method of allocating officers - is according to the follow up with 
 now the admin says that the officers handling a job under immigration - are grouped in two , so stages eg  stage 12 to stage 25 , are handled by one officer - then stages 26 to 34 are handled by another officer 
 
 so now how do i do this - answer in chat first
+
+
+
+can we update the module to match the KRA Email Center module's ui and the use of teh reusable compoennts and functions, paginatiuon of the tables , column sorting , stiky headers , the implementation of Client Category Filter 
