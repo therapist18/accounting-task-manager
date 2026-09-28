@@ -23,6 +23,9 @@ import {
 } from "./types"
 
 const BACKFILL_DAYS = 14
+// update_only categories whose case-attaching step also reads an approved/rejected outcome off the
+// body (extension-of-time requests, and objection decisions — same shape, different KRA matter).
+const APPROVAL_DECISION_CATEGORIES = new Set(["extension_response", "objection_decision"])
 const MAX_MESSAGES_PER_SYNC = 40
 const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
 const LOCK_MS = 90_000
@@ -482,7 +485,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
         threadCase ?? (category.attaches_to_case ? await findOpenCaseByPin(sb, pin, companyId) : null)
       if (target) caseId = target.id
 
-      if (categoryKey === "extension_response") {
+      if (APPROVAL_DECISION_CATEGORIES.has(categoryKey)) {
         const approval = ai?.approval ?? detectApproval(body)
         if (!target) {
           disposition = "needs_review"

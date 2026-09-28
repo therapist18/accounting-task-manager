@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, Bell, CheckCircle2, EyeOff, Info, Loader2, Mail, Pencil, Plus, Tag, Trash2, XCircle } from "lucide-react"
+import { AlertTriangle, ArrowRightCircle, Bell, CheckCircle2, EyeOff, FilePlus2, Info, Link2, Loader2, Mail, Pencil, Plus, Tag, Trash2, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -33,6 +33,22 @@ const SORT_VALUE: Record<string, (r: RuleRow) => string | number> = {
   confidence: (r) => r.confidence,
   active: (r) => (r.is_active ? 1 : 0),
   actions: (r) => r.updated_at ?? "", // most recently edited last
+}
+
+// What actually happens to a matching email — the one thing the Category pill alone doesn't say (a
+// category name like "Demand / Penalty / Assessment" doesn't tell you whether it opens a task, only
+// updates one, or is never stored at all). Checked in the same order ingestion itself decides it:
+// ignore, then notify, then the category's own creates_case / attaches_to_case / disposition.
+type Outcome = { icon: typeof FilePlus2; label: string; tone: string }
+
+function ruleOutcome(r: RuleRow, cat: CategoryOption | undefined): Outcome {
+  if (r.is_ignore) return { icon: EyeOff, label: "Ignored — stored, no task", tone: "text-slate-500" }
+  if (r.is_notify) return { icon: Bell, label: "Notifications tab — flagged urgent, no task", tone: "text-amber-600" }
+  if (cat?.creates_case) return { icon: FilePlus2, label: "Opens a task", tone: "text-emerald-600" }
+  if (cat?.attaches_to_case) return { icon: Link2, label: "Updates an existing task only", tone: "text-blue-600" }
+  if (cat?.disposition === "needs_review") return { icon: ArrowRightCircle, label: "Needs Review — no task", tone: "text-amber-600" }
+  if (cat?.disposition === "ignore") return { icon: EyeOff, label: "Ignored — stored, no task", tone: "text-slate-500" }
+  return { icon: XCircle, label: "Recognized but not stored — stays in Gmail", tone: "text-slate-400" }
 }
 
 const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -257,21 +273,22 @@ export function RulesPanel({
 
       <div className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
         <div className="overflow-auto flex-1 min-h-0 custom-scrollbar">
-          <table className="w-full min-w-[1000px] border-separate border-spacing-0 text-base">
+          <table className="w-full min-w-[1220px] border-separate border-spacing-0 text-base">
             <thead className="sticky top-0 z-30 bg-white shadow-xs">
               <tr>
                 <SortTh tone="blue" id="#" sort={sort} onSort={toggle} className="w-16 text-center">#</SortTh>
                 <SortTh tone="blue" id="order" sort={sort} onSort={toggle} className="w-24 text-left">Order</SortTh>
                 <SortTh tone="blue" id="match" sort={sort} onSort={toggle} className="w-32 text-left">Match</SortTh>
                 <SortTh tone="blue" id="pattern" sort={sort} onSort={toggle} className="min-w-[320px] text-left">Subject wordings / sender</SortTh>
-                <SortTh tone="blue" id="category" sort={sort} onSort={toggle} className="min-w-[240px] text-left">Category</SortTh>
+                <SortTh tone="blue" id="category" sort={sort} onSort={toggle} className="min-w-[220px] text-left">Category</SortTh>
+                <SortTh tone="blue" id="outcome" sort={sort} onSort={toggle} className="min-w-[220px] text-left">Result</SortTh>
                 <SortTh tone="blue" id="confidence" sort={sort} onSort={toggle} className="w-36 text-left">Confidence</SortTh>
                 <SortTh tone="blue" id="active" sort={sort} onSort={toggle} className="w-28 text-left">Active</SortTh>
                 <SortTh tone="blue" id="actions" sort={sort} onSort={toggle} className="w-32 border-r-0 text-left">Actions</SortTh>
               </tr>
             </thead>
             <tbody>
-              {loading && <TableLoading cols={8} />}
+              {loading && <TableLoading cols={9} />}
               {!loading && sorted.map((r, index) => {
                 const cat = catByKey.get(r.category_key)
                 const auto = r.confidence >= 0.8
@@ -284,12 +301,26 @@ export function RulesPanel({
                         {r.match_type === "regex" ? "Regex" : "Contains"}
                       </span>
                     </td>
-                    <td className={cn(TD_CLASS, "font-mono text-sm text-slate-800 break-all")}>
+                    <td className={cn(TD_CLASS, "text-sm text-slate-800 break-all")}>
                       {(() => {
                         const wordings = [r.pattern, ...(r.extra_patterns ?? [])].filter(Boolean)
+                        // Plain "contains" wordings read as ordinary sentences; only a genuine regex line
+                        // gets the code styling + a "pattern" hint, so staff don't mistake one for the other.
                         return wordings.length
-                          ? wordings.map((w, i) => <div key={i}>{i > 0 && <span className="font-sans text-slate-400">or </span>}{w}</div>)
-                          : <span className="font-sans text-slate-400">Any subject</span>
+                          ? wordings.map((w, i) => (
+                              <div key={i} className="flex items-baseline gap-1.5">
+                                {i > 0 && <span className="text-slate-400 shrink-0">or</span>}
+                                {r.match_type === "regex" ? (
+                                  <span className="inline-flex items-baseline gap-1.5 min-w-0">
+                                    <span className="font-mono bg-violet-50 text-violet-800 rounded px-1.5 py-0.5 break-all">{w}</span>
+                                    <span className="text-sm font-sans text-violet-400 shrink-0" title="This line is a pattern (regular expression), not exact wording.">pattern</span>
+                                  </span>
+                                ) : (
+                                  <span className="break-all">“{w}”</span>
+                                )}
+                              </div>
+                            ))
+                          : <span className="text-slate-400">Any subject</span>
                       })()}
                       {r.sender_pattern && (
                         <div className="flex items-center gap-1.5 font-sans text-sm text-slate-500 mt-0.5">
@@ -314,6 +345,17 @@ export function RulesPanel({
                         </span>
                       ) : <span className="text-red-500">{r.category_key}</span>}
                     </td>
+                    <td className={TD_CLASS}>
+                      {(() => {
+                        const outcome = ruleOutcome(r, cat)
+                        const Icon = outcome.icon
+                        return (
+                          <span className={cn("inline-flex items-center gap-1.5 text-sm font-medium", outcome.tone)}>
+                            <Icon className="h-4 w-4 shrink-0" /> {outcome.label}
+                          </span>
+                        )
+                      })()}
+                    </td>
                     <td className={cn(TD_CLASS, "whitespace-nowrap")}>
                       <span className="tabular-nums font-medium">{Math.round(r.confidence * 100)}%</span>
                       <span className={cn("ml-2 text-sm", auto ? "text-emerald-600" : "text-amber-600")}>{auto ? "Auto" : "Review"}</span>
@@ -335,7 +377,7 @@ export function RulesPanel({
                 )
               })}
               {!loading && sorted.length === 0 && (
-                <tr><td colSpan={8} className="py-16 text-center text-slate-400 text-base">No rules match.</td></tr>
+                <tr><td colSpan={9} className="py-16 text-center text-slate-400 text-base">No rules match.</td></tr>
               )}
             </tbody>
           </table>

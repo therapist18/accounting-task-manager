@@ -30,6 +30,12 @@ export const CATEGORIES: CategoryDef[] = [
   c("document_request", "Request for Documents", "#ea580c", "action_required", true),
   c("appointment_notice", "Appointment / Registration Notice", "#ca8a04", "action_required", true),
   c("extension_response", "Extension of Time Response", "#2563eb", "update_only", false, true),
+  c("objection", "Objection", "#dc2626", "action_required", true),
+  // The approval/rejection outcome of an objection — same shape as extension_response (attaches to the
+  // objection's case and reads approved/rejected off the body); see APPROVAL_DECISION_CATEGORIES in
+  // ingest.ts.
+  c("objection_decision", "Objection Decision", "#2563eb", "update_only", false, true),
+  c("refund", "Refund Application", "#ea580c", "action_required", true),
   c("bcl_response", "BCL Response to KRA", "#2563eb", "update_only", false, true),
   c("return_ack", "Return / Payment Acknowledgement", "#16a34a", "update_only"),
   c("certificate", "Certificate (WHT / TCC)", "#16a34a", "update_only"),

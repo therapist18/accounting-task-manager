@@ -157,6 +157,10 @@ export interface CategoryOption {
   name: string
   color: string | null
   disposition: Disposition | null
+  // Whether this category opens a new task, or only updates one that already exists — see
+  // lib/email-center/categories.ts. Both come straight through from the API's full CATEGORIES list.
+  creates_case?: boolean
+  attaches_to_case?: boolean
 }
 
 export interface StaffOption {
