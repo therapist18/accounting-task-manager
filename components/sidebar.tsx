@@ -28,7 +28,8 @@ const navItems = [
             { title: "Summary Reports Dashboard", href: "/dashboard/summary-reports", permission: "summary_reports.view" },
             { title: "Passport Endorsement Tracking", href: "/dashboard/passport-endorsement", permission: "passport_endorsement.view" },
             { title: "Company Profiles", href: "/dashboard/company-profiles", permission: "company_profiles.view" },
-            { title: "Task Basket", href: "/dashboard/task-basket", permission: "task_basket.view" }
+            { title: "Task Basket", href: "/dashboard/task-basket", permission: "task_basket.view" },
+            { title: "Automations", href: "/dashboard/automations", permission: "automations.view" }
         ],
     },
     {

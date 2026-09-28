@@ -3,12 +3,20 @@
 # dependencies
 /node_modules
 
+# The automation server is a separate package with its own lockfile, so its
+# node_modules must be ignored independently of the root one.
+/automation-server/node_modules/
+
 # next.js
 /.next/
 /out/
 
 # production
-/build
+# The electron bundle of playwright browsers is a ~386MB build artefact, but the
+# app icon is source and must be committed - electron-builder and the tray both
+# read it from the repo.
+/build/*
+!/build/icon.ico
 
 # debug
 npm-debug.log*
@@ -25,5 +33,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-# clerk configuration (can include secrets)
-/.clerk/
+
+# automation server runtime output
+/automation-server/logs/
+/automation-server/downloads/
+/automation-server/tmp/
+
+# electron
+/dist-electron/

@@ -268,25 +268,44 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
     });
   }, []);
 
+  // Polls the local automation server through /api/automations/progress.
+  //
+  // Previously read the `automation_jobs` table directly, which only worked
+  // because a separate worker claimed and completed rows there. Automations now
+  // run in a child process of the desktop app, so live state is in that
+  // process's memory and history is tm_automation_runs. The proxy route merges
+  // both and returns the shape this handler already consumed.
   const pollSupabaseJob = useCallback(async (jobId: string) => {
     try {
-      const { data: job, error } = await supabase
-        .from('automation_jobs')
-        .select('*')
-        .eq('id', jobId)
-        .single();
+      const response = await fetch(`/api/automations/progress?jobId=${encodeURIComponent(jobId)}`, {
+        cache: 'no-store',
+      });
+      const payload = await response.json().catch(() => null);
+      const job = payload?.job;
 
-      if (error || !job) {
-        console.log('Job not found - stopping polling');
-        clearPolling();
-        setIsAutomationRunning(false);
+      if (!response.ok || !job) {
+        if (response.status === 503) {
+          clearPolling();
+          setIsAutomationRunning(false);
+          toast({
+            title: '❌ Automation Service Unavailable',
+            description: payload?.error || 'Restart the desktop app to run automations.',
+            variant: 'destructive',
+          });
+          return;
+        }
+        if (response.status === 404) {
+          clearPolling();
+          setIsAutomationRunning(false);
+          return;
+        }
         return;
       }
 
       setAutomationProgress({
-        isRunning: job.status === 'pending' || job.status === 'claiming' || job.status === 'running',
+        isRunning: job.isRunning,
         progress: job.progress || 0,
-        currentStep: job.current_step || '',
+        currentStep: job.currentStep || '',
         message: job.message || '',
         logs: job.logs || [],
         evidence: job.evidence || [],
@@ -297,33 +316,54 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
         clearPolling();
         setIsAutomationRunning(false);
         await handleCompletedJob(job);
-      } else if (job.status === 'failed') {
+      } else if (job.status === 'failed' || job.status === 'cancelled' || job.status === 'interrupted') {
         clearPolling();
         setIsAutomationRunning(false);
         toast({
-          title: '❌ Automation Failed',
+          title: job.status === 'cancelled' ? '🛑 Automation Stopped' : '❌ Automation Failed',
           description: job.error || 'Unknown error',
           variant: 'destructive',
         });
       }
     } catch (error) {
-      console.error('Error polling job:', error);
+      console.error('Error polling automation:', error);
     }
-  }, [handleCompletedJob, clearPolling]);
+  }, [handleCompletedJob, clearPolling, toast]);
 
   const stopAutomation = useCallback(async () => {
     if (!automationJobId) return;
-    await supabase.from('automation_jobs').update({
-      status: 'failed',
-      error: 'Cancelled by user',
-      completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      cancelled_by_id: actor.by_id,
-    }).eq('id', automationJobId);
+
+    // Asks the automation server to close the browser. Writing status='failed'
+    // into automation_jobs used to leave the run itself going in the browser
+    // until it failed on its own.
+    try {
+      const response = await fetch('/api/automations/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: automationJobId }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        toast({
+          title: 'Could not stop automation',
+          description: payload?.error || 'Unknown error',
+          variant: 'destructive',
+        });
+        return;
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Could not stop automation',
+        description: error.message,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     clearPolling();
     setIsAutomationRunning(false);
     setAutomationProgress(prev => prev ? { ...prev, isRunning: false, message: 'Stopped by user' } : prev);
-  }, [automationJobId, clearPolling, currentUser]);
+  }, [automationJobId, clearPolling, toast]);
 
   useEffect(() => {
     return () => {
@@ -740,55 +780,52 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
         }
       }
       const cleanedFormData = cleanFormData(formData);
-      const payload = {
-        url: automationLogin.url || "https://fns.immigration.go.ke/account/login.html",
-        photoPath: "",
-        login: {
-          email: automationLogin.email || "",
-          idNumber: (typeof automationLogin.idNumber === 'string' && automationLogin.idNumber !== '[object Object]') ? automationLogin.idNumber : "",
-          password: automationLogin.password || ""
-        },
-        formData: cleanedFormData,
-        step2Data: {},
-        step3Data: {}
-      };
-
       const jobType = deriveAutomationType(automation);
 
-      const { data: job, error } = await supabase
-        .from('automation_jobs')
-        .insert({
+      // Goes to a Next route, which creates the tm_automation_runs record and
+      // then hands the work to the local automation server.
+      //
+      // This replaces a direct client-side insert into `automation_jobs`, which
+      // persisted the whole payload - including the immigration portal password
+      // assembled just above - as plaintext in a database column. Nothing
+      // sensitive is stored now; the payload travels over loopback and only the
+      // outcome screenshot comes back.
+      const response = await fetch('/api/automations/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           type: jobType,
-          status: 'pending',
-          data: payload,
-          retry_count_max: 3,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          created_by_id: actor.by_id,
-        })
-        .select()
-        .single();
+          taskId: task?.id ?? null,
+          automationId: automation?.id ?? null,
+          // tm_tasks has no task_name/title column. applicant_name and r_number
+          // are the fields that actually identify a task in this schema.
+          taskLabel: task?.applicant_name || task?.r_number || automation?.name || null,
+          formData: cleanedFormData,
+        }),
+      });
 
-      if (error) throw new Error(error.message);
-      if (!job) throw new Error('Failed to create automation job');
+      const started = await response.json().catch(() => null);
+      if (!response.ok || !started?.success) {
+        throw new Error(started?.error || 'Could not start the automation.');
+      }
 
-      setAutomationJobId(job.id);
+      setAutomationJobId(started.jobId);
       setAutomationProgress({
         isRunning: true,
         progress: 0,
-        currentStep: 'Queued',
-        message: 'Job queued, waiting for agent...',
-        logs: [],
+        currentStep: 'Starting',
+        message: 'Launching browser…',
+        logs: [{ level: 'info', message: `Run ${started.runId} started.`, timestamp: new Date().toISOString() }],
       });
 
       const interval = setInterval(() => {
-        pollSupabaseJob(job.id);
+        pollSupabaseJob(started.jobId);
       }, 2000);
       setPollingInterval(interval);
 
       toast({
-        title: 'Automation Queued',
-        description: `Job submitted for ${automation.name || jobType}. The agent will pick it up shortly.`,
+        title: 'Automation Started',
+        description: `${automation.name || jobType} is running. You'll get a desktop notification when it finishes.`,
       });
 
     } catch (e) {

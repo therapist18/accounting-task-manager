@@ -86,24 +86,25 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
   // populated across tab switches since it lives here, not in the (lazily-mounted) tab.
   const [templatesSummary, setTemplatesSummary] = useState<{ ready: number; total: number } | null>(null)
 
-  // Raw automation job history for this task - fetched once here (independent of
+  // Automation run history for this task - fetched once here (independent of
   // whether the Automation tab has been opened, so the tab-bar badge is accurate
   // even before the tab ever mounts) and passed down to AutomationTab as a prop
   // instead of it running the exact same query itself.
+  //
+  // Goes through /api/automations/runs rather than querying tm_automation_runs
+  // directly: the table has RLS enabled with no client policy, so all access goes
+  // through the server route that scopes rows to the signed-in user.
   const [automationJobs, setAutomationJobs] = useState<any[] | null>(null)
   useEffect(() => {
     if (!task?.id) { setAutomationJobs(null); return }
     let cancelled = false
-    supabase
-      .from("automation_jobs")
-      .select("*")
-      .eq("context->>task_id", String(task.id))
-      .order("created_at", { ascending: false })
-      .limit(200)
-      .then(({ data: jobs, error }) => {
-        if (error || !jobs || cancelled) return
-        setAutomationJobs(jobs)
+    fetch(`/api/automations/runs?taskId=${encodeURIComponent(String(task.id))}`, { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((payload) => {
+        if (cancelled || !payload?.success) return
+        setAutomationJobs(payload.runs ?? [])
       })
+      .catch(() => { /* history is non-critical; leave the badge hidden */ })
     return () => { cancelled = true }
   }, [task?.id])
 
@@ -114,7 +115,7 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
     const knownAutomationIds = new Set(data.automations.map((a: any) => String(a.id)))
     const latest: Record<string, any> = {}
     automationJobs.forEach((j: any) => {
-      const autoId = j.context?.automation_id != null ? String(j.context.automation_id) : null
+      const autoId = j.automation_id != null ? String(j.automation_id) : null
       if (autoId && knownAutomationIds.has(autoId) && !latest[autoId]) latest[autoId] = j
     })
     const summary = { failed: 0, needsReview: 0, running: 0 }
