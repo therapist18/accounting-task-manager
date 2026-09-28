@@ -48,7 +48,7 @@ function ruleOutcome(r: RuleRow, cat: CategoryOption | undefined): Outcome {
   if (cat?.attaches_to_case) return { icon: Link2, label: "Updates an existing task only", tone: "text-blue-600" }
   if (cat?.disposition === "needs_review") return { icon: ArrowRightCircle, label: "Needs Review — no task", tone: "text-amber-600" }
   if (cat?.disposition === "ignore") return { icon: EyeOff, label: "Ignored — stored, no task", tone: "text-slate-500" }
-  return { icon: XCircle, label: "Recognized but not stored — stays in Gmail", tone: "text-slate-400" }
+  return { icon: XCircle, label: "Recognized as an Update only but not stored — stays in Gmail", tone: "text-slate-400" }
 }
 
 const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -145,7 +145,13 @@ export function RulesPanel({
     return rules.filter((r) => `${r.pattern} ${(r.extra_patterns ?? []).join(" ")} ${r.sender_pattern ?? ""} ${catByKey.get(r.category_key)?.name ?? r.category_key} ${r.notes ?? ""}`.toLowerCase().includes(q))
   }, [rules, search, catByKey])
 
-  const { sort, sorted, toggle } = useSortedRows(visible, SORT_VALUE, { key: "order", dir: "asc" })
+  // outcome needs catByKey (a rule alone doesn't say what its category does), so it's merged in here
+  // rather than living in the module-level SORT_VALUE like every other column.
+  const sortAccessors = useMemo(
+    () => ({ ...SORT_VALUE, outcome: (r: RuleRow) => ruleOutcome(r, catByKey.get(r.category_key)).label }),
+    [catByKey]
+  )
+  const { sort, sorted, toggle } = useSortedRows(visible, sortAccessors, { key: "order", dir: "asc" })
 
   const [draft, setDraft] = useState<Draft | null>(null)
   const [sample, setSample] = useState("")
