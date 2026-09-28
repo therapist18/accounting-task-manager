@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { authorize, clientAttachments, companyNames, fail, userNames } from "@/lib/email-center/api"
+import { CATEGORY_BY_KEY } from "@/lib/email-center/categories"
+import { RULE_COLUMNS_BASE, RULES_TABLE } from "@/lib/email-center/rule-store"
 import { APPROVAL_STATUSES } from "@/lib/email-center/types"
 
 type Ctx = { params: Promise<{ id: string }> }
@@ -38,6 +40,20 @@ export async function GET(request: NextRequest, { params }: Ctx) {
       .eq("case_id", id)
       .order("received_at", { ascending: true })
 
+    // Which rule (if any) auto-opened this — created_by_rule_id arrived in the 20260929000000
+    // migration, so a missing column just means "not known" rather than failing the whole dialog.
+    let createdByRule: { pattern: string; category_name: string; is_active: boolean } | null = null
+    if (c.created_by_rule_id) {
+      const { data: rule } = await sb.from(RULES_TABLE).select(RULE_COLUMNS_BASE).eq("id", c.created_by_rule_id).maybeSingle()
+      if (rule) {
+        createdByRule = {
+          pattern: rule.pattern,
+          category_name: CATEGORY_BY_KEY.get(rule.category_key)?.name ?? rule.category_key,
+          is_active: !!rule.is_active,
+        }
+      }
+    }
+
     const [companies, users] = await Promise.all([
       companyNames(sb, [c.company_id]),
       userNames(sb, [
@@ -58,6 +74,7 @@ export async function GET(request: NextRequest, { params }: Ctx) {
         assigned_by_name: name(c.assigned_by_id),
         completed_by_name: name(c.completed_by_id),
         created_by_name: c.created_by_id ? name(c.created_by_id) : "System (from email)",
+        created_by_rule: createdByRule,
       },
       emails: (emails ?? []).map(({ attachments, ...e }: any) => ({
         ...e,

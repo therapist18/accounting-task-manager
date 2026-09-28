@@ -7,16 +7,22 @@
 // built-in list the table was seeded from — used only when the table is missing or unreachable.
 
 // A rule matches on subject and/or sender and names one of three behaviours:
-//   ignore   match is dropped entirely (never stored, never opens a case)
+//   ignore   match is stored under the Ignored tab (so it can be looked back on) and never opens a
+//            case — UNLESS the rule is also hard_ignore, in which case it is dropped entirely, the
+//            same as certificates/statements/system noise: never stored anywhere.
 //   notify   match is stored and flagged urgent in Needs Review — an important notification that
 //            needs attention but must NOT create a KRA task/case
 //   classify match is classified into its category (opens a case at high confidence when the
 //            category is case-creating)
 export type RuleResult =
   // ruleId is the ignore rule that matched, so the Ignored tab can group what each rule caught.
-  | { action: "ignore"; categoryKey: null; confidence: number; ruleId?: string }
-  | { action: "notify"; categoryKey: null; confidence: number }
-  | { action: "classify"; categoryKey: string; confidence: number }
+  // hardIgnore mirrors the rule's own hard_ignore — carried here so ingestion doesn't need a second
+  // lookup to know whether to store the match or drop it outright.
+  | { action: "ignore"; categoryKey: null; confidence: number; ruleId?: string; hardIgnore?: boolean }
+  | { action: "notify"; categoryKey: null; confidence: number; ruleId?: string }
+  // ruleId is the classify rule that matched (absent for the built-in noise-sender / thread-approval
+  // shortcuts below, which aren't rows in the table) — lets a task remember which rule opened it.
+  | { action: "classify"; categoryKey: string; confidence: number; ruleId?: string }
 
 const KRA_SENDER_RE = /@([a-z0-9-]+\.)*kra\.go\.ke\s*>?$/i
 // KRA PIN: A/P + 9 digits + letter (e.g. P052230924P)
@@ -48,7 +54,13 @@ export interface SubjectRule {
   // Optional sender filter (ignore/notify rules especially): match on the sender address. When
   // empty the rule matches on subject only; when both are set both must match.
   sender_pattern?: string
+  // Alternative senders (same sender_match_type) — the rule matches a sender that matches
+  // sender_pattern OR any of these, e.g. "ignore mail from either A or B" as one rule.
+  extra_sender_patterns?: string[]
   sender_match_type?: RuleMatchType
+  // Only meaningful when is_ignore is true: drop a match entirely instead of storing it under the
+  // Ignored tab. For mail that has nothing to do with KRA at all.
+  hard_ignore?: boolean
 }
 
 // First match wins, so order from most to least specific.
@@ -103,13 +115,19 @@ function matchesSubject(rule: SubjectRule, cleanSubject: string): boolean {
   return wordings.some((pattern) => !!compileRule({ match_type: rule.match_type, pattern })?.test(cleanSubject))
 }
 
-// Whether an email's SENDER matches a rule's optional sender filter. A rule with no sender filter
-// matches any sender.
+// Every sender a rule carries: its primary sender_pattern plus any alternatives, trimmed and
+// without blanks. Mirrors subjectWordings exactly.
+export function senderPatterns(rule: Pick<SubjectRule, "sender_pattern" | "extra_sender_patterns">): string[] {
+  return [rule.sender_pattern, ...(rule.extra_sender_patterns ?? [])].map((w) => (w ?? "").trim()).filter(Boolean)
+}
+
+// Whether an email's SENDER matches a rule's optional sender filter: any one of its senders is enough.
+// A rule with no sender filter at all matches any sender.
 function matchesSender(rule: SubjectRule, senderEmail: string): boolean {
-  if (!rule.sender_pattern || !rule.sender_pattern.trim()) return true
-  const re = compileRule({ match_type: rule.sender_match_type ?? "contains", pattern: rule.sender_pattern })
-  if (!re) return false
-  return re.test(senderEmail.trim())
+  const senders = senderPatterns(rule)
+  if (!senders.length) return true
+  const sender = senderEmail.trim()
+  return senders.some((pattern) => !!compileRule({ match_type: rule.sender_match_type ?? "contains", pattern })?.test(sender))
 }
 
 export function isKraSender(senderEmail: string): boolean {
@@ -193,7 +211,7 @@ export function classifyByRules(input: {
   for (const rule of rules) {
     if (rule.is_ignore) {
       if (matchesSubject(rule, cleanSubject) && matchesSender(rule, senderEmail)) {
-        return { action: "ignore", categoryKey: null, confidence: rule.confidence, ruleId: rule.id }
+        return { action: "ignore", categoryKey: null, confidence: rule.confidence, ruleId: rule.id, hardIgnore: !!rule.hard_ignore }
       }
     }
   }
@@ -204,7 +222,7 @@ export function classifyByRules(input: {
   for (const rule of rules) {
     if (rule.is_notify) {
       if (matchesSubject(rule, cleanSubject) && matchesSender(rule, senderEmail)) {
-        return { action: "notify", categoryKey: null, confidence: rule.confidence }
+        return { action: "notify", categoryKey: null, confidence: rule.confidence, ruleId: rule.id }
       }
     }
   }
@@ -223,7 +241,7 @@ export function classifyByRules(input: {
     if (rule.is_ignore || rule.is_notify) continue
     // A classify rule with no wording would match every subject — never let that happen.
     if (subjectWordings(rule).length && matchesSubject(rule, cleanSubject)) {
-      return { action: "classify", categoryKey: rule.category_key, confidence: rule.confidence }
+      return { action: "classify", categoryKey: rule.category_key, confidence: rule.confidence, ruleId: rule.id }
     }
   }
   return null

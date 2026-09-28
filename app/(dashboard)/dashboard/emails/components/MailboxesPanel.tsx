@@ -57,6 +57,8 @@ const COMPANY_SORT: Record<string, (r: CompanyRowData) => string | number> = {
   kra_password: (r) => (r.kraPassword ? 1 : 0),
   state: (r) => STATE_RANK[r.state],
   mailboxes: (r) => r.accounts.length,
+  emails: (r) => r.accounts.reduce((sum, a) => sum + (a.email_count ?? 0), 0),
+  first_email: (r) => r.accounts.map((a) => a.first_email_at).filter(Boolean).sort()[0] ?? "￿", // no data sorts last
   last_sync: (r) => r.lastSync,
   push: (r) => r.live,
   actions: (r) => (r.state === "connected" ? 1 : 0), // companies that still need a mailbox first
@@ -64,6 +66,8 @@ const COMPANY_SORT: Record<string, (r: CompanyRowData) => string | number> = {
 
 const ACCOUNT_SORT: Record<string, (a: AccountRow) => string | number> = {
   email: (a) => a.email,
+  emails: (a) => a.email_count ?? 0,
+  first_email: (a) => a.first_email_at ?? "￿",
   last_sync: (a) => a.last_synced_at ?? "",
   push: (a) => (watchActive(a) ? 1 : 0),
   link: (a) => a.label ?? a.email,
@@ -74,6 +78,29 @@ function StateBadge({ state }: { state: ConnState }) {
   if (state === "connected") return <Badge variant="outline" className="text-sm font-semibold bg-emerald-50 text-emerald-700 border-emerald-200 rounded-full px-2.5 py-0.5">Connected</Badge>
   if (state === "reconnect") return <Badge variant="outline" className="text-sm font-semibold bg-amber-50 text-amber-700 border-amber-200 rounded-full px-2.5 py-0.5">Reconnect needed</Badge>
   return <Badge variant="outline" className="text-sm font-medium bg-slate-100 text-slate-600 border-slate-200 rounded-full px-2.5 py-0.5">Not connected</Badge>
+}
+
+// Their own table columns (Emails / First email), not a sub-line under the address — how much mail
+// is stored for this mailbox, and how far back. Blank until at least one email has been stored, so a
+// freshly-connected mailbox doesn't read as broken.
+function EmailCountCell({ a }: { a: AccountRow }) {
+  return a.email_count ? (
+    <span className="tabular-nums" title="How many emails are stored for this mailbox — not every message it's ever received, since most mail (certificates, acknowledgements, system noise) is deliberately never stored.">
+      {a.email_count.toLocaleString()}
+    </span>
+  ) : (
+    <span className="text-slate-300">—</span>
+  )
+}
+
+function FirstEmailCell({ a, showTime }: { a: AccountRow; showTime: boolean }) {
+  return a.first_email_at ? (
+    <span className="tabular-nums" title="The earliest STORED email for this mailbox — not necessarily its very first message in Gmail, since most mail is never stored at all.">
+      {fmtDateTime(a.first_email_at, showTime)}
+    </span>
+  ) : (
+    <span className="text-slate-300">—</span>
+  )
 }
 
 function PushBadge({ live }: { live: boolean }) {
@@ -443,7 +470,7 @@ export function MailboxesPanel({
       <div className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
         <div className="overflow-auto flex-1 min-h-0 custom-scrollbar">
           {!showingUnlinked ? (
-            <table className="w-full min-w-[1650px] border-separate border-spacing-0 text-base">
+            <table className="w-full min-w-[1900px] border-separate border-spacing-0 text-base">
               <thead className="sticky top-0 z-30 bg-white shadow-xs">
                 <tr>
                   <SortTh tone="blue" id="#" sort={companySort.sort} onSort={companySort.toggle} className="w-16 text-center">#</SortTh>
@@ -452,13 +479,15 @@ export function MailboxesPanel({
                   <SortTh tone="blue" id="kra_password" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[200px]">KRA email password</SortTh>
                   <SortTh tone="blue" id="state" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[170px]">Status</SortTh>
                   <SortTh tone="blue" id="mailboxes" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[340px]">Mailbox</SortTh>
+                  <SortTh tone="blue" id="emails" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[100px]">Emails</SortTh>
+                  <SortTh tone="blue" id="first_email" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[140px]">First email</SortTh>
                   <SortTh tone="blue" id="last_sync" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[150px]">Last sync</SortTh>
                   <SortTh tone="blue" id="push" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[150px]">Push</SortTh>
                   <SortTh tone="blue" id="actions" sort={companySort.sort} onSort={companySort.toggle} className="min-w-[250px] text-left border-r-0">Actions</SortTh>
                 </tr>
               </thead>
               <tbody>
-                {loading && <TableLoading cols={9} />}
+                {loading && <TableLoading cols={11} />}
                 {!loading && pageCompanyRows.map((r, index) => {
                   const cid = String(r.company.id)
                   const key = `c-${cid}`
@@ -508,6 +537,20 @@ export function MailboxesPanel({
                                 </div>
                               </div>
                             ))}
+                          </div>
+                        ) : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className={cn(TD_CLASS, "whitespace-nowrap tabular-nums text-slate-600")}>
+                        {connectedOnce ? (
+                          <div className="space-y-1.5">
+                            {r.accounts.map((a) => <div key={a.id}><EmailCountCell a={a} /></div>)}
+                          </div>
+                        ) : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className={cn(TD_CLASS, "whitespace-nowrap tabular-nums text-slate-600")}>
+                        {connectedOnce ? (
+                          <div className="space-y-1.5">
+                            {r.accounts.map((a) => <div key={a.id}><FirstEmailCell a={a} showTime={showTime} /></div>)}
                           </div>
                         ) : <span className="text-slate-300">—</span>}
                       </td>
@@ -566,18 +609,20 @@ export function MailboxesPanel({
                   )
                 })}
                 {!loading && pageCompanyRows.length === 0 && (
-                  <tr><td colSpan={9} className="py-16 text-center text-slate-400 text-base">
+                  <tr><td colSpan={11} className="py-16 text-center text-slate-400 text-base">
                     {companies.length === 0 ? "No companies loaded." : "No companies match this filter."}
                   </td></tr>
                 )}
               </tbody>
             </table>
           ) : (
-            <table className="w-full min-w-[900px] border-separate border-spacing-0 text-base">
+            <table className="w-full min-w-[1150px] border-separate border-spacing-0 text-base">
               <thead className="sticky top-0 z-30 bg-white shadow-xs">
                 <tr>
                   <SortTh tone="blue" id="#" sort={accountSort.sort} onSort={accountSort.toggle} className="w-16 text-center">#</SortTh>
                   <SortTh tone="blue" id="email" sort={accountSort.sort} onSort={accountSort.toggle} className="text-left min-w-[260px]">Mailbox</SortTh>
+                  <SortTh tone="blue" id="emails" sort={accountSort.sort} onSort={accountSort.toggle} className="text-left min-w-[100px]">Emails</SortTh>
+                  <SortTh tone="blue" id="first_email" sort={accountSort.sort} onSort={accountSort.toggle} className="text-left min-w-[140px]">First email</SortTh>
                   <SortTh tone="blue" id="link" sort={accountSort.sort} onSort={accountSort.toggle} className="text-left min-w-[300px]">Link to company</SortTh>
                   <SortTh tone="blue" id="last_sync" sort={accountSort.sort} onSort={accountSort.toggle} className="text-left min-w-[150px]">Last sync</SortTh>
                   <SortTh tone="blue" id="push" sort={accountSort.sort} onSort={accountSort.toggle} className="text-left min-w-[150px]">Push</SortTh>
@@ -585,7 +630,7 @@ export function MailboxesPanel({
                 </tr>
               </thead>
               <tbody>
-                {loading && <TableLoading cols={6} />}
+                {loading && <TableLoading cols={8} />}
                 {!loading && pageAccountRows.map((a, index) => (
                   <tr key={a.id} className={cn("transition-colors", zebraRow(index))}>
                     <td className={cn(TD_CLASS, "text-center text-slate-400 tabular-nums font-medium")}>{start + index + 1}</td>
@@ -604,6 +649,8 @@ export function MailboxesPanel({
                         </div>
                       )}
                     </td>
+                    <td className={cn(TD_CLASS, "whitespace-nowrap tabular-nums text-slate-600")}><EmailCountCell a={a} /></td>
+                    <td className={cn(TD_CLASS, "whitespace-nowrap tabular-nums text-slate-600")}><FirstEmailCell a={a} showTime={showTime} /></td>
                     <td className={TD_CLASS}>
                       <SearchSelect
                         className="w-full"
@@ -625,7 +672,7 @@ export function MailboxesPanel({
                   </tr>
                 ))}
                 {!loading && pageAccountRows.length === 0 && (
-                  <tr><td colSpan={6} className="py-16 text-center text-slate-400 text-base">
+                  <tr><td colSpan={8} className="py-16 text-center text-slate-400 text-base">
                     <Link2 className="h-8 w-8 mx-auto mb-2 text-slate-300" />
                     Every mailbox is linked to a company.
                   </td></tr>

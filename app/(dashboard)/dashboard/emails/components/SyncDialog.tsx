@@ -20,8 +20,11 @@ import { api, type AccountRow } from "./shared"
 // and case opening behave identically and already-stored mail is simply skipped. Up to three mailboxes run
 // at once; "Stop" finishes the batch in flight and leaves the rest for another run.
 
-const BATCH = 10 // keep in step with BACKFILL_BATCH in lib/email-center/ingest.ts (the server accepts up to double)
-const PARALLEL_MAILBOXES = 3
+const BATCH = 40 // keep in step with BACKFILL_BATCH in lib/email-center/ingest.ts (the server accepts up to double)
+// Each mailbox is a separate Google account with its own Gmail quota, so mailboxes don't compete with
+// each other for it — raised from 3 now that a slow mailbox no longer blocks the others as long either
+// (ingestBackfillBatch itself now runs several messages at once within each one).
+const PARALLEL_MAILBOXES = 5
 const LONG_RANGE_DAYS = 90
 // Gmail launched in 2004: a start date this early covers a mailbox from its very first email.
 const MAILBOX_START = "2004-04-01"

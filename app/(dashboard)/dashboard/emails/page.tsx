@@ -169,9 +169,12 @@ export default function EmailCenterPage() {
     const fetchLists = async () => {
       const [casesRes, reviewRes, updateRes, ignoreRes, rulesRes] = await Promise.all([
         api<{ cases: CaseRow[] }>("/api/email-center/cases?status=all"),
-        api<{ emails: EmailRow[] }>(`/api/email-center/emails?disposition=${EMAIL_TABS[0]}&limit=200`),
-        api<{ emails: EmailRow[] }>(`/api/email-center/emails?disposition=${EMAIL_TABS[1]}&limit=200`),
-        api<{ emails: EmailRow[] }>(`/api/email-center/emails?disposition=${EMAIL_TABS[2]}&limit=200`),
+        // No &limit= here on purpose — this wants the whole tab, same as the comment above always
+        // said; a leftover 200-row cap was silently hiding real mail once needs_review passed it
+        // system-wide. The route's own default (25,000) is the actual ceiling now.
+        api<{ emails: EmailRow[] }>(`/api/email-center/emails?disposition=${EMAIL_TABS[0]}`),
+        api<{ emails: EmailRow[] }>(`/api/email-center/emails?disposition=${EMAIL_TABS[1]}`),
+        api<{ emails: EmailRow[] }>(`/api/email-center/emails?disposition=${EMAIL_TABS[2]}`),
         // A rules problem must never take the whole page down with it.
         api<{ rules: RuleRow[]; source: "database" | "builtin" }>("/api/email-center/rules").catch(() => ({ rules: [] as RuleRow[], source: "builtin" as const })),
       ])
@@ -281,9 +284,12 @@ export default function EmailCenterPage() {
 
   // A rule was created (Rules tab or "Remember this"): add it to the local list and ask whether to
   // re-run the mails currently in Needs Review through it — that's how you see which ones the new
-  // rule would now handle automatically.
+  // rule would now handle automatically. The Rules tab's own save() already appends the rule to
+  // `rules` itself before calling this, so the add here has to be idempotent (by id) rather than
+  // unconditional, or that path ends up with the same row twice — "Remember this", which has no
+  // local rules list of its own, still gets its one and only add from here.
   const handleRuleCreated = useCallback((rule: RuleRow) => {
-    setRules((prev) => [...prev, rule])
+    setRules((prev) => (prev.some((r) => r.id === rule.id) ? prev : [...prev, rule]))
     setReclassifyDue(true)
     setReclassifyPrompt({ pattern: rule.pattern, is_ignore: rule.is_ignore, is_notify: rule.is_notify })
   }, [])
@@ -315,7 +321,9 @@ export default function EmailCenterPage() {
       let changed = 0
       let opened = 0
       while (queue.length) {
-        const batch = queue.slice(0, 25)
+        // Matches the server's own RUN_MAX (100) — was needlessly sending a quarter of that per
+        // round trip, which meant 4x the HTTP overhead on a large backlog for no reason.
+        const batch = queue.slice(0, 100)
         const res = await api<{ processed: number; changed: number; cases_opened: number }>("/api/email-center/reclassify", {
           method: "POST",
           body: JSON.stringify({ action: "run", ids: batch }),
@@ -489,15 +497,18 @@ export default function EmailCenterPage() {
 
   // ── counts, derived from what's already loaded — no separate server round trip for these ──
 
-  const openCasesCount = useMemo(() => cases.filter((c) => c.status === "open").length, [cases])
-  const closedCasesCount = useMemo(() => cases.filter((c) => c.status === "closed").length, [cases])
-  const reviewCount = useMemo(() => emails.filter((e) => e.disposition === "needs_review" && e.category_key !== "notification").length, [emails])
-  // The Notifications tab badge counts the active queue; handled rows are the audit trail, shown via
-  // the tab's "Handled" toggle, not the badge.
-  const notificationCount = useMemo(() => emails.filter((e) => e.category_key === "notification" && !e.handled_at).length, [emails])
-  const notificationHandledCount = useMemo(() => emails.filter((e) => e.category_key === "notification" && !!e.handled_at).length, [emails])
-  const updateCount = useMemo(() => emails.filter((e) => e.disposition === "update_only").length, [emails])
-  const ignoreCount = useMemo(() => emails.filter((e) => e.disposition === "ignore").length, [emails])
+  // Read from the already search/assignee-filtered base* lists (see meetsCaseFilters/meetsEmailFilters
+  // above), not the raw cases/emails — so every tab badge (and the Notifications Active/Handled
+  // toggle) reflects what a search would actually turn up in that tab, not the unfiltered total. Also
+  // doubles as a quick "did this get stored anywhere at all?" check: search a subject/sender and watch
+  // every badge, including Ignored, go to 0 if nothing matches in any tab.
+  const openCasesCount = useMemo(() => baseOpenCases.length, [baseOpenCases])
+  const closedCasesCount = useMemo(() => baseClosedCases.length, [baseClosedCases])
+  const reviewCount = useMemo(() => baseReviewEmails.length, [baseReviewEmails])
+  const notificationCount = useMemo(() => baseNotificationEmails.filter((e) => !e.handled_at).length, [baseNotificationEmails])
+  const notificationHandledCount = useMemo(() => baseNotificationEmails.filter((e) => !!e.handled_at).length, [baseNotificationEmails])
+  const updateCount = useMemo(() => baseUpdateEmails.length, [baseUpdateEmails])
+  const ignoreCount = useMemo(() => baseIgnoredEmails.length, [baseIgnoredEmails])
   const unassignedMailboxes = useMemo(() => accounts.filter((a) => !a.company_id).length, [accounts])
   // Mailboxes Google no longer accepts (token revoked/expired) - nothing syncs from them until they are
   // connected again, so they get their own indicator in the toolbar.

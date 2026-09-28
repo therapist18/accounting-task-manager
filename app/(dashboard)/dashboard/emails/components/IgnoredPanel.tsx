@@ -27,11 +27,11 @@ const BULK_MOVE_TARGETS: Disposition[] = ["action_required", "update_only", "nee
 
 function describeRule(rule: RuleRow) {
   const wordings = [rule.pattern, ...(rule.extra_patterns ?? [])].map((w) => w.trim()).filter(Boolean)
-  const sender = rule.sender_pattern?.trim()
+  const senders = [rule.sender_pattern, ...(rule.extra_sender_patterns ?? [])].map((w) => (w ?? "").trim()).filter(Boolean)
   return {
-    sender: sender || "Any sender",
+    sender: senders.length ? senders.join(" · ") : "Any sender",
     subjects: wordings.length ? wordings.join(" · ") : "Any subject",
-    title: `${sender ? `From: ${sender}\n` : ""}${wordings.length ? `Subject: ${wordings.join("\n         ")}` : "Any subject"}`,
+    title: `${senders.length ? `From: ${senders.join("\n      ")}\n` : ""}${wordings.length ? `Subject: ${wordings.join("\n         ")}` : "Any subject"}`,
   }
 }
 
@@ -267,14 +267,16 @@ export function IgnoredPanel({
                   return (
                     <Row
                       key={rule.id}
-                      icon={<ListFilter className="w-5 h-5" />}
+                      // A hard-ignore rule never stores anything (nothing to click into), so it gets a
+                      // distinct icon rather than reading as a broken/unused rule sitting at 0.
+                      icon={rule.hard_ignore ? <Trash2 className="w-5 h-5" /> : <ListFilter className="w-5 h-5" />}
                       label={d.sender}
-                      sub={d.subjects}
+                      sub={rule.hard_ignore ? `${d.subjects} · deleted, not stored` : d.subjects}
                       count={ruleCounts.get(rule.id) ?? 0}
                       active={group === key}
                       onClick={() => setGroup(key)}
-                      title={d.title}
-                      muted={!rule.is_active || !ruleCounts.get(rule.id)}
+                      title={rule.hard_ignore ? `${d.title}\n\n(Ignore and delete — matching mail is dropped entirely, never shown here)` : d.title}
+                      muted={!rule.is_active || (!rule.hard_ignore && !ruleCounts.get(rule.id))}
                     />
                   )
                 })}
@@ -370,7 +372,13 @@ export function IgnoredPanel({
             showTime={showTime}
             loading={loading}
             embedded
-            emptyMessage={group.startsWith("rule:") ? "This rule hasn't ignored any mail yet." : "No ignored emails."}
+            emptyMessage={
+              group.startsWith("rule:") && ignoreRules.find((x) => x.id === group.slice(5))?.hard_ignore
+                ? "This rule deletes matches entirely — there's never anything to show here."
+                : group.startsWith("rule:")
+                  ? "This rule hasn't ignored any mail yet."
+                  : "No ignored emails."
+            }
             selection={{ selected, onToggle: toggle, onToggleAll: toggleAll }}
             onAllocate={(e, d) => { if (e.disposition !== d) onMove([e], d) }}
           />

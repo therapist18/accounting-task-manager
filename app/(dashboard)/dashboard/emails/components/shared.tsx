@@ -1,5 +1,6 @@
 "use client"
 
+import { ArrowRightCircle, Bell, EyeOff, FilePlus2, Link2, Trash2, XCircle } from "lucide-react"
 import { SearchableSelect, type Option } from "@/components/ui/searchable-select"
 import { cn } from "@/lib/utils"
 import { formatDateCell } from "../../summary-reports/components/reportCellRenderers"
@@ -41,6 +42,9 @@ export interface CaseRow {
   status: "open" | "closed"
   created_by_id: string | null
   created_by_name?: string | null
+  // The rule that auto-opened this case, if any (null for a manually-created case, or one opened
+  // before this link existed). Present on the case detail fetch only.
+  created_by_rule?: { pattern: string; category_name: string; is_active: boolean } | null
   assigned_to_id: string | null
   assigned_to_name: string | null
   assigned_by_name?: string | null
@@ -78,6 +82,11 @@ export interface EmailRow {
   handled_by_id?: string | null
   handled_by_name?: string | null
   handled_at?: string | null
+  // Who (a person, on a manual reclassification) and when — null classified_by_id means the system
+  // classified it automatically (a rule or AI, see classification_source), not that it's unknown.
+  classified_by_id?: string | null
+  classified_by_name?: string | null
+  classified_at?: string | null
   // The ignore rule that caused this email to be stored as ignored (null for auto-ignored no-reply
   // mail and for mail ignored by hand).
   matched_rule_id?: string | null
@@ -110,6 +119,12 @@ export interface AccountRow {
   watch_expiry: string | null
   last_synced_at: string | null
   last_sync_error: string | null
+  // How much mail is actually stored for this mailbox, and how far back — email_accounts columns,
+  // kept current by a trigger on `emails` (20261004000000).
+  // first_email_at is the earliest STORED email, not the mailbox's true oldest message in Gmail —
+  // most mail (certificates, acknowledgements, system noise) is deliberately never stored at all.
+  email_count?: number
+  first_email_at?: string | null
 }
 
 // Sync errors that mean Google no longer accepts this mailbox's stored login (revoked, expired, password
@@ -139,10 +154,18 @@ export interface RuleRow {
   is_active: boolean
   notes: string | null
   is_ignore: boolean
+  // Only meaningful when is_ignore is true: drop a match entirely instead of storing it under the
+  // Ignored tab — for mail that has nothing to do with KRA at all.
+  hard_ignore: boolean
   is_notify: boolean
   sender_pattern: string | null
+  // Alternative senders; the rule matches sender_pattern OR any of these.
+  extra_sender_patterns: string[]
   sender_match_type: "contains" | "regex" | null
+  created_at?: string | null
+  created_by_name?: string | null
   updated_at: string | null
+  updated_by_name?: string | null
 }
 
 export interface CompanyOption {
@@ -166,6 +189,24 @@ export interface CategoryOption {
 export interface StaffOption {
   id: string
   name: string
+}
+
+// What actually happens to a matching email — the one thing the Category pill alone doesn't say (a
+// category name like "Demand / Penalty / Assessment" doesn't tell you whether it opens a task, only
+// updates one, or is never stored at all). Checked in the same order ingestion itself decides it:
+// ignore, then notify, then the category's own creates_case / attaches_to_case / disposition. Shared
+// (not RulesPanel-local) so the Rules table and the Excel export render the exact same wording.
+export type RuleOutcome = { icon: typeof FilePlus2; label: string; tone: string }
+
+export function ruleOutcome(r: RuleRow, cat: CategoryOption | undefined): RuleOutcome {
+  if (r.is_ignore && r.hard_ignore) return { icon: Trash2, label: "Deleted — never stored, no task", tone: "text-red-600" }
+  if (r.is_ignore) return { icon: EyeOff, label: "Ignored — stored, no task", tone: "text-slate-500" }
+  if (r.is_notify) return { icon: Bell, label: "Notifications tab — flagged urgent, no task", tone: "text-amber-600" }
+  if (cat?.creates_case) return { icon: FilePlus2, label: "Opens a task", tone: "text-emerald-600" }
+  if (cat?.attaches_to_case) return { icon: Link2, label: "Updates an existing task only", tone: "text-blue-600" }
+  if (cat?.disposition === "needs_review") return { icon: ArrowRightCircle, label: "Needs Review — no task", tone: "text-amber-600" }
+  if (cat?.disposition === "ignore") return { icon: EyeOff, label: "Ignored — stored, no task", tone: "text-slate-500" }
+  return { icon: XCircle, label: "Recognized as an Update only but not stored — stays in Gmail", tone: "text-slate-400" }
 }
 
 export const DISPOSITION_LABEL: Record<Disposition, string> = {

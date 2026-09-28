@@ -465,7 +465,18 @@ export function CaseDialog({
               <section className="space-y-3">
                 <h3 className="text-base font-semibold text-slate-800">History</h3>
                 <ol className="relative border-l border-slate-300 ml-1.5 space-y-4 text-base">
-                  <HistoryItem tone="blue" title="Case opened" detail={`${shown.created_by_name ?? (shown.created_by_id ? "Staff" : "System (from email)")} · ${fmtDate(shown.email_date)}`} />
+                  <HistoryItem
+                    tone="blue"
+                    title="Case opened"
+                    detail={`${shown.created_by_name ?? (shown.created_by_id ? "Staff" : "System (from email)")} · ${fmtDate(shown.email_date)}`}
+                  />
+                  {shown.created_by_rule && (
+                    <HistoryItem
+                      tone="blue"
+                      title={`Rule: “${shown.created_by_rule.pattern}”`}
+                      detail={`→ ${shown.created_by_rule.category_name}${shown.created_by_rule.is_active ? "" : " · this rule has since been deleted"}`}
+                    />
+                  )}
                   {shown.assigned_to_name && (
                     <HistoryItem
                       tone="blue"

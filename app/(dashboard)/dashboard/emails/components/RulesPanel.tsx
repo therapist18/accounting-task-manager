@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, ArrowRightCircle, Bell, CheckCircle2, EyeOff, FilePlus2, Info, Link2, Loader2, Mail, Pencil, Plus, Tag, Trash2, XCircle } from "lucide-react"
+import { AlertTriangle, Bell, CheckCircle2, Download, EyeOff, Info, Loader2, Mail, Pencil, Plus, Tag, Trash2, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -15,7 +15,8 @@ import {
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { HEAD_BLUE, TableLoading, SortTh, TD_CLASS, TH_CLASS, useSortedRows, zebraRow } from "./table"
-import { PRIMARY_PILL_BUTTON_CLASS, SearchSelect, api, type CategoryOption, type RuleRow } from "./shared"
+import { PRIMARY_PILL_BUTTON_CLASS, SearchSelect, api, fmtDateTime, ruleOutcome, type CategoryOption, type RuleRow } from "./shared"
+import { exportRulesToExcel } from "./exportRules"
 
 // The Rules tab: the subject rules that drive automatic classification, auto-ignore and important
 // notifications, editable without a deploy. Rules are tried lowest "Order" first and the first match
@@ -32,24 +33,10 @@ const SORT_VALUE: Record<string, (r: RuleRow) => string | number> = {
   category: (r) => r.category_key,
   confidence: (r) => r.confidence,
   active: (r) => (r.is_active ? 1 : 0),
+  changed: (r) => r.updated_at ?? r.created_at ?? "",
   actions: (r) => r.updated_at ?? "", // most recently edited last
 }
 
-// What actually happens to a matching email — the one thing the Category pill alone doesn't say (a
-// category name like "Demand / Penalty / Assessment" doesn't tell you whether it opens a task, only
-// updates one, or is never stored at all). Checked in the same order ingestion itself decides it:
-// ignore, then notify, then the category's own creates_case / attaches_to_case / disposition.
-type Outcome = { icon: typeof FilePlus2; label: string; tone: string }
-
-function ruleOutcome(r: RuleRow, cat: CategoryOption | undefined): Outcome {
-  if (r.is_ignore) return { icon: EyeOff, label: "Ignored — stored, no task", tone: "text-slate-500" }
-  if (r.is_notify) return { icon: Bell, label: "Notifications tab — flagged urgent, no task", tone: "text-amber-600" }
-  if (cat?.creates_case) return { icon: FilePlus2, label: "Opens a task", tone: "text-emerald-600" }
-  if (cat?.attaches_to_case) return { icon: Link2, label: "Updates an existing task only", tone: "text-blue-600" }
-  if (cat?.disposition === "needs_review") return { icon: ArrowRightCircle, label: "Needs Review — no task", tone: "text-amber-600" }
-  if (cat?.disposition === "ignore") return { icon: EyeOff, label: "Ignored — stored, no task", tone: "text-slate-500" }
-  return { icon: XCircle, label: "Recognized as an Update only but not stored — stays in Gmail", tone: "text-slate-400" }
-}
 
 const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
@@ -101,12 +88,15 @@ const ACTIONS: Array<{ value: RuleAction; title: string; hint: string; icon: typ
 type Draft = {
   id: string | null
   is_ignore: boolean
+  // Only asked about when is_ignore is true: drop a match entirely instead of storing it under Ignored.
+  hard_ignore: boolean
   is_notify: boolean
   match_type: "contains" | "regex"
   // Subject wordings, one per line: the first is the rule's primary pattern, the rest are alternatives.
   wordings: string
   sender_match_type: "contains" | "regex"
-  sender_pattern: string
+  // Sender addresses, one per line: the first is sender_pattern, the rest are extra_sender_patterns.
+  sender_patterns: string
   category_key: string
   confidence: string
   sort_order: string
@@ -115,7 +105,7 @@ type Draft = {
 }
 
 const emptyDraft = (nextOrder: number): Draft => ({
-  id: null, is_ignore: false, is_notify: false, match_type: "contains", wordings: "", sender_match_type: "contains", sender_pattern: "",
+  id: null, is_ignore: false, hard_ignore: false, is_notify: false, match_type: "contains", wordings: "", sender_match_type: "contains", sender_patterns: "",
   category_key: "", confidence: "90", sort_order: String(nextOrder), notes: "", is_active: true,
 })
 
@@ -142,7 +132,11 @@ export function RulesPanel({
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return rules
-    return rules.filter((r) => `${r.pattern} ${(r.extra_patterns ?? []).join(" ")} ${r.sender_pattern ?? ""} ${catByKey.get(r.category_key)?.name ?? r.category_key} ${r.notes ?? ""}`.toLowerCase().includes(q))
+    return rules.filter((r) =>
+      `${r.pattern} ${(r.extra_patterns ?? []).join(" ")} ${r.sender_pattern ?? ""} ${(r.extra_sender_patterns ?? []).join(" ")} ${catByKey.get(r.category_key)?.name ?? r.category_key} ${r.notes ?? ""}`
+        .toLowerCase()
+        .includes(q)
+    )
   }, [rules, search, catByKey])
 
   // outcome needs catByKey (a rule alone doesn't say what its category does), so it's merged in here
@@ -157,16 +151,40 @@ export function RulesPanel({
   const [sample, setSample] = useState("")
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState<RuleRow | null>(null)
+  // How many tasks the rule being deleted has opened, fetched fresh each time the dialog opens so the
+  // choice below is based on real numbers rather than asking blind.
+  const [impact, setImpact] = useState<{ open: number; closed: number; total: number } | null>(null)
+  const [impactLoading, setImpactLoading] = useState(false)
+  const [deleteTasksToo, setDeleteTasksToo] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const nextOrder = (rules.reduce((max, r) => Math.max(max, r.sort_order), 0) || 0) + 10
+
+  // Exports whatever the table is currently showing (the search filter applies, sort order doesn't —
+  // the sheet is always in "tried in this order" order, matching how the rules actually run).
+  const exportExcel = async () => {
+    setExporting(true)
+    try {
+      await exportRulesToExcel(visible, categories)
+      toast.success(`Exported ${visible.length} rule${visible.length === 1 ? "" : "s"}.`)
+    } catch (e: any) {
+      toast.error(e.message ?? "Could not export the rules.")
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const openNew = () => { setSample(""); setDraft(emptyDraft(nextOrder)) }
   const openEdit = (r: RuleRow) => {
     setSample("")
     setDraft({
-      id: r.id, is_ignore: r.is_ignore, is_notify: r.is_notify, match_type: r.match_type, wordings: [r.pattern, ...(r.extra_patterns ?? [])].filter(Boolean).join("\n"),
-      sender_match_type: r.sender_match_type ?? "contains", sender_pattern: r.sender_pattern ?? "",
+      id: r.id, is_ignore: r.is_ignore, hard_ignore: r.hard_ignore, is_notify: r.is_notify, match_type: r.match_type,
+      // Lowercased on the way in too — a rule saved before this field forced lowercase (or with mixed
+      // case some other way) should still open reading the same way it would if you retyped it now.
+      wordings: [r.pattern, ...(r.extra_patterns ?? [])].filter(Boolean).join("\n").toLowerCase(),
+      sender_match_type: r.sender_match_type ?? "contains",
+      sender_patterns: [r.sender_pattern, ...(r.extra_sender_patterns ?? [])].filter(Boolean).join("\n"),
       category_key: r.category_key,
       confidence: String(Math.round(r.confidence * 100)), sort_order: String(r.sort_order), notes: r.notes ?? "", is_active: r.is_active,
     })
@@ -175,18 +193,21 @@ export function RulesPanel({
   const save = async () => {
     if (!draft) return
     const lines = splitWordings(draft.wordings)
-    if (!lines.length && !draft.sender_pattern.trim()) return toast.error("Add at least one subject wording, or a sender, to match.")
+    const senderLines = splitWordings(draft.sender_patterns)
+    if (!lines.length && !senderLines.length) return toast.error("Add at least one subject wording, or a sender, to match.")
     if (!draft.is_ignore && !draft.is_notify && !lines.length) return toast.error("A classify rule needs at least one subject wording.")
     if (!draft.is_ignore && !draft.is_notify && !draft.category_key) return toast.error("Choose a category.")
     const confidence = Number(draft.confidence) / 100
     if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) return toast.error("Confidence must be between 0 and 100.")
     const payload = {
       is_ignore: draft.is_ignore,
+      hard_ignore: draft.is_ignore && draft.hard_ignore,
       is_notify: draft.is_notify,
       match_type: draft.match_type,
       pattern: lines[0] ?? "",
       extra_patterns: lines.slice(1),
-      sender_pattern: draft.sender_pattern.trim() || null,
+      sender_pattern: senderLines[0] ?? null,
+      extra_sender_patterns: senderLines.slice(1),
       sender_match_type: draft.sender_match_type,
       // The table keeps category_key NOT NULL; ignore rules carry "system_noise" and notify rules
       // carry "notification" — neither name a real category.
@@ -226,12 +247,26 @@ export function RulesPanel({
     }
   }
 
+  const openDelete = (r: RuleRow) => {
+    setDeleting(r)
+    setDeleteTasksToo(false)
+    setImpact(null)
+    setImpactLoading(true)
+    api<{ open: number; closed: number; total: number }>(`/api/email-center/rules/${r.id}/impact`)
+      .then(setImpact)
+      .catch(() => setImpact({ open: 0, closed: 0, total: 0 })) // unknown is treated as "none" rather than blocking the dialog
+      .finally(() => setImpactLoading(false))
+  }
+
   const remove = async () => {
     if (!deleting) return
     try {
-      await api(`/api/email-center/rules/${deleting.id}`, { method: "DELETE" })
+      const res = await api<{ tasksDeleted: number }>(`/api/email-center/rules/${deleting.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ deleteTasks: deleteTasksToo }),
+      })
       onRulesChange((prev) => prev.filter((r) => r.id !== deleting.id))
-      toast.success("Rule deleted.")
+      toast.success(res.tasksDeleted ? `Rule deleted — ${res.tasksDeleted} task${res.tasksDeleted === 1 ? "" : "s"} deleted with it.` : "Rule deleted.")
     } catch (e: any) {
       toast.error(e.message)
     } finally {
@@ -257,9 +292,21 @@ export function RulesPanel({
             <Info className="h-5 w-5 text-custom-blue" /> How rules work
           </button>
         </div>
-        <Button size="sm" onClick={openNew} disabled={readOnly} className={cn(PRIMARY_PILL_BUTTON_CLASS, "shrink-0")}>
-          <Plus className="w-5 h-5" /> Add rule
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportExcel}
+            disabled={exporting || !visible.length}
+            className="h-9 px-3.5 gap-1.5 rounded-full border-slate-200 text-base font-medium"
+            title="Download the rules shown below as a styled Excel file"
+          >
+            {exporting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />} Export
+          </Button>
+          <Button size="sm" onClick={openNew} disabled={readOnly} className={PRIMARY_PILL_BUTTON_CLASS}>
+            <Plus className="w-5 h-5" /> Add rule
+          </Button>
+        </div>
       </div>
 
       {readOnly && (
@@ -279,7 +326,7 @@ export function RulesPanel({
 
       <div className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
         <div className="overflow-auto flex-1 min-h-0 custom-scrollbar">
-          <table className="w-full min-w-[1220px] border-separate border-spacing-0 text-base">
+          <table className="w-full min-w-[1420px] border-separate border-spacing-0 text-base">
             <thead className="sticky top-0 z-30 bg-white shadow-xs">
               <tr>
                 <SortTh tone="blue" id="#" sort={sort} onSort={toggle} className="w-16 text-center">#</SortTh>
@@ -290,11 +337,12 @@ export function RulesPanel({
                 <SortTh tone="blue" id="outcome" sort={sort} onSort={toggle} className="min-w-[220px] text-left">Result</SortTh>
                 <SortTh tone="blue" id="confidence" sort={sort} onSort={toggle} className="w-36 text-left">Confidence</SortTh>
                 <SortTh tone="blue" id="active" sort={sort} onSort={toggle} className="w-28 text-left">Active</SortTh>
+                <SortTh tone="blue" id="changed" sort={sort} onSort={toggle} className="w-44 text-left">Last changed</SortTh>
                 <SortTh tone="blue" id="actions" sort={sort} onSort={toggle} className="w-32 border-r-0 text-left">Actions</SortTh>
               </tr>
             </thead>
             <tbody>
-              {loading && <TableLoading cols={9} />}
+              {loading && <TableLoading cols={10} />}
               {!loading && sorted.map((r, index) => {
                 const cat = catByKey.get(r.category_key)
                 const auto = r.confidence >= 0.8
@@ -328,17 +376,30 @@ export function RulesPanel({
                             ))
                           : <span className="text-slate-400">Any subject</span>
                       })()}
-                      {r.sender_pattern && (
-                        <div className="flex items-center gap-1.5 font-sans text-sm text-slate-500 mt-0.5">
-                          <Mail className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                          from <span className="font-mono">{r.sender_pattern}</span>
-                          <span className="text-slate-400">{r.sender_match_type === "regex" ? "regex" : "contains"}</span>
-                        </div>
-                      )}
+                      {(() => {
+                        const senders = [r.sender_pattern, ...(r.extra_sender_patterns ?? [])].filter(Boolean) as string[]
+                        return senders.length > 0 && (
+                          <div className="flex items-start gap-1.5 font-sans text-sm text-slate-500 mt-0.5">
+                            <Mail className="h-3.5 w-3.5 shrink-0 text-slate-400 mt-0.5" />
+                            <span className="min-w-0">
+                              from{" "}
+                              {senders.map((s, i) => (
+                                <span key={i}>
+                                  {i > 0 && <span className="text-slate-400">{" or "}</span>}
+                                  <span className="font-mono">{s}</span>
+                                </span>
+                              ))}{" "}
+                              <span className="text-slate-400">{r.sender_match_type === "regex" ? "regex" : "contains"}</span>
+                            </span>
+                          </div>
+                        )
+                      })()}
                       {r.notes && <div className="font-sans text-sm text-slate-400 mt-0.5">{r.notes}</div>}
                     </td>
                     <td className={TD_CLASS}>
-                      {r.is_ignore ? (
+                      {r.is_ignore && r.hard_ignore ? (
+                        <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200">Ignore &amp; delete</span>
+                      ) : r.is_ignore ? (
                         <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-slate-100 text-slate-600 border-slate-300">Ignore</span>
                       ) : r.is_notify ? (
                         <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">Notify</span>
@@ -369,12 +430,16 @@ export function RulesPanel({
                     <td className={TD_CLASS}>
                       <Switch checked={r.is_active} disabled={readOnly} onCheckedChange={(v) => toggleActive(r, v)} />
                     </td>
+                    <td className={TD_CLASS} title={r.created_at ? `Created ${fmtDateTime(r.created_at)}${r.created_by_name ? ` by ${r.created_by_name}` : ""}` : undefined}>
+                      <div className="text-slate-700">{r.updated_by_name ?? (r.created_by_name ? r.created_by_name : "System")}</div>
+                      <div className="text-sm text-slate-400">{r.updated_at ? fmtDateTime(r.updated_at) : r.created_at ? fmtDateTime(r.created_at) : "—"}</div>
+                    </td>
                     <td className={cn(TD_CLASS, "border-r-0")}>
                       <div className="flex items-center gap-1.5">
                         <Button variant="outline" size="sm" disabled={readOnly} onClick={() => openEdit(r)} className="h-9 w-9 p-0 rounded-md border-slate-200" title="Edit rule">
                           <Pencil className="w-4 h-4 text-slate-600" />
                         </Button>
-                        <Button variant="outline" size="sm" disabled={readOnly} onClick={() => setDeleting(r)} className="h-9 w-9 p-0 rounded-md border-slate-200 hover:bg-red-50 hover:border-red-200" title="Delete rule">
+                        <Button variant="outline" size="sm" disabled={readOnly} onClick={() => openDelete(r)} className="h-9 w-9 p-0 rounded-md border-slate-200 hover:bg-red-50 hover:border-red-200" title="Delete rule">
                           <Trash2 className="w-4 h-4 text-red-500" />
                         </Button>
                       </div>
@@ -383,7 +448,7 @@ export function RulesPanel({
                 )
               })}
               {!loading && sorted.length === 0 && (
-                <tr><td colSpan={9} className="py-16 text-center text-slate-400 text-base">No rules match.</td></tr>
+                <tr><td colSpan={10} className="py-16 text-center text-slate-400 text-base">No rules match.</td></tr>
               )}
             </tbody>
           </table>
@@ -487,6 +552,31 @@ export function RulesPanel({
                     )
                   })}
                 </div>
+                {draft.is_ignore && (
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    {(
+                      [
+                        { value: false, title: "Keep a record", hint: "Stored under the Ignored tab, so you can look back on what it caught." },
+                        { value: true, title: "Delete completely", hint: "Never stored anywhere, not even Ignored — for mail that has nothing to do with KRA at all." },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={String(opt.value)}
+                        type="button"
+                        onClick={() => setDraft({ ...draft, hard_ignore: opt.value })}
+                        className={cn(
+                          "text-left rounded-xl border px-4 py-3 transition-colors",
+                          draft.hard_ignore === opt.value
+                            ? opt.value ? "border-red-400 bg-red-50 ring-1 ring-red-400" : "border-slate-400 bg-slate-50 ring-1 ring-slate-400"
+                            : "border-slate-200 bg-white hover:bg-slate-50"
+                        )}
+                      >
+                        <span className="text-base font-semibold text-slate-900">{opt.title}</span>
+                        <span className="block text-sm text-slate-500 mt-1 leading-snug">{opt.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </Step>
 
               {/* 2 - what to look for: sender (ignore / flag only), then subject */}
@@ -497,21 +587,27 @@ export function RulesPanel({
               >
                 {(draft.is_ignore || draft.is_notify) && (
                   <div className="space-y-1.5">
-                    <Label className="text-sm font-medium text-slate-600">Sender <span className="text-slate-400 font-normal">— optional, blank = any sender</span></Label>
-                    <div className="grid sm:grid-cols-[1fr_11rem] gap-3">
-                      <Input
-                        className="h-10 text-base rounded-md border-slate-200 font-mono bg-white"
-                        value={draft.sender_pattern}
-                        onChange={(e) => setDraft({ ...draft, sender_pattern: e.target.value })}
-                        placeholder="e.g. admin.itax2@kra.go.ke"
-                      />
-                      <SearchSelect
-                        className="w-full"
-                        value={draft.sender_match_type}
-                        onChange={(v) => setDraft({ ...draft, sender_match_type: v as Draft["sender_match_type"] })}
-                        options={[{ value: "contains", label: "Contains text" }, { value: "regex", label: "Regular expression" }]}
-                      />
+                    <div className="flex flex-wrap items-end justify-between gap-3">
+                      <Label className="text-sm font-medium text-slate-600">
+                        Sender <span className="text-slate-400 font-normal">— one per line, optional, blank = any sender</span>
+                      </Label>
+                      <div className="w-44">
+                        <SearchSelect
+                          className="w-full"
+                          value={draft.sender_match_type}
+                          onChange={(v) => setDraft({ ...draft, sender_match_type: v as Draft["sender_match_type"] })}
+                          options={[{ value: "contains", label: "Contains text" }, { value: "regex", label: "Regular expression" }]}
+                        />
+                      </div>
                     </div>
+                    <Textarea
+                      rows={2}
+                      className="text-base rounded-md border-slate-200 font-mono leading-relaxed"
+                      value={draft.sender_patterns}
+                      onChange={(e) => setDraft({ ...draft, sender_patterns: e.target.value.toLowerCase() })}
+                      placeholder={"admin.itax2@kra.go.ke\nmarketing.emails@cloudhq.net"}
+                    />
+                    <p className="text-sm text-slate-400">Matches mail from <span className="font-medium text-slate-500">any</span> of these senders — add more than one to treat them the same way in one rule.</p>
                   </div>
                 )}
 
@@ -534,10 +630,12 @@ export function RulesPanel({
                     rows={5}
                     className={cn("text-base rounded-md border-slate-200 font-mono leading-relaxed", result === "invalid" && "border-red-300")}
                     value={draft.wordings}
-                    onChange={(e) => setDraft({ ...draft, wordings: e.target.value })}
+                    // Matching is already case-insensitive; lowercasing on the way in just keeps what's
+                    // typed or pasted (any case) reading consistently in the list and in "Try it".
+                    onChange={(e) => setDraft({ ...draft, wordings: e.target.value.toLowerCase() })}
                     placeholder={draft.match_type === "regex"
                       ? "pre-?assess(ment)?\nnotice of pre.?assessment"
-                      : "Payment against Payment Registration Number\nSuccessful completion of payment registration"}
+                      : "payment against payment registration number\nsuccessful completion of payment registration"}
                   />
                   <p className="text-sm text-slate-400">
                     The rule matches when the subject contains <span className="font-medium text-slate-500">any</span> line. Not case-sensitive.
@@ -620,15 +718,44 @@ export function RulesPanel({
             <AlertDialogDescription>
               {(deleting?.pattern || deleting?.sender_pattern) ? (
                 <>Emails matching <span className="font-mono font-medium">{deleting?.pattern || "any subject"}</span>
-                  {deleting?.sender_pattern ? <> from <span className="font-mono font-medium">{deleting.sender_pattern}</span></> : null} will no longer be
+                  {deleting?.sender_pattern ? (
+                    <> from <span className="font-mono font-medium">{[deleting.sender_pattern, ...(deleting.extra_sender_patterns ?? [])].filter(Boolean).join(" or ")}</span></>
+                  ) : null} will no longer be
                   {deleting?.is_ignore ? " automatically ignored by it." : deleting?.is_notify ? " flagged as important notifications by it." : " classified automatically by it."}</>
               ) : "This rule will be removed."}
-              Emails already stored keep their classification. You can switch a rule off instead if you might want it back.
+              {" "}Emails already stored keep their classification. You can switch a rule off instead if you might want it back.
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {impactLoading ? (
+            <div className="flex items-center gap-2 text-base text-slate-500 py-1">
+              <Loader2 className="w-4 h-4 animate-spin" /> Checking how many tasks this rule opened…
+            </div>
+          ) : impact && impact.total > 0 ? (
+            <label className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={deleteTasksToo}
+                onChange={(e) => setDeleteTasksToo(e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-red-600 cursor-pointer"
+              />
+              <span className="text-base text-slate-700">
+                This rule opened <span className="font-semibold">{impact.total} task{impact.total === 1 ? "" : "s"}</span>
+                {impact.open > 0 && impact.closed > 0 ? ` (${impact.open} open, ${impact.closed} closed)` : impact.open > 0 ? " (still open)" : " (closed)"}.
+                <span className="block text-sm text-slate-500 mt-0.5">
+                  {deleteTasksToo
+                    ? "Checked: they'll be deleted too, and their emails will go back to Needs Review."
+                    : "Unchecked: they're kept exactly as they are — this only stops the rule matching new mail."}
+                </span>
+              </span>
+            </label>
+          ) : null}
+
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={remove} className="bg-red-600 hover:bg-red-700">Delete rule</AlertDialogAction>
+            <AlertDialogAction onClick={remove} className="bg-red-600 hover:bg-red-700">
+              {deleteTasksToo && impact?.total ? `Delete rule and ${impact.total} task${impact.total === 1 ? "" : "s"}` : "Delete rule"}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

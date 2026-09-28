@@ -428,6 +428,14 @@ export function EmailDialog({
                       </dd>
                     </>
                   )}
+                  {shown.classification_source === "manual" && (
+                    <>
+                      <dt className="text-slate-500">Reclassified by</dt>
+                      <dd className="text-slate-800">
+                        {shown.classified_by_name ?? "Staff"}{shown.classified_at && ` · ${fmtDateTime(shown.classified_at, true)}`}
+                      </dd>
+                    </>
+                  )}
                 </dl>
               </section>
             </aside>

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { authorize, fail } from "@/lib/email-center/api"
+import { authorize, fail, userNames } from "@/lib/email-center/api"
 import {
-  EXTRA_MIGRATION_MESSAGE, RULES_TABLE, RULE_COLUMNS, RULE_COLUMNS_BASE, invalidateRulesCache, isMissingExtraColumn, normalizeRuleRow,
+  EXTRA_MIGRATION_MESSAGE, EXTRA_SENDER_MIGRATION_MESSAGE, RULES_TABLE, invalidateRulesCache,
+  normalizeRuleRow, ruleColumns, withOptionalColumnFallback, withoutDroppedColumns,
 } from "@/lib/email-center/rule-store"
 import { parseRuleBody } from "@/lib/email-center/rule-validation"
 
@@ -29,13 +30,16 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     }
 
     const changes = { ...parsed.value, updated_by_id: actor.id, updated_at: new Date().toISOString() }
-    let { data, error } = await sb.from(RULES_TABLE).update(changes).eq("id", id).select(RULE_COLUMNS).maybeSingle()
-    if (isMissingExtraColumn(error)) {
-      // Migration not applied: clearing/keeping an empty list is harmless to drop, real extra wordings can't be saved.
-      if (parsed.value.extra_patterns?.length) return NextResponse.json({ success: false, error: EXTRA_MIGRATION_MESSAGE }, { status: 409 })
-      const { extra_patterns: _omit, ...withoutExtras } = changes
-      ;({ data, error } = await sb.from(RULES_TABLE).update(withoutExtras).eq("id", id).select(RULE_COLUMNS_BASE).maybeSingle())
-    }
+    const { data, error, blocked } = await withOptionalColumnFallback<any>(
+      (dropped) => sb.from(RULES_TABLE).update(withoutDroppedColumns(changes, dropped)).eq("id", id).select(ruleColumns(dropped)).maybeSingle(),
+      (col) => {
+        // Clearing/keeping an empty list is harmless to drop; real extra wordings/senders can't be.
+        // hard_ignore has a safe default (false), so it never blocks.
+        if (col === "extra_patterns" && parsed.value.extra_patterns?.length) return EXTRA_MIGRATION_MESSAGE
+        if (col === "extra_sender_patterns" && parsed.value.extra_sender_patterns?.length) return EXTRA_SENDER_MIGRATION_MESSAGE
+      }
+    )
+    if (blocked) return NextResponse.json({ success: false, error: blocked }, { status: 409 })
     if (error) {
       if ((error as any).code === "23505") {
         return NextResponse.json({ success: false, error: "A rule with this exact pattern already exists." }, { status: 409 })
@@ -44,21 +48,80 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     }
     if (!data) return NextResponse.json({ success: false, error: "Rule not found." }, { status: 404 })
     invalidateRulesCache()
-    return NextResponse.json({ success: true, rule: normalizeRuleRow(data) })
+    const names = await userNames(sb, [data.created_by_id, data.updated_by_id])
+    return NextResponse.json({
+      success: true,
+      rule: {
+        ...normalizeRuleRow(data),
+        created_by_name: data.created_by_id ? names.get(String(data.created_by_id)) ?? null : null,
+        updated_by_name: data.updated_by_id ? names.get(String(data.updated_by_id)) ?? null : null,
+      },
+    })
   } catch (error) {
     return fail(error, "rule PATCH")
   }
 }
 
-// DELETE /api/email-center/rules/:id
+// DELETE /api/email-center/rules/:id — { deleteTasks?: boolean }
+// A soft delete (deleted_at/deleted_by_id + is_active: false): the row disappears from the Rules tab
+// and from classification, but stays in the database so a task's created_by_rule_id keeps resolving
+// to something, and so the delete itself has an audit trail — a hard delete left no trace at all.
+//
+// deleteTasks decides what happens to the tasks (email_case rows) this rule already opened:
+//   false (default)  they're left exactly as they are, still pointing at this now-deleted rule.
+//   true              they're removed, and the emails that were in them go back to Needs Review
+//                      (case_id cleared) rather than being silently stranded with no case and no
+//                      tab that shows them.
 export async function DELETE(request: NextRequest, { params }: Ctx) {
   try {
-    const { sb } = await authorize(request)
+    const { sb, actor } = await authorize(request)
     const { id } = await params
-    const { error } = await sb.from(RULES_TABLE).delete().eq("id", id)
-    if (error) throw new Error(error.message)
+    const body = (await request.json().catch(() => ({}))) as { deleteTasks?: boolean }
+    const now = new Date().toISOString()
+
+    let tasksDeleted = 0
+    if (body.deleteTasks === true) {
+      const { data: cases } = await sb.from("email_case").select("id").eq("created_by_rule_id", id)
+      const caseIds = (cases ?? []).map((c: any) => c.id)
+      if (caseIds.length) {
+        const { error: emailsErr } = await sb
+          .from("emails")
+          .update({
+            case_id: null,
+            disposition: "needs_review",
+            review_reason: "Its task was deleted along with the rule that created it.",
+            updated_by_id: actor.id,
+            updated_at: now,
+          })
+          .in("case_id", caseIds)
+        if (emailsErr) throw new Error(emailsErr.message)
+
+        const { error: casesErr } = await sb.from("email_case").delete().in("id", caseIds)
+        if (casesErr) throw new Error(casesErr.message)
+        tasksDeleted = caseIds.length
+      }
+    }
+
+    const { error, data } = await sb
+      .from(RULES_TABLE)
+      .update({ is_active: false, deleted_at: now, deleted_by_id: actor.id, updated_by_id: actor.id, updated_at: now })
+      .eq("id", id)
+      .select("id")
+      .maybeSingle()
+    if (error) {
+      // deleted_at not applied yet — fall back to the old hard delete rather than failing outright.
+      if (/deleted_at|deleted_by_id/i.test(error.message)) {
+        const { error: hardErr } = await sb.from(RULES_TABLE).delete().eq("id", id)
+        if (hardErr) throw new Error(hardErr.message)
+      } else {
+        throw new Error(error.message)
+      }
+    } else if (!data) {
+      return NextResponse.json({ success: false, error: "Rule not found." }, { status: 404 })
+    }
+
     invalidateRulesCache()
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, tasksDeleted })
   } catch (error) {
     return fail(error, "rule DELETE")
   }

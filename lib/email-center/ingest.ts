@@ -31,6 +31,12 @@ const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
 const LOCK_MS = 90_000
 const MAX_PASSES = 3
 const BUCKET = "email-attachments"
+// How many messages ingestMessage() runs at once, within ONE mailbox. Each KRA email can mean 2+
+// Gmail calls (metadata, then a full fetch), one more per attachment, an AI call for a confident
+// notice, and several DB round trips — running them one at a time was the actual bottleneck, not
+// Gmail's quota (250 units/user/second; a handful of concurrent full-fetches + attachment downloads
+// sits nowhere close to that). Kept well under the quota rather than tuned to the exact ceiling.
+const INGEST_CONCURRENCY = 6
 
 export interface AccountRow {
   id: string
@@ -170,6 +176,9 @@ export interface CaseFacts {
   extracted: Partial<AiExtraction> | null
   snippet: string
   attachment_names: string[]
+  // The classify rule that decided this email's category, when a rule (rather than AI or a person)
+  // is what actually opened the case. Absent/null for the manual "mark as action required" path.
+  created_by_rule_id?: string | null
 }
 
 export async function openCaseFromEmail(
@@ -200,6 +209,7 @@ export async function openCaseFromEmail(
     attachments_summary: facts.attachment_names.length ? facts.attachment_names.join(", ") : null,
     signing_officer_name: ex.signing_officer_name ?? null,
     signing_officer_position: ex.signing_officer_position ?? null,
+    created_by_rule_id: facts.created_by_rule_id ?? null,
     created_by_id: actor.id, // NULL when opened automatically from an incoming email
     updated_by_id: actor.id,
     created_at: now,
@@ -275,7 +285,8 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     // sender, matching mail never opens a case or reaches review. Below the threshold it still goes
     // to review.
     if (cheap?.action === "ignore" && cheap.confidence >= THRESHOLD) {
-      if (!cheap.ruleId) return "skipped"
+      // "Ignore and delete": drop it here, same as any other noise — never stored, never tagged.
+      if (cheap.hardIgnore || !cheap.ruleId) return "skipped"
       ruleIgnore = { ruleId: cheap.ruleId, confidence: cheap.confidence }
     }
     if (!kra && cheap?.categoryKey === "system_noise") return "skipped"
@@ -344,6 +355,9 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   let reviewReason: string | null = null
   let caseId: string | null = null
   let notifyFlag = false
+  // The rule (if any) that actually decided this email's outcome — recorded on the email row, and on
+  // the task if this is what opens one, so "this rule shouldn't have created these" has an answer.
+  let matchedRuleId: string | null = null
 
   if (direction === "outbound") {
     // BCL's reply inside a case thread: fills the "when BCL responds" columns.
@@ -373,6 +387,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     confidence = ruleIgnore.confidence
     source = "rule"
     disposition = "ignore"
+    matchedRuleId = ruleIgnore.ruleId
   } else if (autoIgnore) {
     // No-reply automated mail: never KRA, never opens a case or a review item. Store it marked
     // ignored so staff can see what came in under the ignored tab's "No-reply" filter.
@@ -382,6 +397,9 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     disposition = "ignore"
   } else {
     const rule = classifyByRules({ subject, body: text, senderEmail, threadHasCase: !!threadCase, rules })
+    // "Ignore and delete" reached only via the full body/subject (the cheap, snippet-only pass above
+    // missed it): drop it now, before spending an AI call on a category it'll never keep.
+    if (rule?.action === "ignore" && rule.confidence >= THRESHOLD && rule.hardIgnore) return "skipped"
     const ruleCat = rule && rule.categoryKey ? CATEGORY_BY_KEY.get(rule.categoryKey) : null
     // AI only runs to extract PDF details (deadline, PIN, signing officer) for a category the rules
     // are already confident about — never to guess an uncertain category. An email the rules can't
@@ -406,6 +424,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
       categoryKey = rule.confidence >= THRESHOLD ? "system_noise" : "other_kra"
       confidence = rule.confidence
       source = "rule"
+      if (rule.confidence >= THRESHOLD) matchedRuleId = rule.ruleId ?? null
     } else if (rule && rule.action === "notify") {
       // An important-notification rule matched: store it under the "notification" category (which
       // carries the needs_review disposition) so someone sees it, but a case is never opened and
@@ -413,10 +432,12 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
       categoryKey = "notification"
       confidence = rule.confidence
       source = "rule"
+      matchedRuleId = rule.ruleId ?? null
     } else if (rule && rule.categoryKey && rule.confidence >= THRESHOLD) {
       categoryKey = rule.categoryKey
       confidence = rule.confidence
       source = ai ? "rule+ai" : "rule"
+      matchedRuleId = rule.ruleId ?? null
     } else if (ai?.category_key && ai.confidence >= THRESHOLD) {
       categoryKey = ai.category_key
       confidence = ai.confidence
@@ -474,6 +495,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
             extracted: ai,
             snippet,
             attachment_names: attachmentNames,
+            created_by_rule_id: matchedRuleId,
           },
           category,
           { id: null, type: "system" }
@@ -566,7 +588,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   // tag instead of failing the whole sync.
   let { error: upsertErr } = await sb
     .from("emails")
-    .upsert({ ...emailRow, matched_rule_id: ruleIgnore?.ruleId ?? null }, { onConflict: "gmail_message_id" })
+    .upsert({ ...emailRow, matched_rule_id: matchedRuleId }, { onConflict: "gmail_message_id" })
   if (upsertErr && /matched_rule_id/i.test(upsertErr.message)) {
     ;({ error: upsertErr } = await sb.from("emails").upsert(emailRow, { onConflict: "gmail_message_id" }))
   }
@@ -673,23 +695,50 @@ export interface SyncResult {
   error?: string
 }
 
+// Runs ingestMessage() over `ids` with up to INGEST_CONCURRENCY in flight at once, within one
+// mailbox. When budgetMs is set, workers stop CLAIMING new ids once that much time has passed —
+// whatever's already claimed always finishes — and whatever was never claimed comes back as
+// `remaining`; undefined means no cutoff (the regular sync path, already capped at
+// MAX_MESSAGES_PER_SYNC ids so it doesn't need one).
+async function ingestConcurrently(
+  ctx: Ctx,
+  ids: string[],
+  budgetMs?: number
+): Promise<{ ingested: number; skipped: number; failed: number; errors: string[]; remaining: string[] }> {
+  const out = { ingested: 0, skipped: 0, failed: 0, errors: [] as string[], remaining: [] as string[] }
+  const started = Date.now()
+  let next = 0
+
+  const worker = async () => {
+    for (;;) {
+      if (budgetMs !== undefined && Date.now() - started > budgetMs) return
+      const i = next++
+      if (i >= ids.length) return
+      try {
+        const r = await ingestMessage(ctx, ids[i])
+        if (r === "ingested") out.ingested++
+        else out.skipped++
+      } catch (err: any) {
+        out.failed++
+        out.errors.push(`${ids[i]}: ${err?.message ?? err}`)
+        console.error("[email-center] ingest failed", ctx.account.email, ids[i], err)
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(INGEST_CONCURRENCY, ids.length) }, worker))
+  out.remaining = ids.slice(next) // never claimed — everything from here on is untouched
+  return out
+}
+
 async function runPass(sb: SupabaseClient, account: AccountRow, result: SyncResult, max: number) {
   const ctx: Ctx = { sb, gmail: gmailForAccount(account), account }
   const collected = await collectMessageIds(ctx, max)
   result.truncated = collected.truncated
-  const errors: string[] = []
 
-  for (const id of collected.ids) {
-    try {
-      const r = await ingestMessage(ctx, id)
-      if (r === "ingested") result.ingested++
-      else result.skipped++
-    } catch (err: any) {
-      result.failed++
-      errors.push(`${id}: ${err?.message ?? err}`)
-      console.error("[email-center] ingest failed", account.email, id, err)
-    }
-  }
+  const { ingested, skipped, failed, errors } = await ingestConcurrently(ctx, collected.ids)
+  result.ingested += ingested
+  result.skipped += skipped
+  result.failed += failed
 
   const update: Record<string, unknown> = {
     last_synced_at: new Date().toISOString(),
@@ -734,7 +783,10 @@ export async function syncAccount(
     }
   } catch (err: any) {
     result.error = err?.message ?? String(err)
-    await sb.from("email_accounts").update({ last_sync_error: result.error }).eq("id", accountId)
+    // last_synced_at reflects the last ATTEMPT, not the last success — a mailbox that's been failing
+    // repeatedly should show a fresh timestamp with an error, not a stale one that reads as "hasn't
+    // synced in days" when it's actually been trying (and failing) the whole time.
+    await sb.from("email_accounts").update({ last_synced_at: new Date().toISOString(), last_sync_error: result.error }).eq("id", accountId)
   } finally {
     await sb.from("email_accounts").update({ sync_lock_until: null }).eq("id", accountId)
   }
@@ -809,7 +861,11 @@ export async function syncAllAccounts(
 
 // How far one listing pass walks: 500 ids per page, newest first.
 const MAX_LIST_PAGES = 60
-export const BACKFILL_BATCH = 10
+// How many ids the client sends per HTTP round trip. Now that ingestBackfillBatch runs them
+// INGEST_CONCURRENCY at a time instead of one at a time, a small batch mostly just adds round-trip
+// overhead relative to the actual work — raised so each call does more before the time budget in
+// ingestBackfillBatch cuts it off; the "remaining" mechanism absorbs whatever doesn't fit either way.
+export const BACKFILL_BATCH = 40
 
 async function loadActiveAccount(sb: SupabaseClient, accountId: string): Promise<AccountRow> {
   const { data: account } = await sb.from("email_accounts").select("*").eq("id", accountId).maybeSingle()
@@ -876,25 +932,18 @@ export async function ingestBackfillBatch(
 ): Promise<{ ingested: number; skipped: number; failed: number; remaining: string[]; errors: string[] }> {
   const account = await loadActiveAccount(sb, accountId)
   const ctx: Ctx = { sb, gmail: gmailForAccount(account), account }
-  const out = { ingested: 0, skipped: 0, failed: 0, remaining: [] as string[], errors: [] as string[] }
-  const started = Date.now()
-
-  for (let i = 0; i < ids.length; i++) {
-    if (Date.now() - started > budgetMs) {
-      out.remaining = ids.slice(i)
-      break
-    }
-    try {
-      const r = await ingestMessage(ctx, ids[i])
-      if (r === "ingested") out.ingested++
-      else out.skipped++
-    } catch (err: any) {
-      out.failed++
-      out.errors.push(`${ids[i]}: ${err?.message ?? err}`)
-      console.error("[email-center] backfill ingest failed", account.email, ids[i], err)
-    }
-  }
-  return out
+  const result = await ingestConcurrently(ctx, ids, budgetMs)
+  // Backfill talks to this mailbox's Gmail just as much as a regular sync does, so it gets the same
+  // last_synced_at/last_sync_error treatment as runPass below — every batch, not just the final one,
+  // so "Sync from date" always leaves an accurate trail even if the dialog is closed partway through.
+  await sb
+    .from("email_accounts")
+    .update({
+      last_synced_at: new Date().toISOString(),
+      last_sync_error: result.errors.length ? result.errors.slice(0, 3).join(" | ").slice(0, 500) : null,
+    })
+    .eq("id", accountId)
+  return result
 }
 
 // ─── Gmail push watch ───────────────────────────────────────────────────────

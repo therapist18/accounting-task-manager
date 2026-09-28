@@ -77,7 +77,7 @@ VALUES
     ARRAY[
       'notice of (assessment|demand)', 'outstanding (tax|liab)', 'tax arrears', 'vat arrears',
       'default assessment', 'outstanding vat liability', 'outstanding withholding vat', 'tax demand',
-      'non remittance', 'settlement notice', 'payment defaulter', 'tax amnesty',
+      'non remittance', 'settlement notice', 'payment defaulter', 'default in paying income tax',
       'additional assessment', 'auto assessment', 'assessment amendment', 'assessment and amendment'
     ],
     'demand_penalty', 0.93, 40, FALSE, FALSE, NULL, NULL, 'Seeded'),
@@ -108,8 +108,12 @@ VALUES
     'certificate', 0.93, 80, FALSE, FALSE, NULL, NULL, 'Seeded'),
 
   ('regex', 'acknowledg(e)?ment',
-    ARRAY['successfully (received|filed|submitted)', 'return (received|filed)', 'payment (receipt|confirmation)'],
-    'return_ack', 0.90, 90, FALSE, FALSE, NULL, NULL, 'Seeded'),
+    ARRAY[
+      'successfully (received|filed|submitted)', 'return (received|filed)', 'payment (receipt|confirmation)',
+      'payment against payment registration', 'successful completion of payment registration',
+      'accepted customs entry', 'released customs entry'
+    ],
+    'return_ack', 0.90, 90, FALSE, FALSE, NULL, NULL, 'Seeded — plus routine PRN payment and customs clearance confirmations, none of which need a task'),
 
   ('contains', 'statement', ARRAY['ledger'],
     'statement', 0.80, 100, FALSE, FALSE, NULL, NULL, 'Seeded'),
@@ -135,9 +139,27 @@ VALUES
 
   ('contains', 'invitation for a meeting',
     ARRAY['invitation to a meeting', 'meeting for tariff clarification'],
-    'notification', 0.85, 150, FALSE, TRUE, 'kra.go.ke', 'contains', 'Needs a response but isn''t a KRA notice — flagged, no case opened')
+    'notification', 0.85, 150, FALSE, TRUE, 'kra.go.ke', 'contains', 'Needs a response but isn''t a KRA notice — flagged, no case opened'),
 
-ON CONFLICT (match_type, pattern) DO UPDATE SET
+  -- General awareness/education mail (e.g. "Do you qualify for the Tax Amnesty?") is sent to many
+  -- taxpayers, not written about this client's own position — worth someone seeing, never a task.
+  -- Kept deliberately narrow (the exact rhetorical-question phrasing) so it never shadows the real
+  -- default notice, which demand_penalty's own 'default in paying income tax' wording still catches.
+  ('contains', 'do you qualify for the tax amnesty', ARRAY[]::text[],
+    'notification', 0.85, 160, FALSE, TRUE, 'kra.go.ke', 'contains', 'General amnesty awareness mail — flagged, no case opened'),
+
+  -- Unlike "Accepted"/"Released" Customs Entry (duty already settled — return_ack, dropped silently),
+  -- a REGISTERED entry names duty that is due but not yet paid. Routine, not a violation, but real
+  -- money — worth someone confirming it gets paid, without opening a case for every import.
+  ('contains', 'registered customs entry', ARRAY[]::text[],
+    'notification', 0.85, 170, FALSE, TRUE, 'kra.go.ke', 'contains', 'Customs duty now due — flagged so someone confirms it gets paid, no case opened')
+
+-- Targets the unique index 20260930000000 replaced the original (match_type, pattern) constraint
+-- with — (match_type, pattern) alone no longer exists as a constraint once that migration has run
+-- (it allows several sender-only rules to share an empty pattern), so this file's own seed now
+-- depends on 20260930 being applied first. Every row above has NULL/'kra.go.ke' sender_pattern, so
+-- COALESCE(sender_pattern, '') here just reproduces the same matching this always effectively did.
+ON CONFLICT (match_type, pattern, (coalesce(sender_pattern, ''))) DO UPDATE SET
   extra_patterns    = EXCLUDED.extra_patterns,
   category_key      = EXCLUDED.category_key,
   confidence        = EXCLUDED.confidence,

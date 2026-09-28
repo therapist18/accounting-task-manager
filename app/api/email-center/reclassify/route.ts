@@ -21,7 +21,12 @@ import { AUTO_CONFIDENCE_THRESHOLD as THRESHOLD } from "@/lib/email-center/types
 // ignore-rule match, or flagged urgent as an important notification); everything a rule still doesn't
 // match stays in Needs Review.
 
-const LIST_MAX = 1000
+// Same reasoning as the emails list route's own cap: this used to silently ignore any Needs Review
+// backlog beyond the oldest 1,000, which — at the volumes a first-time full-mailbox backfill leaves
+// behind — meant Reclassify could never reach most of it, run after run. RUN_MAX stays as it was:
+// each "run" call still does real DB writes (and possibly opens a case) per email, so it's sized for
+// one request's time budget, not for the backlog's total size — the client below just loops it more.
+const LIST_MAX = 20000
 const RUN_MAX = 100
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 

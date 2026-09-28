@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { authorize, clientAttachments, companyNames, fail } from "@/lib/email-center/api"
+import { authorize, clientAttachments, companyNames, fail, userNames } from "@/lib/email-center/api"
 import { CATEGORY_BY_KEY } from "@/lib/email-center/categories"
 import { fetchMessageBody, openCaseFromEmail } from "@/lib/email-center/ingest"
 import { DISPOSITIONS, type Disposition } from "@/lib/email-center/types"
@@ -136,10 +136,20 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     const { error } = await sb.from("emails").update(patch).eq("id", id)
     if (error) throw new Error(error.message)
 
-    // email_patch: exactly the fields that changed, so the client can merge them into whichever
-    // local copy of this email it's holding (the Needs Review list, the open dialog, …) without a
-    // round trip back to GET the same row it just wrote.
-    return NextResponse.json({ success: true, case_id: caseId, email_patch: patch, case: newCase })
+    // Resolved display name for classified_by_id/handled_by_id — display-only, never written to the
+    // DB, so it's added to the response after the update, not into `patch` itself. Both are always
+    // the acting user when set, so one lookup covers either.
+    const displayNames: Record<string, unknown> = {}
+    if (reclassified || "handled_by_id" in patch) {
+      const actorName = (await userNames(sb, [actor.id])).get(String(actor.id)) ?? null
+      if (reclassified) displayNames.classified_by_name = actorName
+      if ("handled_by_id" in patch) displayNames.handled_by_name = patch.handled_by_id ? actorName : null
+    }
+
+    // email_patch: exactly the fields that changed (plus their resolved names, for display only), so
+    // the client can merge them into whichever local copy of this email it's holding (the Needs Review
+    // list, the open dialog, …) without a round trip back to GET the same row it just wrote.
+    return NextResponse.json({ success: true, case_id: caseId, email_patch: { ...patch, ...displayNames }, case: newCase })
   } catch (error) {
     return fail(error, "email PATCH")
   }
