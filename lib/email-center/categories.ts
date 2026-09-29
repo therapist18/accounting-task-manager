@@ -31,6 +31,11 @@ export const CATEGORIES: CategoryDef[] = [
   c("appointment_notice", "Appointment / Registration Notice", "#ca8a04", "action_required", true),
   c("extension_response", "Extension of Time Response", "#2563eb", "update_only", false, true),
   c("objection", "Objection", "#dc2626", "action_required", true),
+  // KRA's receipt confirming an objection was filed (carries the objection reference number). Attaches
+  // to whatever case the objection above opened rather than opening its own — the body has no
+  // approve/reject wording to detect (that's objection_decision below), so this only attaches; nothing
+  // more to do until the decision arrives.
+  c("objection_acknowledgement", "Objection Acknowledgement", "#2563eb", "update_only", false, true),
   // The approval/rejection outcome of an objection — same shape as extension_response (attaches to the
   // objection's case and reads approved/rejected off the body); see APPROVAL_DECISION_CATEGORIES in
   // ingest.ts.
