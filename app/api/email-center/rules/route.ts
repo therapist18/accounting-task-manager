@@ -5,6 +5,7 @@ import {
   EXTRA_MIGRATION_MESSAGE, EXTRA_SENDER_MIGRATION_MESSAGE, NOTIFY_PRIORITY_MIGRATION_MESSAGE, RULES_TABLE,
   invalidateRulesCache, normalizeRuleRow, ruleColumns, withOptionalColumnFallback, withoutDroppedColumns,
 } from "@/lib/email-center/rule-store"
+import { withSupabaseRetry } from "@/lib/supabaseRetry"
 import { parseRuleBody } from "@/lib/email-center/rule-validation"
 
 // deleted_at arrived in the 20260929000000 migration; read without the filter if it isn't applied
@@ -23,11 +24,13 @@ export async function GET(request: NextRequest) {
       if (excludeDeleted) q = q.is("deleted_at", null)
       return q
     }
+    // Loaded on every page open — withSupabaseRetry absorbs a transient network blip before it's
+    // treated as a real failure (and before this falls all the way back to the read-only built-in list).
     let excludeDeleted = true
-    let { data, error } = await withOptionalColumnFallback<any[]>((dropped) => read(ruleColumns(dropped), excludeDeleted))
+    let { data, error } = await withOptionalColumnFallback<any[]>((dropped) => withSupabaseRetry(() => read(ruleColumns(dropped), excludeDeleted)))
     if (isMissingDeletedAtColumn(error)) {
       excludeDeleted = false
-      ;({ data, error } = await withOptionalColumnFallback<any[]>((dropped) => read(ruleColumns(dropped), excludeDeleted)))
+      ;({ data, error } = await withOptionalColumnFallback<any[]>((dropped) => withSupabaseRetry(() => read(ruleColumns(dropped), excludeDeleted))))
     }
 
     if (error) {

@@ -333,11 +333,12 @@ export default function EmailCenterPage() {
       let done = 0
       let changed = 0
       let opened = 0
+      let failed = 0
       while (queue.length) {
         // Matches the server's own RUN_MAX (100) — was needlessly sending a quarter of that per
         // round trip, which meant 4x the HTTP overhead on a large backlog for no reason.
         const batch = queue.slice(0, 100)
-        const res = await api<{ processed: number; changed: number; cases_opened: number }>("/api/email-center/reclassify", {
+        const res = await api<{ processed: number; changed: number; cases_opened: number; failed: number }>("/api/email-center/reclassify", {
           method: "POST",
           body: JSON.stringify({ action: "run", ids: batch }),
         })
@@ -345,13 +346,15 @@ export default function EmailCenterPage() {
         done += res.processed
         changed += res.changed
         opened += res.cases_opened
+        failed += res.failed ?? 0
         setReclassifyProgress({ done, total: listed.ids.length })
       }
       await loadAll()
       setReclassifyDue(false)
-      if (changed === 0) toast.info(`Reclassified ${listed.ids.length} Needs Review mail(s) — none matched any rule.`)
-      else if (changed === listed.ids.length) toast.success(`All ${changed} Needs Review mail(s) reclassified${opened ? ` — ${opened} case(s) opened` : ""}.`)
-      else toast.success(`Reclassified ${changed} of ${listed.ids.length} Needs Review mail(s)${opened ? ` — ${opened} case(s) opened` : ""}.`)
+      const failedNote = failed ? ` — ${failed} couldn't be reclassified this run (still in Needs Review, try again later)` : ""
+      if (changed === 0) toast.info(`Reclassified ${listed.ids.length} Needs Review mail(s) — none matched any rule.${failedNote}`)
+      else if (changed === listed.ids.length) toast.success(`All ${changed} Needs Review mail(s) reclassified${opened ? ` — ${opened} case(s) opened` : ""}.${failedNote}`)
+      else toast.success(`Reclassified ${changed} of ${listed.ids.length} Needs Review mail(s)${opened ? ` — ${opened} case(s) opened` : ""}.${failedNote}`)
     } catch (e: any) {
       toast.error(e.message)
     } finally {

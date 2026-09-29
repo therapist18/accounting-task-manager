@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { authorize, companyNames, fail, userNames } from "@/lib/email-center/api"
 import { KRA_JOB_LEVEL } from "@/lib/email-center/categories"
+import { withSupabaseRetry } from "@/lib/supabaseRetry"
 
 // GET /api/email-center/cases?company=&status=open|closed|all&assignee=&q=
 // One row per KRA case == one row of the correspondence Sheet1 (and one task of job level
@@ -17,18 +18,23 @@ export async function GET(request: NextRequest) {
 
     // Fetched once per page load (and on an explicit Refresh/Sync), not per filter change, so a
     // larger one-time cap is affordable — the filtering/sorting itself runs client-side.
-    let query = sb
-      .from("email_case")
-      .select("*")
-      .order("email_date", { ascending: false, nullsFirst: false })
-      .limit(2000)
-    if (status === "open" || status === "closed") query = query.eq("status", status)
-    if (company) query = query.eq("company_id", company)
-    if (assignee === "none") query = query.is("assigned_to_id", null)
-    else if (assignee) query = query.eq("assigned_to_id", assignee)
-    if (q) query = query.or(`subject.ilike.%${q}%,kra_pin.ilike.%${q}%,notice_type.ilike.%${q}%,case_ref.ilike.%${q}%`)
+    const buildQuery = () => {
+      let query = sb
+        .from("email_case")
+        .select("*")
+        .order("email_date", { ascending: false, nullsFirst: false })
+        .limit(2000)
+      if (status === "open" || status === "closed") query = query.eq("status", status)
+      if (company) query = query.eq("company_id", company)
+      if (assignee === "none") query = query.is("assigned_to_id", null)
+      else if (assignee) query = query.eq("assigned_to_id", assignee)
+      if (q) query = query.or(`subject.ilike.%${q}%,kra_pin.ilike.%${q}%,notice_type.ilike.%${q}%,case_ref.ilike.%${q}%`)
+      return query
+    }
 
-    const { data, error } = await query
+    // Loaded on every page open — withSupabaseRetry absorbs a transient network blip before it's
+    // treated as a real failure. A fresh query builder each attempt (not the same one re-awaited).
+    const { data, error } = await withSupabaseRetry<any>(buildQuery)
     if (error) throw new Error(error.message)
 
     const [companies, users] = await Promise.all([

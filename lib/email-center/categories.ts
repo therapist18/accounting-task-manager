@@ -36,6 +36,14 @@ export const CATEGORIES: CategoryDef[] = [
   // ingest.ts.
   c("objection_decision", "Objection Decision", "#2563eb", "update_only", false, true),
   c("refund", "Refund Application", "#ea580c", "action_required", true),
+  // A taxpayer restricted from claiming input VAT until the underlying compliance issue is resolved —
+  // real casework (a letter + supporting documents requesting the "uplift"), not just a status notice.
+  c("vat_special_table", "VAT Special Table", "#dc2626", "action_required", true),
+  // The resolution: KRA confirming the taxpayer was removed (uplifted). Attaches to whatever case the
+  // addition/intention notice above opened, rather than opening its own — same shape as
+  // objection_decision, but the body has no clean approve/reject wording to auto-detect, so this only
+  // attaches; someone still marks the case Completed once they've seen it.
+  c("vat_special_table_removed", "VAT Special Table — Removed", "#16a34a", "update_only", false, true),
   c("bcl_response", "BCL Response to KRA", "#2563eb", "update_only", false, true),
   c("return_ack", "Return / Payment Acknowledgement", "#16a34a", "update_only"),
   c("certificate", "Certificate (WHT / TCC)", "#16a34a", "update_only"),

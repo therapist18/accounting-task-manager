@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { authorize, clientAttachments, companyNames, fail, userNames } from "@/lib/email-center/api"
 import { DISPOSITIONS } from "@/lib/email-center/types"
+import { withSupabaseRetry } from "@/lib/supabaseRetry"
 
 // GET /api/email-center/emails?disposition=&company=&q=&limit=&offset=
 export async function GET(request: NextRequest) {
@@ -36,8 +37,12 @@ export async function GET(request: NextRequest) {
       return query
     }
 
-    let { data, count, error } = await run(`${columns}, matched_rule_id`)
-    if (error && /matched_rule_id/i.test(error.message)) ({ data, count, error } = await run(columns))
+    // withSupabaseRetry absorbs a transient network blip before this is treated as a real error — the
+    // three list/review/update/ignore tabs load concurrently on every page open, and this list has no
+    // row cap (see comment above), so it's one of the larger single queries in the module.
+    type EmailsQueryResult = { data: any; count: number | null; error: any }
+    let { data, count, error } = await withSupabaseRetry<EmailsQueryResult>(() => run(`${columns}, matched_rule_id`))
+    if (error && /matched_rule_id/i.test(error.message)) ({ data, count, error } = await withSupabaseRetry<EmailsQueryResult>(() => run(columns)))
     if (error) throw new Error(error.message)
 
     const names = await companyNames(sb, (data ?? []).map((e: any) => e.company_id))

@@ -926,7 +926,7 @@ async function loadActiveAccount(sb: SupabaseClient, accountId: string): Promise
   // The error was previously ignored here, so a transient network failure (the account row couldn't be
   // read, not that it doesn't exist) surfaced as the misleading "Mailbox not found." — withSupabaseRetry
   // absorbs the transient case; a real lookup failure now says so accurately instead of guessing.
-  const { data: account, error } = await withSupabaseRetry(() => sb.from("email_accounts").select("*").eq("id", accountId).maybeSingle())
+  const { data: account, error } = await withSupabaseRetry<any>(() => sb.from("email_accounts").select("*").eq("id", accountId).maybeSingle())
   if (error) throw new Error(`Could not load mailbox: ${error.message}`)
   if (!account) throw new Error("Mailbox not found.")
   if (account.status !== "active" || !account.refresh_token) throw new Error(`${account.email} isn't connected — reconnect it first.`)

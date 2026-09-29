@@ -164,7 +164,7 @@ export function SyncDialog({
     stopRef.current = false
     setFinished(false)
     setRunning(true)
-    setProgress(Object.fromEntries(targets.map((a) => [a.id, { status: "pending" as Status, total: 0, done: 0, ingested: 0, failed: 0 }])))
+    setProgress(Object.fromEntries(targets.map((a) => [a.id, { status: "pending" as Status, total: 0, done: 0, ingested: 0, failed: 0, failureReasons: [] as string[] }])))
 
     const queue = [...targets]
     const worker = async () => {

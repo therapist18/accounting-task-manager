@@ -11,7 +11,7 @@ import type {
   ManagedAuthUserUpdateInput,
   ScannerUserRole,
 } from "@/lib/auth/types";
-import { getRoleAssignmentsByUserId, setRoleAssignmentsForUser } from "./role-assignments";
+import { getRoleAssignmentsByUserId, getRoleAssignmentsByUserIds, setRoleAssignmentsForUser } from "./role-assignments";
 
 export const SCANNER_USERS_TABLE = "scanner_users";
 // Mirrors the `public.user_role` Postgres enum on scanner_users.role (see ScannerUserRole).
@@ -338,16 +338,11 @@ export async function getManagedScannerUserById(id: string): Promise<ManagedAuth
 }
 
 async function loadRoleAssignmentsForUsers(users: ManagedAuthUser[]): Promise<ManagedAuthUser[]> {
-  const usersWithAssignments = await Promise.all(
-    users.map(async (user) => {
-      const roleAssignments = await getRoleAssignmentsByUserId(user.id);
-      return {
-        ...user,
-        roleAssignments
-      };
-    })
-  );
-  return usersWithAssignments;
+  // One query for every user here, not one query per user — this used to fire a Promise.all with as
+  // many concurrent Supabase connections as there are scanner users system-wide (~80), which was the
+  // actual cause of the "fetch failed" 500s on this route under load.
+  const byUser = await getRoleAssignmentsByUserIds(users.map((u) => u.id));
+  return users.map((user) => ({ ...user, roleAssignments: byUser.get(user.id) ?? [] }));
 }
 
 export async function listManagedScannerUsers(options?: FetchRowsOptions): Promise<ManagedAuthUser[]> {

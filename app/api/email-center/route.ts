@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { authorize, companyNames, fail } from "@/lib/email-center/api"
 import { CATEGORIES } from "@/lib/email-center/categories"
+import { withSupabaseRetry } from "@/lib/supabaseRetry"
 
 // GET /api/email-center?light=1 — mailboxes, companies, staff and categories: everything the page
 // needs besides the cases/emails lists themselves (those come from their own routes, fetched once
@@ -21,18 +22,20 @@ export async function GET(request: NextRequest) {
     // migration isn't applied yet, retry without them rather than failing the whole tab.
     const ACCOUNT_COLUMNS_BASE = "id, email, label, status, company_id, watch_expiry, last_synced_at, last_sync_error, created_at"
     const ACCOUNT_COLUMNS = `${ACCOUNT_COLUMNS_BASE}, email_count, first_email_at`
-    let accountsRes = await sb.from("email_accounts").select(ACCOUNT_COLUMNS).order("email")
+    // Loaded on every page open — withSupabaseRetry absorbs a transient network blip on any of these
+    // before it's treated as a real failure.
+    let accountsRes = await withSupabaseRetry<any>(() => sb.from("email_accounts").select(ACCOUNT_COLUMNS).order("email"))
     if (accountsRes.error && /email_count|first_email_at/i.test(accountsRes.error.message ?? "")) {
-      accountsRes = await sb.from("email_accounts").select(ACCOUNT_COLUMNS_BASE).order("email")
+      accountsRes = await withSupabaseRetry<any>(() => sb.from("email_accounts").select(ACCOUNT_COLUMNS_BASE).order("email"))
     }
 
     const [companiesRes, staffRes] = await Promise.all([
       light
         ? Promise.resolve({ data: null } as { data: null })
-        : sb.from("acc_portal_company_duplicate").select("id, company_name, kra_pin").order("company_name"),
+        : withSupabaseRetry<any>(() => sb.from("acc_portal_company_duplicate").select("id, company_name, kra_pin").order("company_name")),
       light
         ? Promise.resolve({ data: null } as { data: null })
-        : sb.from("scanner_users").select("id, first_name, last_name, username").neq("is_active", false),
+        : withSupabaseRetry<any>(() => sb.from("scanner_users").select("id, first_name, last_name, username").neq("is_active", false)),
     ])
 
     const names = await companyNames(sb, (accountsRes.data ?? []).map((a: any) => a.company_id))
