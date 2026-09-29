@@ -1,5 +1,6 @@
 import { CATEGORY_BY_KEY } from "./categories"
 import { DEFAULT_SUBJECT_RULES, type RuleMatchType, type SubjectRule } from "./rules"
+import { withSupabaseRetry } from "./retry"
 import type { getServiceClient } from "./service"
 
 // Loads the subject -> category rules from email_classification_rules. Kept apart from rules.ts (pure,
@@ -112,7 +113,9 @@ export async function loadSubjectRules(sb: ReturnType<typeof getServiceClient>):
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true })
 
-  const { data, error } = await withOptionalColumnFallback<any[]>((dropped) => read(ruleColumns(dropped)))
+  // withSupabaseRetry absorbs a transient network blip (heavy concurrent backfill traffic) before this
+  // ever falls back to the built-in list — a real "table doesn't exist" error still falls through as before.
+  const { data, error } = await withOptionalColumnFallback<any[]>((dropped) => withSupabaseRetry(() => read(ruleColumns(dropped))))
 
   // Table not created yet / unreachable: keep classifying with the built-in list rather than failing
   // every email. (An existing-but-empty table is respected — that is a deliberate "no rules".)

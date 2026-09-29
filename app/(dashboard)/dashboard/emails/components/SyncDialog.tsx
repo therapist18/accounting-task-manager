@@ -70,6 +70,10 @@ export function SyncDialog({
   const [until, setUntil] = useState("")
   const [scope, setScope] = useState<"all" | "selected">("all")
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  // For recovering mail while the classification rules are still being tuned: every inbound email in
+  // the period is stored straight into Needs Review, skipping ignore/notify/classify rules and AI
+  // entirely, so a not-yet-correct rule can't re-drop or re-misclassify it the moment it comes back in.
+  const [pauseClassification, setPauseClassification] = useState(false)
   const [search, setSearch] = useState("")
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<Record<string, Progress>>({})
@@ -82,6 +86,7 @@ export function SyncDialog({
     setProgress({})
     setFinished(false)
     setSearch("")
+    setPauseClassification(false)
     if (presetIds?.length) {
       setScope("selected")
       setSelected(new Set(presetIds))
@@ -126,7 +131,7 @@ export function SyncDialog({
         const batch = queue.slice(0, BATCH)
         const res = await api<{ ingested: number; skipped: number; failed: number; remaining: string[] }>("/api/email-center/sync/backfill", {
           method: "POST",
-          body: JSON.stringify({ accountId: acc.id, action: "ingest", ids: batch }),
+          body: JSON.stringify({ accountId: acc.id, action: "ingest", ids: batch, skipClassification: pauseClassification }),
         })
         // Anything the server ran out of time for goes back to the front of the queue.
         queue = [...res.remaining, ...queue.slice(batch.length)]
@@ -236,6 +241,15 @@ export function SyncDialog({
                 That period spans {daysBack} days. A long range can take a while — keep this page open until it finishes. Mail already stored is skipped, so it's safe to stop and run it again.
               </p>
             )}
+            <label className={cn("flex items-start gap-3 rounded-xl border px-4 py-3 cursor-pointer", pauseClassification ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white hover:bg-slate-50")}>
+              <Checkbox checked={pauseClassification} disabled={running} onCheckedChange={(v) => setPauseClassification(v === true)} className="mt-0.5" />
+              <span>
+                <span className="block text-base font-semibold text-slate-900">Pause auto-classification for this sync</span>
+                <span className="block text-sm text-slate-500 leading-snug mt-0.5">
+                  Every email pulled in lands straight in Needs Review, skipping the ignore/notify/classify rules entirely — use this while you're still tuning them, so mail recovered here isn't immediately re-dropped or re-misclassified by a rule that isn't finished yet.
+                </span>
+              </span>
+            </label>
           </section>
 
           {/* Scope */}

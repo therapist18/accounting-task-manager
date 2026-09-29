@@ -150,7 +150,7 @@ export default function TaskBasketPage() {
   }
 
   return (
-    <div className="p-6 h-full flex flex-col bg-[#FAFAFC]">
+    <div className="p-6 h-full flex flex-col bg-[#FAFAFC] overflow-y-auto">
       <div className="flex items-center justify-between mb-6 shrink-0">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-lg bg-custom-blue flex items-center justify-center">
@@ -226,7 +226,7 @@ export default function TaskBasketPage() {
         </Button>
       </div>
 
-      <div className="flex-1 min-h-0 flex flex-col border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden">
+      <div className="flex flex-col border border-slate-200 rounded-xl bg-white shadow-sm mb-6">
         <TaskBasketTable
           items={visibleItems}
           loading={loading}

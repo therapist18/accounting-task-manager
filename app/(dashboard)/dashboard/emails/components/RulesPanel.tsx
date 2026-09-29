@@ -33,22 +33,31 @@ const SORT_VALUE: Record<string, (r: RuleRow) => string | number> = {
   order: (r) => r.sort_order,
   match: (r) => r.match_type,
   pattern: (r) => r.pattern,
+  sender: (r) => r.sender_pattern ?? "",
+  sender_match: (r) => r.sender_match_type ?? "",
   category: (r) => r.category_key,
   confidence: (r) => r.confidence,
   active: (r) => (r.is_active ? 1 : 0),
+  notes: (r) => r.notes ?? "",
+  created: (r) => r.created_at ?? "",
   changed: (r) => r.updated_at ?? r.created_at ?? "",
   actions: (r) => r.updated_at ?? "", // most recently edited last
 }
 
-// Toggleable columns — "#" and Actions always show.
+// Toggleable columns — "#" and Actions always show. Mirrors every field the Add/Edit dialog asks
+// about, one column each, so nothing entered there is only visible by opening the dialog again.
 const TOGGLEABLE_COLUMNS = [
   { id: "order", label: "Order" },
   { id: "match", label: "Match" },
-  { id: "pattern", label: "Subject wordings / sender" },
+  { id: "pattern", label: "Subject wordings" },
+  { id: "sender", label: "Sender" },
+  { id: "sender_match", label: "Sender match" },
   { id: "category", label: "Category" },
   { id: "outcome", label: "Result" },
   { id: "confidence", label: "Confidence" },
   { id: "active", label: "Active" },
+  { id: "notes", label: "Notes" },
+  { id: "created", label: "Created" },
   { id: "changed", label: "Last changed" },
 ]
 
@@ -165,9 +174,11 @@ export function RulesPanel({
   )
   const outcomeLabel = (r: RuleRow) => ruleOutcome(r, catByKey.get(r.category_key)).label
   const categoryLabel = (r: RuleRow) => (r.is_ignore || r.is_notify ? outcomeLabel(r) : catByKey.get(r.category_key)?.name ?? r.category_key)
+  const hasSender = (r: RuleRow) => !!(r.sender_pattern || r.extra_sender_patterns?.length)
   const FILTER_VALUE: Record<string, (r: RuleRow) => string> = useMemo(
     () => ({
       match: (r) => (r.match_type === "regex" ? "Regex" : "Contains"),
+      sender_match: (r) => (hasSender(r) ? (r.sender_match_type === "regex" ? "Regex" : "Contains") : ""),
       category: categoryLabel,
       active: (r) => (r.is_active ? "Active" : "Inactive"),
     }),
@@ -184,10 +195,14 @@ export function RulesPanel({
     if (isVisible("order")) cols.push({ id: "order", getValue: (r) => String(r.sort_order) })
     if (isVisible("match")) cols.push({ id: "match", getValue: (r) => (r.match_type === "regex" ? "Regex" : "Contains") })
     if (isVisible("pattern")) cols.push({ id: "pattern", getValue: (r) => [r.pattern, ...(r.extra_patterns ?? [])].filter(Boolean).join(" ") })
+    if (isVisible("sender")) cols.push({ id: "sender", getValue: (r) => [r.sender_pattern, ...(r.extra_sender_patterns ?? [])].filter(Boolean).join(" ") })
+    if (isVisible("sender_match")) cols.push({ id: "sender_match", getValue: (r) => (hasSender(r) ? (r.sender_match_type === "regex" ? "Regex" : "Contains") : "") })
     if (isVisible("category")) cols.push({ id: "category", getValue: categoryLabel })
     if (isVisible("outcome")) cols.push({ id: "outcome", getValue: outcomeLabel })
     if (isVisible("confidence")) cols.push({ id: "confidence", getValue: (r) => String(r.confidence) })
     if (isVisible("active")) cols.push({ id: "active", getValue: (r) => (r.is_active ? "Active" : "") })
+    if (isVisible("notes")) cols.push({ id: "notes", getValue: (r) => r.notes ?? "" })
+    if (isVisible("created")) cols.push({ id: "created", getValue: (r) => r.created_at ?? "" })
     if (isVisible("changed")) cols.push({ id: "changed", getValue: (r) => r.updated_at ?? r.created_at ?? "" })
     cols.push({ id: "actions" })
     return cols
@@ -389,11 +404,15 @@ export function RulesPanel({
                 <SortTh tone="blue" id="#" levels={levels} onSort={toggle} className="w-16 text-center">#</SortTh>
                 {isVisible("order") && <SortTh tone="blue" id="order" levels={levels} onSort={toggle} className="w-24 text-left">Order</SortTh>}
                 {isVisible("match") && <SortTh tone="blue" id="match" levels={levels} onSort={toggle} filter={configFor("match")} className="w-32 text-left">Match</SortTh>}
-                {isVisible("pattern") && <SortTh tone="blue" id="pattern" levels={levels} onSort={toggle} className="min-w-[320px] text-left">Subject wordings / sender</SortTh>}
+                {isVisible("pattern") && <SortTh tone="blue" id="pattern" levels={levels} onSort={toggle} className="min-w-[260px] text-left">Subject wordings</SortTh>}
+                {isVisible("sender") && <SortTh tone="blue" id="sender" levels={levels} onSort={toggle} className="min-w-[200px] text-left">Sender</SortTh>}
+                {isVisible("sender_match") && <SortTh tone="blue" id="sender_match" levels={levels} onSort={toggle} filter={configFor("sender_match")} className="w-32 text-left">Sender match</SortTh>}
                 {isVisible("category") && <SortTh tone="blue" id="category" levels={levels} onSort={toggle} filter={configFor("category")} className="min-w-[220px] text-left">Category</SortTh>}
                 {isVisible("outcome") && <SortTh tone="blue" id="outcome" levels={levels} onSort={toggle} className="min-w-[220px] text-left">Result</SortTh>}
                 {isVisible("confidence") && <SortTh tone="blue" id="confidence" levels={levels} onSort={toggle} className="w-36 text-left">Confidence</SortTh>}
                 {isVisible("active") && <SortTh tone="blue" id="active" levels={levels} onSort={toggle} filter={configFor("active")} className="w-28 text-left">Active</SortTh>}
+                {isVisible("notes") && <SortTh tone="blue" id="notes" levels={levels} onSort={toggle} className="min-w-[200px] text-left">Notes</SortTh>}
+                {isVisible("created") && <SortTh tone="blue" id="created" levels={levels} onSort={toggle} className="w-44 text-left">Created</SortTh>}
                 {isVisible("changed") && <SortTh tone="blue" id="changed" levels={levels} onSort={toggle} className="w-44 text-left">Last changed</SortTh>}
                 <SortTh tone="blue" id="actions" levels={levels} onSort={toggle} className="w-32 border-r-0 text-left">Actions</SortTh>
               </tr>
@@ -437,25 +456,35 @@ export function RulesPanel({
                             ))
                           : <span className="text-slate-400">Any subject</span>
                       })()}
+                    </td>
+                    )}
+                    {isVisible("sender") && (
+                    <td className={cn(TD_CLASS, "text-sm text-slate-700 break-all")}>
                       {(() => {
                         const senders = [r.sender_pattern, ...(r.extra_sender_patterns ?? [])].filter(Boolean) as string[]
-                        return senders.length > 0 && (
-                          <div className="flex items-start gap-1.5 font-sans text-sm text-slate-500 mt-0.5">
+                        return senders.length > 0 ? (
+                          <div className="flex items-start gap-1.5">
                             <Mail className="h-3.5 w-3.5 shrink-0 text-slate-400 mt-0.5" />
                             <span className="min-w-0">
-                              from{" "}
                               {senders.map((s, i) => (
                                 <span key={i}>
                                   {i > 0 && <span className="text-slate-400">{" or "}</span>}
                                   <span className="font-mono">{s}</span>
                                 </span>
-                              ))}{" "}
-                              <span className="text-slate-400">{r.sender_match_type === "regex" ? "regex" : "contains"}</span>
+                              ))}
                             </span>
                           </div>
-                        )
+                        ) : <span className="text-slate-400">Any sender</span>
                       })()}
-                      {r.notes && <div className="font-sans text-sm text-slate-400 mt-0.5">{r.notes}</div>}
+                    </td>
+                    )}
+                    {isVisible("sender_match") && (
+                    <td className={TD_CLASS}>
+                      {(r.sender_pattern || r.extra_sender_patterns?.length) ? (
+                        <span className={cn("text-sm font-semibold px-2.5 py-0.5 rounded-full border", r.sender_match_type === "regex" ? "bg-violet-50 text-violet-700 border-violet-200" : "bg-slate-100 text-slate-700 border-slate-200")}>
+                          {r.sender_match_type === "regex" ? "Regex" : "Contains"}
+                        </span>
+                      ) : <span className="text-slate-300">—</span>}
                     </td>
                     )}
                     {isVisible("category") && (
@@ -504,8 +533,19 @@ export function RulesPanel({
                       <Switch checked={r.is_active} disabled={readOnly} onCheckedChange={(v) => toggleActive(r, v)} />
                     </td>
                     )}
+                    {isVisible("notes") && (
+                    <td className={cn(TD_CLASS, "text-sm text-slate-600 break-words")}>
+                      {r.notes || <span className="text-slate-300">—</span>}
+                    </td>
+                    )}
+                    {isVisible("created") && (
+                    <td className={TD_CLASS}>
+                      <div className="text-slate-700">{r.created_by_name ?? "System"}</div>
+                      <div className="text-sm text-slate-400">{r.created_at ? fmtDateTime(r.created_at) : "—"}</div>
+                    </td>
+                    )}
                     {isVisible("changed") && (
-                    <td className={TD_CLASS} title={r.created_at ? `Created ${fmtDateTime(r.created_at)}${r.created_by_name ? ` by ${r.created_by_name}` : ""}` : undefined}>
+                    <td className={TD_CLASS}>
                       <div className="text-slate-700">{r.updated_by_name ?? (r.created_by_name ? r.created_by_name : "System")}</div>
                       <div className="text-sm text-slate-400">{r.updated_at ? fmtDateTime(r.updated_at) : r.created_at ? fmtDateTime(r.created_at) : "—"}</div>
                     </td>

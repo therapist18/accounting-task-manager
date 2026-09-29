@@ -15,6 +15,7 @@ import { extractWithAi } from "./ai"
 import { CATEGORY_BY_KEY, KRA_JOB_LEVEL, type CategoryDef } from "./categories"
 import { classifyByRules, detectApproval, extractPin, isAutomatedSender, isKraSender } from "./rules"
 import { loadSubjectRules } from "./rule-store"
+import { withSupabaseRetry } from "./retry"
 import {
   AUTO_CONFIDENCE_THRESHOLD as THRESHOLD,
   type Actor,
@@ -53,6 +54,11 @@ interface Ctx {
   sb: SupabaseClient
   gmail: gmail_v1.Gmail
   account: AccountRow
+  // Set only by a "Sync from date" run started with "Pause auto-classification" checked: every inbound
+  // email is stored straight into Needs Review, skipping every ignore/notify/classify rule (and AI)
+  // entirely — for recovering mail while the rules themselves are still being tuned, without letting
+  // not-yet-correct rules re-drop or re-misclassify it the moment it's re-fetched.
+  skipClassification?: boolean
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -265,6 +271,9 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   const kra = isKraSender(senderEmail)
   const threadCase = await findCaseByThread(sb, threadId)
   const rules = await loadSubjectRules(sb) // cached for a minute, so a batch of emails costs one query
+  // Outbound replies aren't decided by these rules at all (they always follow the case they're in), so
+  // pausing only ever changes what happens to INBOUND mail.
+  const paused = !!ctx.skipClassification && direction === "inbound"
 
   // 2. Decide from sender + subject alone whether this email is worth a full fetch at all.
   if (direction === "outbound" && !threadCase) return "skipped" // our mail outside any KRA case
@@ -272,14 +281,16 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   // Automated mail from a non-KRA "no-reply"/"alerts" address, outside any case thread: auto-ignore
   // it. Like a rule ignore this is decided from headers alone, but unlike one it is STORED — marked
   // ignored, the same as hitting Ignore in the UI — so it lands under the ignored tab's "Automated"
-  // filter instead of disappearing entirely.
-  const autoIgnore = direction === "inbound" && !kra && !threadCase && isAutomatedSender(senderEmail)
+  // filter instead of disappearing entirely. Skipped while paused — it should land in Needs Review too.
+  const autoIgnore = !paused && direction === "inbound" && !kra && !threadCase && isAutomatedSender(senderEmail)
 
   // Set when a confident ignore rule matches: the mail is stored as ignored (headers only — no body,
   // no attachments, no AI), tagged with the rule, so the Ignored tab can show what each rule caught.
   let ruleIgnore: { ruleId: string; confidence: number } | null = null
 
-  if (direction === "inbound" && !autoIgnore) {
+  // While paused this whole cheap pass is skipped too: it's what would otherwise drop hard-ignore
+  // matches, non-KRA noise and confidently-informational KRA mail before ever reaching Needs Review.
+  if (direction === "inbound" && !autoIgnore && !paused) {
     const cheap = classifyByRules({ subject, body: snippet, senderEmail, threadHasCase: !!threadCase, rules })
     // Confident ignore rules are checked before classification and name no category: whatever the
     // sender, matching mail never opens a case or reaches review. Below the threshold it still goes
@@ -321,10 +332,11 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
         const res = await gmail.users.messages.attachments.get({ userId: "me", messageId, id: att.attachmentId })
         const buf = decodeB64(res.data.data ?? "")
         storagePath = `${account.id}/${messageId}/${safeName(att.filename)}`
-        const { error } = await sb.storage.from(BUCKET).upload(storagePath, buf, {
-          contentType: att.mimeType,
-          upsert: true,
-        })
+        // withSupabaseRetry absorbs a transient network blip before this attachment is given up on —
+        // same heavy-concurrency traffic that occasionally resets a socket mid-upload.
+        const { error } = await withSupabaseRetry(() =>
+          sb.storage.from(BUCKET).upload(storagePath!, buf, { contentType: att.mimeType, upsert: true })
+        )
         if (error) throw error
         if (att.mimeType === "application/pdf" || /\.pdf$/i.test(att.filename)) {
           pdfs.push({ filename: att.filename, data: buf })
@@ -398,6 +410,14 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     confidence = 0.92
     source = "rule"
     disposition = "ignore"
+  } else if (paused) {
+    // Recovery mode: skip rules and AI entirely, store as-is straight into Needs Review so a human (or
+    // a later Reclassify run, once the rules are finished) decides what happens to it.
+    categoryKey = "other_kra"
+    confidence = 0
+    source = "rule"
+    disposition = "needs_review"
+    reviewReason = "Classification paused — recovering synced mail."
   } else {
     const rule = classifyByRules({ subject, body: text, senderEmail, threadHasCase: !!threadCase, rules })
     // "Ignore and delete" reached only via the full body/subject (the cheap, snippet-only pass above
@@ -589,12 +609,14 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
       processed_at: new Date().toISOString(),
   }
   // matched_rule_id arrived in a later migration; if it isn't applied yet, save the email without the
-  // tag instead of failing the whole sync.
-  let { error: upsertErr } = await sb
-    .from("emails")
-    .upsert({ ...emailRow, matched_rule_id: matchedRuleId }, { onConflict: "gmail_message_id" })
+  // tag instead of failing the whole sync. withSupabaseRetry absorbs a transient network blip (a big
+  // backfill runs many mailboxes concurrently, enough traffic to occasionally reset a socket) before
+  // this is counted as a real failure.
+  let { error: upsertErr } = await withSupabaseRetry(() =>
+    sb.from("emails").upsert({ ...emailRow, matched_rule_id: matchedRuleId }, { onConflict: "gmail_message_id" })
+  )
   if (upsertErr && /matched_rule_id/i.test(upsertErr.message)) {
-    ;({ error: upsertErr } = await sb.from("emails").upsert(emailRow, { onConflict: "gmail_message_id" }))
+    ;({ error: upsertErr } = await withSupabaseRetry(() => sb.from("emails").upsert(emailRow, { onConflict: "gmail_message_id" })))
   }
   if (upsertErr) throw new Error(`Could not save email ${messageId}: ${upsertErr.message}`)
 
@@ -932,10 +954,11 @@ export async function ingestBackfillBatch(
   sb: SupabaseClient,
   accountId: string,
   ids: string[],
-  budgetMs = 45_000
+  budgetMs = 45_000,
+  skipClassification = false
 ): Promise<{ ingested: number; skipped: number; failed: number; remaining: string[]; errors: string[] }> {
   const account = await loadActiveAccount(sb, accountId)
-  const ctx: Ctx = { sb, gmail: gmailForAccount(account), account }
+  const ctx: Ctx = { sb, gmail: gmailForAccount(account), account, skipClassification }
   const result = await ingestConcurrently(ctx, ids, budgetMs)
   // Backfill talks to this mailbox's Gmail just as much as a regular sync does, so it gets the same
   // last_synced_at/last_sync_error treatment as runPass below — every batch, not just the final one,

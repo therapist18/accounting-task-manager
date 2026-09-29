@@ -9,11 +9,13 @@ const YMD = /^\d{4}-\d{2}-\d{2}$/
 // POST /api/email-center/sync/backfill — pull in mail from a chosen date, for one mailbox at a time
 // (the client runs the selected mailboxes and reports progress).
 //   { accountId, action: "list",   since: "YYYY-MM-DD", until?: "YYYY-MM-DD" }  -> { ids (oldest first), listed, capped, email }
-//   { accountId, action: "ingest", ids: string[] }         -> { ingested, skipped, failed, remaining, errors }
+//   { accountId, action: "ingest", ids: string[], skipClassification? }         -> { ingested, skipped, failed, remaining, errors }
 export async function POST(request: NextRequest) {
   try {
     const { sb } = await authorize(request)
-    const body = (await request.json().catch(() => ({}))) as { accountId?: string; action?: string; since?: string; until?: string; ids?: unknown }
+    const body = (await request.json().catch(() => ({}))) as {
+      accountId?: string; action?: string; since?: string; until?: string; ids?: unknown; skipClassification?: boolean
+    }
     if (!body.accountId) return NextResponse.json({ success: false, error: "accountId is required." }, { status: 400 })
 
     if (body.action === "list") {
@@ -37,7 +39,7 @@ export async function POST(request: NextRequest) {
       if (!ids.length || ids.length > BACKFILL_BATCH * 2) {
         return NextResponse.json({ success: false, error: `Send between 1 and ${BACKFILL_BATCH * 2} message ids.` }, { status: 400 })
       }
-      return NextResponse.json({ success: true, ...(await ingestBackfillBatch(sb, body.accountId, ids)) })
+      return NextResponse.json({ success: true, ...(await ingestBackfillBatch(sb, body.accountId, ids, undefined, !!body.skipClassification)) })
     }
 
     return NextResponse.json({ success: false, error: "Unknown action." }, { status: 400 })

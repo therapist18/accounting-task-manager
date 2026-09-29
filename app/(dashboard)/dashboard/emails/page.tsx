@@ -152,6 +152,10 @@ export default function EmailCenterPage() {
   // "Sync from date" dialog; presetIds is set when it is opened from one company's row.
   const [syncFromOpen, setSyncFromOpen] = useState(false)
   const [syncFromIds, setSyncFromIds] = useState<string[] | undefined>(undefined)
+  // "Reset to Needs Review" — for while the rules are still being tuned: deletes every task and clears
+  // every email's classification back to Needs Review, so the whole history can be reclassified fresh.
+  const [resetPromptOpen, setResetPromptOpen] = useState(false)
+  const [resetting, setResetting] = useState(false)
   const [companiesLoading, setCompaniesLoading] = useState(true)
 
   // Companies and staff barely change within a session, unlike accounts, which "Refresh"/"Sync now"
@@ -354,6 +358,20 @@ export default function EmailCenterPage() {
       setReclassifying(false)
       setReclassifyProgress(null)
       setReclassifyPrompt(null)
+    }
+  }
+
+  const resetToReview = async () => {
+    setResetting(true)
+    try {
+      const res = await api<{ casesDeleted: number; emailsReset: number }>("/api/email-center/reset-to-review", { method: "POST" })
+      toast.success(`${res.emailsReset} email(s) reset to Needs Review${res.casesDeleted ? ` — ${res.casesDeleted} task(s) deleted` : ""}.`)
+      setResetPromptOpen(false)
+      await loadAll()
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setResetting(false)
     }
   }
 
@@ -710,6 +728,17 @@ export default function EmailCenterPage() {
               </span>
             )}
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setResetPromptOpen(true)}
+            disabled={loading}
+            title="While the rules are still being tuned: delete every task and clear every email's classification back to Needs Review"
+            className="h-10 px-3.5 rounded-md text-base font-medium gap-2 border-red-200 text-red-700 bg-white hover:bg-red-50 shadow-none"
+          >
+            <RotateCcw className="h-5 w-5" />
+            Reset to Needs Review
+          </Button>
         </div>
       </div>
 
@@ -971,6 +1000,26 @@ export default function EmailCenterPage() {
             <AlertDialogAction onClick={(e) => { e.preventDefault(); runReclassify() }} disabled={reclassifying} className="bg-custom-blue hover:bg-custom-blue/90">
               {reclassifying && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
               {reclassifying ? "Reclassifying…" : "Reclassify now"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={resetPromptOpen} onOpenChange={(o) => !o && !resetting && setResetPromptOpen(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset everything to Needs Review?</AlertDialogTitle>
+            <AlertDialogDescription>
+              For while the classification rules are still being tuned. This deletes <span className="font-medium text-slate-900">every KRA task</span> (open and completed), and clears every email currently Ignored, flagged as a Notification, or already classified — all of it goes back to Needs Review.
+              {" "}Mail that was previously <span className="font-medium text-slate-900">"Delete completely"</span>-ignored was never stored and won't come back from this — use <span className="font-medium text-slate-900">Sync from date</span> with <span className="font-medium text-slate-900">Pause auto-classification</span> checked afterward to recover it.
+              {" "}This can't be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resetting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); resetToReview() }} disabled={resetting} className="bg-red-600 hover:bg-red-700">
+              {resetting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+              {resetting ? "Resetting…" : "Reset everything"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

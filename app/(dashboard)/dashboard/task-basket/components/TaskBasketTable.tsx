@@ -174,310 +174,328 @@ export default function TaskBasketTable({
 
   return (
     <>
-      <div className="overflow-auto flex-1 min-h-0">
+      <div>
         {!loading && !items.length ? (
           <div className="py-16 text-center text-sm text-slate-400">
             Nothing here — every company is compliant for this filter.
           </div>
         ) : (
-          <table className="w-full min-w-[1150px] border-separate border-spacing-0 text-base">
-            <thead className="sticky top-0 z-30 bg-white shadow-xs">
-              <tr>
-                <SortTh
-                  id="#"
-                  levels={levels}
-                  onSort={toggle}
-                  tone="blue"
-                  className="w-16 text-center"
-                >
-                  #
-                </SortTh>
-                <SortTh
-                  id="companyId"
-                  levels={levels}
-                  onSort={toggle}
-                  tone="blue"
-                  className="text-center w-16"
-                >
-                  Company ID
-                </SortTh>
-                <SortTh
-                  id="company"
-                  levels={levels}
-                  onSort={toggle}
-                  tone="blue"
-                  className="text-left min-w-[220px]"
-                >
-                  Company
-                </SortTh>
-                <SortTh
-                  id="module"
-                  levels={levels}
-                  onSort={toggle}
-                  tone="blue"
-                  className="text-left min-w-[170px]"
-                >
-                  Module
-                </SortTh>
-                <SortTh
-                  id="cycle"
-                  levels={levels}
-                  onSort={toggle}
-                  tone="blue"
-                  className="text-left"
-                >
-                  Cycle
-                </SortTh>
-                <SortTh
-                  id="contacts"
-                  levels={levels}
-                  onSort={toggle}
-                  tone="blue"
-                  className="text-left min-w-[200px]"
-                >
-                  Contact
-                </SortTh>
-                <SortTh
-                  id="reason"
-                  levels={levels}
-                  onSort={toggle}
-                  tone="blue"
-                  className="text-left min-w-[260px]"
-                >
-                  Reason
-                </SortTh>
-                <SortTh
-                  id="triggered"
-                  levels={levels}
-                  onSort={toggle}
-                  tone="blue"
-                  className="text-left"
-                >
-                  Triggered
-                </SortTh>
-                <SortTh
-                  id="overdue"
-                  levels={levels}
-                  onSort={toggle}
-                  tone="blue"
-                  className="text-left"
-                >
-                  Overdue
-                </SortTh>
-                <SortTh
-                  id="status"
-                  levels={levels}
-                  onSort={toggle}
-                  tone="blue"
-                  className="text-left"
-                >
-                  Status
-                </SortTh>
-                <th className="px-3 py-2.5 text-base font-semibold text-right border-b border-slate-200/80 whitespace-nowrap">
-                  Action
-                </th>
-              </tr>
-              {/* Total / Completed / Missing, frozen with the rest of the header, counted over the
+          <div className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
+            <div className="overflow-auto flex-1 min-h-0 custom-scrollbar">
+              <table className="w-full min-w-[1420px] border-separate border-spacing-0 text-base">
+                <thead className="sticky top-0 z-30 bg-white shadow-xs">
+                  <tr>
+                    <SortTh
+                      id="#"
+                      levels={levels}
+                      onSort={toggle}
+                      tone="blue"
+                      className="w-16 text-center"
+                    >
+                      #
+                    </SortTh>
+                    <SortTh
+                      id="companyId"
+                      levels={levels}
+                      onSort={toggle}
+                      tone="blue"
+                      className="text-center w-16"
+                    >
+                      Company ID
+                    </SortTh>
+                    <SortTh
+                      id="company"
+                      levels={levels}
+                      onSort={toggle}
+                      tone="blue"
+                      className="text-left min-w-[220px]"
+                    >
+                      Company
+                    </SortTh>
+                    <SortTh
+                      id="module"
+                      levels={levels}
+                      onSort={toggle}
+                      tone="blue"
+                      className="text-left min-w-[170px]"
+                    >
+                      Module
+                    </SortTh>
+                    <SortTh
+                      id="cycle"
+                      levels={levels}
+                      onSort={toggle}
+                      tone="blue"
+                      className="text-left"
+                    >
+                      Cycle
+                    </SortTh>
+                    <SortTh
+                      id="contacts"
+                      levels={levels}
+                      onSort={toggle}
+                      tone="blue"
+                      className="text-left min-w-[200px]"
+                    >
+                      Contact
+                    </SortTh>
+                    <SortTh
+                      id="reason"
+                      levels={levels}
+                      onSort={toggle}
+                      tone="blue"
+                      className="text-left min-w-[260px]"
+                    >
+                      Reason
+                    </SortTh>
+                    <SortTh
+                      id="triggered"
+                      levels={levels}
+                      onSort={toggle}
+                      tone="blue"
+                      className="text-left"
+                    >
+                      Triggered
+                    </SortTh>
+                    <SortTh
+                      id="overdue"
+                      levels={levels}
+                      onSort={toggle}
+                      tone="blue"
+                      className="text-left"
+                    >
+                      Overdue
+                    </SortTh>
+                    <SortTh
+                      id="status"
+                      levels={levels}
+                      onSort={toggle}
+                      tone="blue"
+                      className="text-left"
+                    >
+                      Status
+                    </SortTh>
+                    <th className="px-3 py-2.5 text-base font-semibold text-right border-b border-slate-200/80 whitespace-nowrap">
+                      Action
+                    </th>
+                  </tr>
+                  {/* Total / Completed / Missing, frozen with the rest of the header, counted over the
                   whole filtered list — not just the visible page. */}
-              {!loading && <StatsRows rows={items} columns={STATS_COLUMNS} />}
-            </thead>
-            <tbody>
-              {loading ? (
-                <TableLoading
-                  cols={COLUMN_COUNT}
-                  label="Loading task basket…"
-                />
-              ) : (
-                pageRows.map(({ item, number }, index) => {
-                  const overdue = daysOpen(item);
-                  const isOpen = item.status === "open";
-                  const expanded = expandedId === item.id;
-                  return [
-                    <tr key={item.id} className={zebraRow(index)}>
-                      <td
-                        className={cn(
-                          TD_CLASS,
-                          "text-center text-slate-400 tabular-nums",
-                        )}
-                      >
-                        {number}
-                      </td>
-                      <td
-                        className={cn(
-                          TD_CLASS,
-                          "text-center tabular-nums text-slate-500",
-                        )}
-                      >
-                        {item.company_id}
-                      </td>
-                      <td
-                        className={cn(TD_CLASS, "font-semibold text-slate-800")}
-                      >
-                        {item.company_name}
-                      </td>
-                      <td className={TD_CLASS}>
-                        {TASK_BASKET_MODULE_LABELS[item.module]}
-                      </td>
-                      <td className={TD_CLASS}>{item.cycle_month}</td>
-                      <td className={TD_CLASS}>
-                        <ContactCell item={item} />
-                      </td>
-                      <td className={cn(TD_CLASS, "max-w-[280px]")}>
-                        {item.reason}
-                      </td>
-                      <td className={TD_CLASS}>
-                        {format(new Date(item.triggered_at), "dd MMM yyyy")}
-                      </td>
-                      <td className={TD_CLASS}>
-                        {isOpen ? (
-                          <span
+                  {!loading && (
+                    <StatsRows rows={items} columns={STATS_COLUMNS} />
+                  )}
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <TableLoading
+                      cols={COLUMN_COUNT}
+                      label="Loading task basket…"
+                    />
+                  ) : (
+                    pageRows.map(({ item, number }, index) => {
+                      const overdue = daysOpen(item);
+                      const isOpen = item.status === "open";
+                      const expanded = expandedId === item.id;
+                      return [
+                        <tr key={item.id} className={zebraRow(index)}>
+                          <td
                             className={cn(
-                              "font-medium",
-                              overdue >= 14
-                                ? "text-red-600"
-                                : overdue >= 7
-                                  ? "text-amber-600"
-                                  : "text-slate-600",
+                              TD_CLASS,
+                              "text-center text-slate-400 tabular-nums",
                             )}
                           >
-                            {overdue} day{overdue === 1 ? "" : "s"}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td className={TD_CLASS}>
-                        <Badge
-                          variant="outline"
-                          className={
-                            isOpen
-                              ? "border-amber-300 bg-amber-50 text-amber-700"
-                              : "border-emerald-300 bg-emerald-50 text-emerald-700"
-                          }
-                        >
-                          {isOpen ? "Open" : "Resolved"}
-                        </Badge>
-                      </td>
-                      <td
-                        className={cn(TD_CLASS, "text-right whitespace-nowrap")}
-                      >
-                        {isOpen ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setResolvingItem(item);
-                              setDialogOpen(true);
-                            }}
+                            {number}
+                          </td>
+                          <td
+                            className={cn(
+                              TD_CLASS,
+                              "text-center tabular-nums text-slate-500",
+                            )}
                           >
-                            Mark Resolved
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-slate-400">
-                            {item.resolution_note || "Resolved"}
-                          </span>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="ml-1"
-                          onClick={() =>
-                            setExpandedId(expanded ? null : item.id)
-                          }
-                        >
-                          {expanded ? "Hide" : "Details"}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="ml-1 text-red-600 hover:text-red-700 hover:bg-red-50"
-                          onClick={() => {
-                            setDeletingItem(item);
-                            setDeleteDialogOpen(true);
-                          }}
-                        >
-                          Delete
-                        </Button>
-                      </td>
-                    </tr>,
-                    expanded ? (
-                      <tr key={`${item.id}-detail`} className="bg-slate-50/60">
-                        <td
-                          className={cn(TD_CLASS, "bg-inherit")}
-                          colSpan={COLUMN_COUNT}
-                        >
-                          <div className="grid gap-4 md:grid-cols-2 py-1">
-                            <div>
-                              <p className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
-                                Reason
-                              </p>
-                              <p className="text-sm text-slate-700">
-                                {item.reason}
-                              </p>
-                              <p className="mt-2 mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
-                                Contacts ({item.contact_summary.length})
-                              </p>
-                              {item.contact_summary.length ? (
-                                <ul className="space-y-0.5">
-                                  {item.contact_summary.map((contact, i) => (
-                                    <li
-                                      key={i}
-                                      className="text-sm text-slate-700"
-                                    >
-                                      <span className="font-medium">
-                                        {contact.name}
-                                      </span>
-                                      {contact.position ? (
-                                        <span className="text-slate-500">
-                                          {" "}
-                                          — {contact.position}
-                                        </span>
-                                      ) : null}
-                                      <span className="text-slate-400">
-                                        {" "}
-                                        ({contact.channel}: {contact.value})
-                                      </span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              ) : (
-                                <p className="text-sm text-slate-400">
-                                  No contact configured.
-                                </p>
-                              )}
-                            </div>
-                            <div>
-                              <p className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
-                                Check history
-                              </p>
-                              <HistoryList history={item.history} />
-                              {item.status === "resolved" && (
-                                <p className="mt-2 text-sm text-emerald-700">
-                                  Resolved{" "}
-                                  {item.resolved_at
-                                    ? format(
-                                        new Date(item.resolved_at),
-                                        "dd MMM yyyy, HH:mm",
-                                      )
-                                    : ""}
-                                  {item.resolved_by
-                                    ? ` by ${item.resolved_by}`
-                                    : " automatically"}
-                                  {item.resolution_note
-                                    ? ` — ${item.resolution_note}`
-                                    : ""}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : null,
-                  ];
-                })
-              )}
-            </tbody>
-          </table>
+                            {item.company_id}
+                          </td>
+                          <td
+                            className={cn(
+                              TD_CLASS,
+                              "font-semibold text-slate-800",
+                            )}
+                          >
+                            {item.company_name}
+                          </td>
+                          <td className={TD_CLASS}>
+                            {TASK_BASKET_MODULE_LABELS[item.module]}
+                          </td>
+                          <td className={TD_CLASS}>{item.cycle_month}</td>
+                          <td className={TD_CLASS}>
+                            <ContactCell item={item} />
+                          </td>
+                          <td className={cn(TD_CLASS, "max-w-[280px]")}>
+                            {item.reason}
+                          </td>
+                          <td className={TD_CLASS}>
+                            {format(new Date(item.triggered_at), "dd MMM yyyy")}
+                          </td>
+                          <td className={TD_CLASS}>
+                            {isOpen ? (
+                              <span
+                                className={cn(
+                                  "font-medium",
+                                  overdue >= 14
+                                    ? "text-red-600"
+                                    : overdue >= 7
+                                      ? "text-amber-600"
+                                      : "text-slate-600",
+                                )}
+                              >
+                                {overdue} day{overdue === 1 ? "" : "s"}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
+                          </td>
+                          <td className={TD_CLASS}>
+                            <Badge
+                              variant="outline"
+                              className={
+                                isOpen
+                                  ? "border-amber-300 bg-amber-50 text-amber-700"
+                                  : "border-emerald-300 bg-emerald-50 text-emerald-700"
+                              }
+                            >
+                              {isOpen ? "Open" : "Resolved"}
+                            </Badge>
+                          </td>
+                          <td
+                            className={cn(
+                              TD_CLASS,
+                              "text-right whitespace-nowrap",
+                            )}
+                          >
+                            {isOpen ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setResolvingItem(item);
+                                  setDialogOpen(true);
+                                }}
+                              >
+                                Mark Resolved
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-slate-400">
+                                {item.resolution_note || "Resolved"}
+                              </span>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="ml-1"
+                              onClick={() =>
+                                setExpandedId(expanded ? null : item.id)
+                              }
+                            >
+                              {expanded ? "Hide" : "Details"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="ml-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => {
+                                setDeletingItem(item);
+                                setDeleteDialogOpen(true);
+                              }}
+                            >
+                              Delete
+                            </Button>
+                          </td>
+                        </tr>,
+                        expanded ? (
+                          <tr
+                            key={`${item.id}-detail`}
+                            className="bg-slate-50/60"
+                          >
+                            <td
+                              className={cn(TD_CLASS, "bg-inherit")}
+                              colSpan={COLUMN_COUNT}
+                            >
+                              <div className="grid gap-4 md:grid-cols-2 py-1">
+                                <div>
+                                  <p className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                                    Reason
+                                  </p>
+                                  <p className="text-sm text-slate-700">
+                                    {item.reason}
+                                  </p>
+                                  <p className="mt-2 mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                                    Contacts ({item.contact_summary.length})
+                                  </p>
+                                  {item.contact_summary.length ? (
+                                    <ul className="space-y-0.5">
+                                      {item.contact_summary.map(
+                                        (contact, i) => (
+                                          <li
+                                            key={i}
+                                            className="text-sm text-slate-700"
+                                          >
+                                            <span className="font-medium">
+                                              {contact.name}
+                                            </span>
+                                            {contact.position ? (
+                                              <span className="text-slate-500">
+                                                {" "}
+                                                — {contact.position}
+                                              </span>
+                                            ) : null}
+                                            <span className="text-slate-400">
+                                              {" "}
+                                              ({contact.channel}:{" "}
+                                              {contact.value})
+                                            </span>
+                                          </li>
+                                        ),
+                                      )}
+                                    </ul>
+                                  ) : (
+                                    <p className="text-sm text-slate-400">
+                                      No contact configured.
+                                    </p>
+                                  )}
+                                </div>
+                                <div>
+                                  <p className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                                    Check history
+                                  </p>
+                                  <HistoryList history={item.history} />
+                                  {item.status === "resolved" && (
+                                    <p className="mt-2 text-sm text-emerald-700">
+                                      Resolved{" "}
+                                      {item.resolved_at
+                                        ? format(
+                                            new Date(item.resolved_at),
+                                            "dd MMM yyyy, HH:mm",
+                                          )
+                                        : ""}
+                                      {item.resolved_by
+                                        ? ` by ${item.resolved_by}`
+                                        : " automatically"}
+                                      {item.resolution_note
+                                        ? ` — ${item.resolution_note}`
+                                        : ""}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null,
+                      ];
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </div>
 
