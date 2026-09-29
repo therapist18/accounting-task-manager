@@ -22,6 +22,18 @@ export interface TaskBasketContact {
   value: string
 }
 
+// Appended by kra-tools' task-basket sync while an item stays open (and once more when it closes
+// itself): { checked_at, still_pending } for a progress tick, plus the richer late_upload record
+// with received_accounts/total_accounts and auto_resolved.
+export interface TaskBasketHistoryEntry {
+  checked_at: string
+  event?: "late_upload"
+  still_pending?: boolean
+  received_accounts?: number
+  total_accounts?: number
+  auto_resolved?: boolean
+}
+
 export interface TaskBasketItem {
   id: string
   company_id: number
@@ -32,6 +44,7 @@ export interface TaskBasketItem {
   status: TaskBasketStatus
   reason: string
   contact_summary: TaskBasketContact[]
+  history: TaskBasketHistoryEntry[]
   triggered_at: string
   resolved_at: string | null
   resolved_by: string | null
@@ -71,6 +84,7 @@ export async function getTaskBasketItems(filters: TaskBasketFilters = {}): Promi
     ...row,
     company_name: nameById.get(row.company_id) || `Company #${row.company_id}`,
     contact_summary: row.contact_summary || [],
+    history: row.history || [],
   }))
 }
 
@@ -84,6 +98,19 @@ export async function resolveTaskBasketItem(id: string, resolutionNote: string):
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw new Error(body.error || "Failed to resolve task basket item.")
+  }
+}
+
+export async function deleteTaskBasketItem(id: string): Promise<void> {
+  const response = await fetch("/api/task-basket/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  })
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.error || "Failed to delete task basket item.")
   }
 }
 

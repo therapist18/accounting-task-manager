@@ -1,15 +1,20 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Paperclip, Inbox, CornerUpLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { Pagination } from "./Pagination"
-import { HEAD_BLUE, TableLoading, SortTh, TD_CLASS, TH_CLASS, useSortedRows, zebraRow } from "./table"
+import {
+  StatsRows, TableLoading, SortTh, TD_CLASS,
+  useColumnFilters, useTableSort, zebraRow,
+} from "./table"
 import { DISPOSITION_BADGE, DISPOSITION_LABEL, fmtDateTime, type CategoryOption, type Disposition, type EmailRow } from "./shared"
 
-// The email tabs (Needs Review / Update / Ignored): one sortable, bordered, zebra-striped table with
-// pagination — the same table language as the cases table and the Individual Document Manager.
+// The email tabs (Needs Review / Update / Ignored): one sortable, filterable, bordered, zebra-striped
+// table with pagination — the same table language as the cases table and the Individual Document
+// Manager. Header filters, multi-column sort (shift-click) and column visibility all come from ./table;
+// only what's specific to an email row (cell rendering, quick-classify actions) lives here.
 
 const SORT_VALUE: Record<string, (e: EmailRow) => string | number> = {
   company: (e) => e.company_name ?? "",
@@ -23,7 +28,18 @@ const SORT_VALUE: Record<string, (e: EmailRow) => string | number> = {
   actions: (e) => (e.disposition === "needs_review" ? 0 : 1), // rows still awaiting a decision first
 }
 
-export function   EmailsTable({
+// Toggleable columns — "#"/Company (sticky) and Actions (the whole point of the review tabs) always show.
+export const TOGGLEABLE_COLUMNS = [
+  { id: "from", label: "From" },
+  { id: "subject", label: "Subject" },
+  { id: "summary", label: "Summary" },
+  { id: "received", label: "Received" },
+  { id: "category", label: "Category" },
+  { id: "status", label: "Status" },
+  { id: "case", label: "Case" },
+]
+
+export function EmailsTable({
   emails,
   categories,
   onOpen,
@@ -36,6 +52,8 @@ export function   EmailsTable({
   onMarkHandled,
   selection,
   onAllocate,
+  showStats = false,
+  visibleColumns: visibility,
 }: {
   emails: EmailRow[]
   categories: CategoryOption[]
@@ -54,21 +72,40 @@ export function   EmailsTable({
   selection?: { selected: Set<string>; onToggle: (id: string) => void; onToggleAll: (ids: string[], on: boolean) => void }
   // Adds an Action dropdown (— / Action required / Update only / Ignored / Needs review) to each row.
   onAllocate?: (e: EmailRow, d: Disposition) => void
+  // Both owned by the page's shared toolbar (Stats / Columns buttons), not this component — so every
+  // list tab's table keeps those controls in one place instead of each growing its own.
+  showStats?: boolean
+  visibleColumns?: Record<string, boolean>
 }) {
   const [itemsPerPage, setItemsPerPage] = useState(50)
   const [page, setPage] = useState(0)
-  const { sort, sorted, toggle } = useSortedRows(emails, SORT_VALUE, { key: "received", dir: "desc" })
+  const isVisible = (id: string) => visibility?.[id] !== false
+
+  const byKey = new Map(categories.map((c) => [c.key, c]))
+  const categoryName = (e: EmailRow) => (e.category_key ? byKey.get(e.category_key)?.name ?? e.category_key : "")
+  const statusLabel = (e: EmailRow) =>
+    e.handled_at ? "Handled"
+      : e.category_key === "notification" ? (e.priority === "urgent" ? "Urgent" : "FYI")
+      : e.disposition ? DISPOSITION_LABEL[e.disposition] : ""
+
+  const FILTER_VALUE: Record<string, (e: EmailRow) => string> = {
+    company: (e) => e.company_name ?? "Unassigned company",
+    category: categoryName,
+    status: statusLabel,
+  }
+  const { filtered, configFor, activeCount: activeFilterCount, clearAll: clearAllFilters } = useColumnFilters(emails, FILTER_VALUE)
+
+  const { levels, sorted, toggle } = useTableSort(filtered, SORT_VALUE, [{ key: "received", dir: "desc" }])
 
   useEffect(() => setPage(0), [emails, itemsPerPage])
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / itemsPerPage))
   const safePage = Math.min(page, totalPages - 1)
   const start = safePage * itemsPerPage
-  const visible = sorted.slice(start, start + itemsPerPage)
+  const visibleRows = sorted.slice(start, start + itemsPerPage)
 
-  const byKey = new Map(categories.map((c) => [c.key, c]))
   const showActions = !!onAllocate || emails.some((e) => e.disposition === "needs_review")
-  const colCount = showActions ? 10 : 9
+  const colCount = 2 + TOGGLEABLE_COLUMNS.filter((c) => isVisible(c.id)).length + (showActions ? 1 : 0)
   // The row checkbox lives in the sticky "#" column, which widens to make room — so the Company column
   // that sticks beside it has to move over by the same amount.
   const numWidth = selection ? "w-24 min-w-[6rem] max-w-[6rem]" : "w-16"
@@ -76,16 +113,41 @@ export function   EmailsTable({
   const allSelected = !!selection && emails.length > 0 && emails.every((e) => selection.selected.has(e.id))
   const someSelected = !!selection && !allSelected && emails.some((e) => selection.selected.has(e.id))
 
+  const statsRowColumns = useMemo(() => {
+    const cols: { id: string; getValue?: (e: EmailRow) => string; className?: string }[] = [
+      { id: "#", className: cn(numWidth, "sticky left-0 z-40 text-center") },
+      { id: "company", getValue: (e) => e.company_name ?? "", className: cn("sticky z-40 border-r-2", companyLeft) },
+    ]
+    if (isVisible("from")) cols.push({ id: "from", getValue: (e) => e.sender_name || e.sender_email })
+    if (isVisible("subject")) cols.push({ id: "subject", getValue: (e) => e.subject ?? "" })
+    if (isVisible("summary")) cols.push({ id: "summary", getValue: (e) => e.ai_summary || e.snippet || "" })
+    if (isVisible("received")) cols.push({ id: "received", getValue: (e) => e.received_at })
+    if (isVisible("category")) cols.push({ id: "category", getValue: categoryName })
+    if (isVisible("status")) cols.push({ id: "status", getValue: statusLabel })
+    if (isVisible("case")) cols.push({ id: "case", getValue: (e) => (e.case_id ? "yes" : "") })
+    if (showActions) cols.push({ id: "actions" })
+    return cols
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isVisible, showActions, numWidth, companyLeft, byKey])
+
   return (
     <div className={cn(
       "flex flex-col flex-1 min-h-0 bg-white overflow-hidden",
       !embedded && "rounded-xl border border-slate-200 shadow-sm"
     )}>
+      {activeFilterCount > 0 && (
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-200 shrink-0">
+          <Button variant="outline" size="sm" onClick={clearAllFilters} className="h-9 px-3 gap-1.5 rounded-full border-slate-200 text-base font-medium text-custom-blue">
+            Clear {activeFilterCount} filter{activeFilterCount === 1 ? "" : "s"}
+          </Button>
+        </div>
+      )}
+
       <div className="overflow-auto flex-1 min-h-0 custom-scrollbar">
         <table className="min-w-[1500px] w-full border-separate border-spacing-0 text-base">
           <thead className="sticky top-0 z-30 bg-white shadow-xs">
             <tr>
-              <SortTh tone="blue" id="#" sort={sort} onSort={toggle} className={cn(numWidth, "sticky left-0 z-40 text-center")}>
+              <SortTh tone="blue" id="#" levels={levels} onSort={toggle} className={cn(numWidth, "sticky left-0 z-40 text-center")}>
                 {selection ? (
                   <input
                     type="checkbox"
@@ -98,20 +160,21 @@ export function   EmailsTable({
                   />
                 ) : "#"}
               </SortTh>
-              <SortTh tone="blue" id="company" sort={sort} onSort={toggle} className={cn("min-w-[210px] sticky z-40 text-left border-r-2", companyLeft)}>Company</SortTh>
-              <SortTh tone="blue" id="from" sort={sort} onSort={toggle} className="min-w-[200px]">From</SortTh>
-              <SortTh tone="blue" id="subject" sort={sort} onSort={toggle} className="min-w-[280px]">Subject</SortTh>
-              <SortTh tone="blue" id="summary" sort={sort} onSort={toggle} className="min-w-[300px]">Summary</SortTh>
-              <SortTh tone="blue" id="received" sort={sort} onSort={toggle} className="min-w-[130px]">Received</SortTh>
-              <SortTh tone="blue" id="category" sort={sort} onSort={toggle} className="min-w-[140px]">Category</SortTh>
-              <SortTh tone="blue" id="status" sort={sort} onSort={toggle} className="min-w-[130px]">Status</SortTh>
-              <SortTh tone="blue" id="case" sort={sort} onSort={toggle} className="min-w-[90px]">Case</SortTh>
-              {showActions && <SortTh tone="blue" id="actions" sort={sort} onSort={toggle} className="min-w-[200px] text-left">Actions</SortTh>}
+              <SortTh tone="blue" id="company" levels={levels} onSort={toggle} filter={configFor("company")} className={cn("min-w-[210px] sticky z-40 text-left border-r-2", companyLeft)}>Company</SortTh>
+              {isVisible("from") && <SortTh tone="blue" id="from" levels={levels} onSort={toggle} className="min-w-[200px]">From</SortTh>}
+              {isVisible("subject") && <SortTh tone="blue" id="subject" levels={levels} onSort={toggle} className="min-w-[280px]">Subject</SortTh>}
+              {isVisible("summary") && <SortTh tone="blue" id="summary" levels={levels} onSort={toggle} className="min-w-[300px]">Summary</SortTh>}
+              {isVisible("received") && <SortTh tone="blue" id="received" levels={levels} onSort={toggle} className="min-w-[130px]">Received</SortTh>}
+              {isVisible("category") && <SortTh tone="blue" id="category" levels={levels} onSort={toggle} filter={configFor("category")} className="min-w-[140px]">Category</SortTh>}
+              {isVisible("status") && <SortTh tone="blue" id="status" levels={levels} onSort={toggle} filter={configFor("status")} className="min-w-[130px]">Status</SortTh>}
+              {isVisible("case") && <SortTh tone="blue" id="case" levels={levels} onSort={toggle} className="min-w-[90px]">Case</SortTh>}
+              {showActions && <SortTh tone="blue" id="actions" levels={levels} onSort={toggle} className="min-w-[200px] text-left">Actions</SortTh>}
             </tr>
+            {showStats && <StatsRows rows={filtered} columns={statsRowColumns} />}
           </thead>
           <tbody>
             {loading && <TableLoading cols={colCount} />}
-            {!loading && visible.length === 0 && (
+            {!loading && visibleRows.length === 0 && (
               <tr>
                 <td colSpan={colCount} className="py-20 text-center text-base text-slate-400">
                   <Inbox className="w-11 h-11 text-slate-300 mx-auto mb-2" />
@@ -119,7 +182,7 @@ export function   EmailsTable({
                 </td>
               </tr>
             )}
-            {visible.map((e, index) => {
+            {visibleRows.map((e, index) => {
               const cat = e.category_key ? byKey.get(e.category_key) : null
               const isUnread = !e.is_read
               return (
@@ -143,60 +206,76 @@ export function   EmailsTable({
                     </div>
                     {e.kra_pin && <div className="text-sm text-slate-500 mt-1">{e.kra_pin}</div>}
                   </td>
-                  <td className={cn(TD_CLASS, "break-all")}>
-                    <div className="flex items-start gap-1.5">
-                      {e.direction === "outbound" && <CornerUpLeft className="w-4 h-4 mt-0.5 text-slate-400 shrink-0" />}
-                      <div className="min-w-0">
-                        <div className="text-slate-800">{e.sender_name || e.sender_email}</div>
-                        {e.sender_name && <div className="text-sm text-slate-500 mt-0.5">{e.sender_email}</div>}
+                  {isVisible("from") && (
+                    <td className={cn(TD_CLASS, "break-all")}>
+                      <div className="flex items-start gap-1.5">
+                        {e.direction === "outbound" && <CornerUpLeft className="w-4 h-4 mt-0.5 text-slate-400 shrink-0" />}
+                        <div className="min-w-0">
+                          <div className="text-slate-800">{e.sender_name || e.sender_email}</div>
+                          {e.sender_name && <div className="text-sm text-slate-500 mt-0.5">{e.sender_email}</div>}
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td className={TD_CLASS}>
-                    <div className="flex items-start gap-1.5">
-                      <span className={cn("line-clamp-2 leading-snug", isUnread ? "font-bold text-slate-900" : "font-medium text-slate-900")} title={e.subject}>
-                        {e.subject || "(no subject)"}
-                      </span>
-                      {e.has_attachments && <Paperclip className="w-4 h-4 mt-0.5 text-slate-400 shrink-0" />}
-                    </div>
-                  </td>
-                  <td className={TD_CLASS}>
-                    <span className="line-clamp-2 leading-snug text-slate-600" title={e.ai_summary || e.snippet || ""}>{e.ai_summary || e.snippet || "—"}</span>
-                    {e.disposition === "needs_review" && e.review_reason && (
-                      <div className="text-sm text-amber-700 font-medium mt-1">{e.review_reason}</div>
-                    )}
-                  </td>
-                  <td className={cn(TD_CLASS, "whitespace-nowrap tabular-nums")}>{fmtDateTime(e.received_at, showTime)}</td>
-                  <td className={TD_CLASS}>
-                    {cat ? (
-                      <span
-                        className="text-sm font-semibold px-2.5 py-0.5 rounded-full border whitespace-nowrap"
-                        style={{ background: `${cat.color ?? "#6b7280"}14`, color: cat.color ?? "#6b7280", borderColor: `${cat.color ?? "#6b7280"}33` }}
-                      >
-                        {cat.name}
-                      </span>
-                    ) : <span className="text-slate-300">—</span>}
-                  </td>
-                  <td className={cn(TD_CLASS, "whitespace-nowrap")}>
-                    {e.handled_at ? (
-                      <>
-                        <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">Handled</span>
-                        <div className="text-sm text-emerald-700 mt-1">by {e.handled_by_name ?? "…"} · {fmtDateTime(e.handled_at, showTime)}</div>
-                      </>
-                    ) : e.category_key === "notification" ? (
-                      <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">Important</span>
-                    ) : e.disposition ? (
-                      <span className={cn("text-sm font-semibold px-2.5 py-0.5 rounded-full border", DISPOSITION_BADGE[e.disposition])}>
-                        {DISPOSITION_LABEL[e.disposition]}
-                      </span>
-                    ) : <span className="text-slate-300">—</span>}
-                    {!e.handled_at && e.disposition !== "needs_review" && e.classification_source && e.category_confidence !== null && (
-                      <div className="text-sm text-slate-400 mt-1">{e.classification_source} · {Math.round(e.category_confidence * 100)}%</div>
-                    )}
-                  </td>
-                  <td className={cn(TD_CLASS, "whitespace-nowrap")}>
-                    {e.case_id ? <span className="text-sm font-semibold text-emerald-600">● In a case</span> : <span className="text-slate-300">—</span>}
-                  </td>
+                    </td>
+                  )}
+                  {isVisible("subject") && (
+                    <td className={TD_CLASS}>
+                      <div className="flex items-start gap-1.5">
+                        <span className={cn("line-clamp-2 leading-snug", isUnread ? "font-bold text-slate-900" : "font-medium text-slate-900")} title={e.subject}>
+                          {e.subject || "(no subject)"}
+                        </span>
+                        {e.has_attachments && <Paperclip className="w-4 h-4 mt-0.5 text-slate-400 shrink-0" />}
+                      </div>
+                    </td>
+                  )}
+                  {isVisible("summary") && (
+                    <td className={TD_CLASS}>
+                      <span className="line-clamp-2 leading-snug text-slate-600" title={e.ai_summary || e.snippet || ""}>{e.ai_summary || e.snippet || "—"}</span>
+                      {e.disposition === "needs_review" && e.review_reason && (
+                        <div className="text-sm text-amber-700 font-medium mt-1">{e.review_reason}</div>
+                      )}
+                    </td>
+                  )}
+                  {isVisible("received") && <td className={cn(TD_CLASS, "whitespace-nowrap tabular-nums")}>{fmtDateTime(e.received_at, showTime)}</td>}
+                  {isVisible("category") && (
+                    <td className={TD_CLASS}>
+                      {cat ? (
+                        <span
+                          className="text-sm font-semibold px-2.5 py-0.5 rounded-full border whitespace-nowrap"
+                          style={{ background: `${cat.color ?? "#6b7280"}14`, color: cat.color ?? "#6b7280", borderColor: `${cat.color ?? "#6b7280"}33` }}
+                        >
+                          {cat.name}
+                        </span>
+                      ) : <span className="text-slate-300">—</span>}
+                    </td>
+                  )}
+                  {isVisible("status") && (
+                    <td className={cn(TD_CLASS, "whitespace-nowrap")}>
+                      {e.handled_at ? (
+                        <>
+                          <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">Handled</span>
+                          <div className="text-sm text-emerald-700 mt-1">by {e.handled_by_name ?? "…"} · {fmtDateTime(e.handled_at, showTime)}</div>
+                        </>
+                      ) : e.category_key === "notification" ? (
+                        e.priority === "urgent" ? (
+                          <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">Urgent</span>
+                        ) : (
+                          <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-200">FYI</span>
+                        )
+                      ) : e.disposition ? (
+                        <span className={cn("text-sm font-semibold px-2.5 py-0.5 rounded-full border", DISPOSITION_BADGE[e.disposition])}>
+                          {DISPOSITION_LABEL[e.disposition]}
+                        </span>
+                      ) : <span className="text-slate-300">—</span>}
+                      {!e.handled_at && e.disposition !== "needs_review" && e.classification_source && e.category_confidence !== null && (
+                        <div className="text-sm text-slate-400 mt-1">{e.classification_source} · {Math.round(e.category_confidence * 100)}%</div>
+                      )}
+                    </td>
+                  )}
+                  {isVisible("case") && (
+                    <td className={cn(TD_CLASS, "whitespace-nowrap")}>
+                      {e.case_id ? <span className="text-sm font-semibold text-emerald-600">● In a case</span> : <span className="text-slate-300">—</span>}
+                    </td>
+                  )}
                   {showActions && (
                     <td className={TD_CLASS} onClick={(ev) => ev.stopPropagation()}>
                       {onAllocate ? (

@@ -107,8 +107,10 @@ async function reclassifyEmails(
       continue
     }
 
-    // An important-notification match: store + urgent, Needs Review, no case — exactly as ingestion.
+    // An important-notification match: store + flagged, Needs Review, no case — exactly as ingestion.
+    // notify_priority decides how loudly (urgent -> priority "urgent", informational/FYI -> "normal").
     if (rule.action === "notify") {
+      const informational = rule.notifyPriority === "informational"
       const { error: upErr } = await sb
         .from("emails")
         .update({
@@ -116,8 +118,8 @@ async function reclassifyEmails(
           category_confidence: rule.confidence,
           classification_source: "rule",
           disposition: "needs_review",
-          priority: "urgent",
-          review_reason: "Important notification — requires attention.",
+          priority: informational ? "normal" : "urgent",
+          review_reason: informational ? "Important notification (FYI) — no action needed." : "Important notification — requires attention.",
           classified_at: now,
           updated_at: now,
         })

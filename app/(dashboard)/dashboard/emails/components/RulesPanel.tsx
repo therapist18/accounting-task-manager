@@ -14,7 +14,10 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
-import { HEAD_BLUE, TableLoading, SortTh, TD_CLASS, TH_CLASS, useSortedRows, zebraRow } from "./table"
+import {
+  ColumnVisibilityButton, StatsRows, TableLoading, SortTh, TD_CLASS,
+  useColumnFilters, useColumnVisibility, useTableSort, zebraRow,
+} from "./table"
 import { PRIMARY_PILL_BUTTON_CLASS, SearchSelect, api, fmtDateTime, ruleOutcome, type CategoryOption, type RuleRow } from "./shared"
 import { exportRulesToExcel } from "./exportRules"
 
@@ -36,6 +39,18 @@ const SORT_VALUE: Record<string, (r: RuleRow) => string | number> = {
   changed: (r) => r.updated_at ?? r.created_at ?? "",
   actions: (r) => r.updated_at ?? "", // most recently edited last
 }
+
+// Toggleable columns — "#" and Actions always show.
+const TOGGLEABLE_COLUMNS = [
+  { id: "order", label: "Order" },
+  { id: "match", label: "Match" },
+  { id: "pattern", label: "Subject wordings / sender" },
+  { id: "category", label: "Category" },
+  { id: "outcome", label: "Result" },
+  { id: "confidence", label: "Confidence" },
+  { id: "active", label: "Active" },
+  { id: "changed", label: "Last changed" },
+]
 
 
 const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -82,7 +97,7 @@ type RuleAction = "classify" | "ignore" | "notify"
 const ACTIONS: Array<{ value: RuleAction; title: string; hint: string; icon: typeof Tag; tone: string }> = [
   { value: "classify", title: "Classify", hint: "Sort it into a KRA category — opens or updates a case.", icon: Tag, tone: "border-custom-blue bg-blue-50/60 ring-custom-blue" },
   { value: "ignore", title: "Ignore", hint: "Send it to the Ignored tab, under this rule. No case is opened.", icon: EyeOff, tone: "border-slate-400 bg-slate-50 ring-slate-400" },
-  { value: "notify", title: "Flag as important", hint: "Keep it in Needs Review, marked urgent. No case is opened.", icon: Bell, tone: "border-amber-400 bg-amber-50 ring-amber-400" },
+  { value: "notify", title: "Flag as important", hint: "Store it under the Notifications tab. No case is opened.", icon: Bell, tone: "border-amber-400 bg-amber-50 ring-amber-400" },
 ]
 
 type Draft = {
@@ -91,6 +106,9 @@ type Draft = {
   // Only asked about when is_ignore is true: drop a match entirely instead of storing it under Ignored.
   hard_ignore: boolean
   is_notify: boolean
+  // Only asked about when is_notify is true: "urgent" demands attention now, "informational" still
+  // lands in Notifications but reads as FYI.
+  notify_priority: "urgent" | "informational"
   match_type: "contains" | "regex"
   // Subject wordings, one per line: the first is the rule's primary pattern, the rest are alternatives.
   wordings: string
@@ -105,7 +123,7 @@ type Draft = {
 }
 
 const emptyDraft = (nextOrder: number): Draft => ({
-  id: null, is_ignore: false, hard_ignore: false, is_notify: false, match_type: "contains", wordings: "", sender_match_type: "contains", sender_patterns: "",
+  id: null, is_ignore: false, hard_ignore: false, is_notify: false, notify_priority: "urgent", match_type: "contains", wordings: "", sender_match_type: "contains", sender_patterns: "",
   category_key: "", confidence: "90", sort_order: String(nextOrder), notes: "", is_active: true,
 })
 
@@ -145,7 +163,36 @@ export function RulesPanel({
     () => ({ ...SORT_VALUE, outcome: (r: RuleRow) => ruleOutcome(r, catByKey.get(r.category_key)).label }),
     [catByKey]
   )
-  const { sort, sorted, toggle } = useSortedRows(visible, sortAccessors, { key: "order", dir: "asc" })
+  const outcomeLabel = (r: RuleRow) => ruleOutcome(r, catByKey.get(r.category_key)).label
+  const categoryLabel = (r: RuleRow) => (r.is_ignore || r.is_notify ? outcomeLabel(r) : catByKey.get(r.category_key)?.name ?? r.category_key)
+  const FILTER_VALUE: Record<string, (r: RuleRow) => string> = useMemo(
+    () => ({
+      match: (r) => (r.match_type === "regex" ? "Regex" : "Contains"),
+      category: categoryLabel,
+      active: (r) => (r.is_active ? "Active" : "Inactive"),
+    }),
+    [catByKey] // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  const { filtered, configFor, activeCount: activeFilterCount, clearAll: clearAllFilters } = useColumnFilters(visible, FILTER_VALUE)
+  const { levels, sorted, toggle } = useTableSort(filtered, sortAccessors, [{ key: "order", dir: "asc" }])
+  const { visible: visibleCols, isVisible, toggle: toggleColumn, showAll } = useColumnVisibility(TOGGLEABLE_COLUMNS)
+  const [showStats, setShowStats] = useState(false)
+  const colCount = 2 + TOGGLEABLE_COLUMNS.filter((c) => isVisible(c.id)).length
+
+  const statsRowColumns = useMemo(() => {
+    const cols: { id: string; getValue?: (r: RuleRow) => string }[] = [{ id: "#" }]
+    if (isVisible("order")) cols.push({ id: "order", getValue: (r) => String(r.sort_order) })
+    if (isVisible("match")) cols.push({ id: "match", getValue: (r) => (r.match_type === "regex" ? "Regex" : "Contains") })
+    if (isVisible("pattern")) cols.push({ id: "pattern", getValue: (r) => [r.pattern, ...(r.extra_patterns ?? [])].filter(Boolean).join(" ") })
+    if (isVisible("category")) cols.push({ id: "category", getValue: categoryLabel })
+    if (isVisible("outcome")) cols.push({ id: "outcome", getValue: outcomeLabel })
+    if (isVisible("confidence")) cols.push({ id: "confidence", getValue: (r) => String(r.confidence) })
+    if (isVisible("active")) cols.push({ id: "active", getValue: (r) => (r.is_active ? "Active" : "") })
+    if (isVisible("changed")) cols.push({ id: "changed", getValue: (r) => r.updated_at ?? r.created_at ?? "" })
+    cols.push({ id: "actions" })
+    return cols
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isVisible, catByKey])
 
   const [draft, setDraft] = useState<Draft | null>(null)
   const [sample, setSample] = useState("")
@@ -161,13 +208,13 @@ export function RulesPanel({
 
   const nextOrder = (rules.reduce((max, r) => Math.max(max, r.sort_order), 0) || 0) + 10
 
-  // Exports whatever the table is currently showing (the search filter applies, sort order doesn't —
-  // the sheet is always in "tried in this order" order, matching how the rules actually run).
+  // Exports whatever the table is currently showing (search + column filters apply, sort order
+  // doesn't — the sheet is always in "tried in this order" order, matching how the rules actually run).
   const exportExcel = async () => {
     setExporting(true)
     try {
-      await exportRulesToExcel(visible, categories)
-      toast.success(`Exported ${visible.length} rule${visible.length === 1 ? "" : "s"}.`)
+      await exportRulesToExcel(filtered, categories)
+      toast.success(`Exported ${filtered.length} rule${filtered.length === 1 ? "" : "s"}.`)
     } catch (e: any) {
       toast.error(e.message ?? "Could not export the rules.")
     } finally {
@@ -179,7 +226,7 @@ export function RulesPanel({
   const openEdit = (r: RuleRow) => {
     setSample("")
     setDraft({
-      id: r.id, is_ignore: r.is_ignore, hard_ignore: r.hard_ignore, is_notify: r.is_notify, match_type: r.match_type,
+      id: r.id, is_ignore: r.is_ignore, hard_ignore: r.hard_ignore, is_notify: r.is_notify, notify_priority: r.notify_priority ?? "urgent", match_type: r.match_type,
       // Lowercased on the way in too — a rule saved before this field forced lowercase (or with mixed
       // case some other way) should still open reading the same way it would if you retyped it now.
       wordings: [r.pattern, ...(r.extra_patterns ?? [])].filter(Boolean).join("\n").toLowerCase(),
@@ -203,6 +250,7 @@ export function RulesPanel({
       is_ignore: draft.is_ignore,
       hard_ignore: draft.is_ignore && draft.hard_ignore,
       is_notify: draft.is_notify,
+      notify_priority: draft.is_notify ? draft.notify_priority : "urgent",
       match_type: draft.match_type,
       pattern: lines[0] ?? "",
       extra_patterns: lines.slice(1),
@@ -292,12 +340,21 @@ export function RulesPanel({
             <Info className="h-5 w-5 text-custom-blue" /> How rules work
           </button>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <Button variant="outline" size="sm" onClick={() => setShowStats((v) => !v)} className={cn("h-9 px-3 gap-1.5 rounded-full border-slate-200 text-base font-medium", showStats && "bg-custom-blue border-custom-blue text-white hover:bg-custom-blue hover:text-white")}>
+            Stats
+          </Button>
+          {activeFilterCount > 0 && (
+            <Button variant="outline" size="sm" onClick={clearAllFilters} className="h-9 px-3 gap-1.5 rounded-full border-slate-200 text-base font-medium text-custom-blue">
+              Clear {activeFilterCount} filter{activeFilterCount === 1 ? "" : "s"}
+            </Button>
+          )}
+          <ColumnVisibilityButton columns={TOGGLEABLE_COLUMNS} visible={visibleCols} onToggle={toggleColumn} onShowAll={showAll} />
           <Button
             variant="outline"
             size="sm"
             onClick={exportExcel}
-            disabled={exporting || !visible.length}
+            disabled={exporting || !filtered.length}
             className="h-9 px-3.5 gap-1.5 rounded-full border-slate-200 text-base font-medium"
             title="Download the rules shown below as a styled Excel file"
           >
@@ -329,32 +386,36 @@ export function RulesPanel({
           <table className="w-full min-w-[1420px] border-separate border-spacing-0 text-base">
             <thead className="sticky top-0 z-30 bg-white shadow-xs">
               <tr>
-                <SortTh tone="blue" id="#" sort={sort} onSort={toggle} className="w-16 text-center">#</SortTh>
-                <SortTh tone="blue" id="order" sort={sort} onSort={toggle} className="w-24 text-left">Order</SortTh>
-                <SortTh tone="blue" id="match" sort={sort} onSort={toggle} className="w-32 text-left">Match</SortTh>
-                <SortTh tone="blue" id="pattern" sort={sort} onSort={toggle} className="min-w-[320px] text-left">Subject wordings / sender</SortTh>
-                <SortTh tone="blue" id="category" sort={sort} onSort={toggle} className="min-w-[220px] text-left">Category</SortTh>
-                <SortTh tone="blue" id="outcome" sort={sort} onSort={toggle} className="min-w-[220px] text-left">Result</SortTh>
-                <SortTh tone="blue" id="confidence" sort={sort} onSort={toggle} className="w-36 text-left">Confidence</SortTh>
-                <SortTh tone="blue" id="active" sort={sort} onSort={toggle} className="w-28 text-left">Active</SortTh>
-                <SortTh tone="blue" id="changed" sort={sort} onSort={toggle} className="w-44 text-left">Last changed</SortTh>
-                <SortTh tone="blue" id="actions" sort={sort} onSort={toggle} className="w-32 border-r-0 text-left">Actions</SortTh>
+                <SortTh tone="blue" id="#" levels={levels} onSort={toggle} className="w-16 text-center">#</SortTh>
+                {isVisible("order") && <SortTh tone="blue" id="order" levels={levels} onSort={toggle} className="w-24 text-left">Order</SortTh>}
+                {isVisible("match") && <SortTh tone="blue" id="match" levels={levels} onSort={toggle} filter={configFor("match")} className="w-32 text-left">Match</SortTh>}
+                {isVisible("pattern") && <SortTh tone="blue" id="pattern" levels={levels} onSort={toggle} className="min-w-[320px] text-left">Subject wordings / sender</SortTh>}
+                {isVisible("category") && <SortTh tone="blue" id="category" levels={levels} onSort={toggle} filter={configFor("category")} className="min-w-[220px] text-left">Category</SortTh>}
+                {isVisible("outcome") && <SortTh tone="blue" id="outcome" levels={levels} onSort={toggle} className="min-w-[220px] text-left">Result</SortTh>}
+                {isVisible("confidence") && <SortTh tone="blue" id="confidence" levels={levels} onSort={toggle} className="w-36 text-left">Confidence</SortTh>}
+                {isVisible("active") && <SortTh tone="blue" id="active" levels={levels} onSort={toggle} filter={configFor("active")} className="w-28 text-left">Active</SortTh>}
+                {isVisible("changed") && <SortTh tone="blue" id="changed" levels={levels} onSort={toggle} className="w-44 text-left">Last changed</SortTh>}
+                <SortTh tone="blue" id="actions" levels={levels} onSort={toggle} className="w-32 border-r-0 text-left">Actions</SortTh>
               </tr>
+              {showStats && <StatsRows rows={filtered} columns={statsRowColumns} />}
             </thead>
             <tbody>
-              {loading && <TableLoading cols={10} />}
+              {loading && <TableLoading cols={colCount} />}
               {!loading && sorted.map((r, index) => {
                 const cat = catByKey.get(r.category_key)
                 const auto = r.confidence >= 0.8
                 return (
                   <tr key={r.id} className={cn("transition-colors", zebraRow(index), !r.is_active && "opacity-60")}>
                     <td className={cn(TD_CLASS, "text-center text-slate-400 tabular-nums font-medium")}>{index + 1}</td>
-                    <td className={cn(TD_CLASS, "tabular-nums font-medium")}>{r.sort_order}</td>
+                    {isVisible("order") && <td className={cn(TD_CLASS, "tabular-nums font-medium")}>{r.sort_order}</td>}
+                    {isVisible("match") && (
                     <td className={TD_CLASS}>
                       <span className={cn("text-sm font-semibold px-2.5 py-0.5 rounded-full border", r.match_type === "regex" ? "bg-violet-50 text-violet-700 border-violet-200" : "bg-slate-100 text-slate-700 border-slate-200")}>
                         {r.match_type === "regex" ? "Regex" : "Contains"}
                       </span>
                     </td>
+                    )}
+                    {isVisible("pattern") && (
                     <td className={cn(TD_CLASS, "text-sm text-slate-800 break-all")}>
                       {(() => {
                         const wordings = [r.pattern, ...(r.extra_patterns ?? [])].filter(Boolean)
@@ -396,13 +457,19 @@ export function RulesPanel({
                       })()}
                       {r.notes && <div className="font-sans text-sm text-slate-400 mt-0.5">{r.notes}</div>}
                     </td>
+                    )}
+                    {isVisible("category") && (
                     <td className={TD_CLASS}>
                       {r.is_ignore && r.hard_ignore ? (
                         <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200">Ignore &amp; delete</span>
                       ) : r.is_ignore ? (
                         <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-slate-100 text-slate-600 border-slate-300">Ignore</span>
                       ) : r.is_notify ? (
-                        <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">Notify</span>
+                        r.notify_priority === "informational" ? (
+                          <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-200">Notify · FYI</span>
+                        ) : (
+                          <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">Notify · Urgent</span>
+                        )
                       ) : cat ? (
                         <span
                           className="text-sm font-semibold px-2.5 py-0.5 rounded-full border whitespace-nowrap"
@@ -412,6 +479,8 @@ export function RulesPanel({
                         </span>
                       ) : <span className="text-red-500">{r.category_key}</span>}
                     </td>
+                    )}
+                    {isVisible("outcome") && (
                     <td className={TD_CLASS}>
                       {(() => {
                         const outcome = ruleOutcome(r, cat)
@@ -423,17 +492,24 @@ export function RulesPanel({
                         )
                       })()}
                     </td>
+                    )}
+                    {isVisible("confidence") && (
                     <td className={cn(TD_CLASS, "whitespace-nowrap")}>
                       <span className="tabular-nums font-medium">{Math.round(r.confidence * 100)}%</span>
                       <span className={cn("ml-2 text-sm", auto ? "text-emerald-600" : "text-amber-600")}>{auto ? "Auto" : "Review"}</span>
                     </td>
+                    )}
+                    {isVisible("active") && (
                     <td className={TD_CLASS}>
                       <Switch checked={r.is_active} disabled={readOnly} onCheckedChange={(v) => toggleActive(r, v)} />
                     </td>
+                    )}
+                    {isVisible("changed") && (
                     <td className={TD_CLASS} title={r.created_at ? `Created ${fmtDateTime(r.created_at)}${r.created_by_name ? ` by ${r.created_by_name}` : ""}` : undefined}>
                       <div className="text-slate-700">{r.updated_by_name ?? (r.created_by_name ? r.created_by_name : "System")}</div>
                       <div className="text-sm text-slate-400">{r.updated_at ? fmtDateTime(r.updated_at) : r.created_at ? fmtDateTime(r.created_at) : "—"}</div>
                     </td>
+                    )}
                     <td className={cn(TD_CLASS, "border-r-0")}>
                       <div className="flex items-center gap-1.5">
                         <Button variant="outline" size="sm" disabled={readOnly} onClick={() => openEdit(r)} className="h-9 w-9 p-0 rounded-md border-slate-200" title="Edit rule">
@@ -448,7 +524,7 @@ export function RulesPanel({
                 )
               })}
               {!loading && sorted.length === 0 && (
-                <tr><td colSpan={10} className="py-16 text-center text-slate-400 text-base">No rules match.</td></tr>
+                <tr><td colSpan={colCount} className="py-16 text-center text-slate-400 text-base">No rules match.</td></tr>
               )}
             </tbody>
           </table>
@@ -492,7 +568,7 @@ export function RulesPanel({
                 </div>
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
                   <p className="font-semibold text-slate-900">Important notification</p>
-                  <p className="text-slate-600">Stores the email and flags it urgent in Needs Review, but never creates a task or case.</p>
+                  <p className="text-slate-600">Stores the email under the Notifications tab — Urgent or FYI, depending on the rule — but never creates a task or case.</p>
                 </div>
               </div>
             </section>
@@ -568,6 +644,31 @@ export function RulesPanel({
                           "text-left rounded-xl border px-4 py-3 transition-colors",
                           draft.hard_ignore === opt.value
                             ? opt.value ? "border-red-400 bg-red-50 ring-1 ring-red-400" : "border-slate-400 bg-slate-50 ring-1 ring-slate-400"
+                            : "border-slate-200 bg-white hover:bg-slate-50"
+                        )}
+                      >
+                        <span className="text-base font-semibold text-slate-900">{opt.title}</span>
+                        <span className="block text-sm text-slate-500 mt-1 leading-snug">{opt.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {draft.is_notify && (
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    {(
+                      [
+                        { value: "urgent", title: "Urgent", hint: "Needs eyes now — an account issue, a deadline, real money due." },
+                        { value: "informational", title: "FYI", hint: "Informational only — still shown in Notifications, but doesn't need action (e.g. a password-reset confirmation)." },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setDraft({ ...draft, notify_priority: opt.value })}
+                        className={cn(
+                          "text-left rounded-xl border px-4 py-3 transition-colors",
+                          draft.notify_priority === opt.value
+                            ? opt.value === "urgent" ? "border-amber-400 bg-amber-50 ring-1 ring-amber-400" : "border-blue-300 bg-blue-50/60 ring-1 ring-blue-300"
                             : "border-slate-200 bg-white hover:bg-slate-50"
                         )}
                       >

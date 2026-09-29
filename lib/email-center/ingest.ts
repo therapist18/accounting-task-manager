@@ -355,6 +355,9 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   let reviewReason: string | null = null
   let caseId: string | null = null
   let notifyFlag = false
+  // Only meaningful when notifyFlag is true: "urgent" demands attention now, "informational" still
+  // lands in Notifications but reads as FYI (see rule.notify_priority in rules.ts).
+  let notifyPriority: "urgent" | "informational" | null = null
   // The rule (if any) that actually decided this email's outcome — recorded on the email row, and on
   // the task if this is what opens one, so "this rule shouldn't have created these" has an answer.
   let matchedRuleId: string | null = null
@@ -455,7 +458,8 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     // low-confidence / non-KRA overrides below replace the reason or quietly demote it.
     notifyFlag = rule?.action === "notify"
     if (notifyFlag) {
-      reviewReason = "Important notification — requires attention."
+      notifyPriority = rule && rule.action === "notify" ? (rule.notifyPriority ?? "urgent") : "urgent"
+      reviewReason = notifyPriority === "informational" ? "Important notification (FYI) — no action needed." : "Important notification — requires attention."
     }
 
     if (confidence < THRESHOLD && !notifyFlag) {
@@ -549,7 +553,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
         ? "urgent"
         : "high"
       : notifyFlag
-        ? "urgent"
+        ? notifyPriority === "informational" ? "normal" : "urgent"
         : disposition === "needs_review"
           ? "normal"
           : "low"

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { fetchCompanyEmployees, ContractEmployeeInfo } from '../utils/data';
 import { EcJobProfile, fetchJobProfiles, fetchGlobalJobProfiles, matchJobProfile } from '../utils/jobProfileData';
 import { EmploymentOffer, fetchLatestOffer } from '../utils/employmentOfferData';
@@ -19,7 +19,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, UserRound, RotateCcw, RefreshCw, AlertCircle, FileText, CheckCircle2, Search, X, Wallet } from 'lucide-react';
+import { Loader2, UserRound, RotateCcw, RefreshCw, AlertCircle, FileText, CheckCircle2, Search, X, Wallet, FileSpreadsheet, Upload } from 'lucide-react';
+import { generateEcContractExcel, EC_SHEET_NAME } from '../utils/ecExcelExport';
+import { importEcContractExcel } from '../utils/ecExcelImport';
 import { cn } from '@/lib/utils';
 import { ENTITY_TYPES } from '@/lib/constants/entity-types';
 import { useToast } from '@/components/ui/use-toast';
@@ -188,6 +190,58 @@ export function ContractEditor({
       toast({ title: 'Refreshed', description: 'Data & Values updated with the latest source data.' });
     } catch (err: any) {
       toast({ title: 'Refresh failed', description: err?.message || 'Could not fetch the latest values.', variant: 'destructive' });
+    }
+  };
+
+  const [exportingExcel, setExportingExcel] = useState(false);
+  const [importingExcel, setImportingExcel] = useState(false);
+  const importFileRef = useRef<HTMLInputElement>(null);
+
+  const handleExportExcel = async () => {
+    setExportingExcel(true);
+    try {
+      await generateEcContractExcel({
+        employeeName: employee?.fullName || 'Employee',
+        jobProfileName: selectedJobProfile?.name || 'No Profile',
+        placeholders: profileScopedPlaceholders,
+        placeholderValues,
+        basicSalary: offer.basic_salary,
+        currency: offer.currency,
+      });
+      toast({ title: 'Exported', description: 'Contract fields exported to Excel.' });
+    } catch (err: any) {
+      toast({ title: 'Export failed', description: err?.message || 'Could not export contract fields.', variant: 'destructive' });
+    } finally {
+      setExportingExcel(false);
+    }
+  };
+
+  const handleImportExcel = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImportingExcel(true);
+    try {
+      const result = await importEcContractExcel(file, profileScopedPlaceholders, placeholderValues);
+      if (!result) {
+        toast({ title: 'Import failed', description: `"${EC_SHEET_NAME}" sheet not found — import a file exported from this page.`, variant: 'destructive' });
+        return;
+      }
+      const offerPatch: Record<string, any> = {};
+      if (Object.keys(result.placeholderOverrides).length > 0) {
+        offerPatch.placeholder_overrides = { ...(offer.placeholder_overrides || {}), ...result.placeholderOverrides };
+      }
+      if (result.basicSalary !== undefined) offerPatch.basic_salary = result.basicSalary;
+      if (result.currency !== undefined) offerPatch.currency = result.currency;
+      if (Object.keys(offerPatch).length > 0) updateOffer(offerPatch);
+      toast({
+        title: 'Imported',
+        description: `${result.fieldsChanged} field(s) updated${result.skippedLocked ? `, ${result.skippedLocked} read-only field(s) skipped` : ''}.`,
+      });
+    } catch (err: any) {
+      toast({ title: 'Import failed', description: err?.message || 'Could not import this file.', variant: 'destructive' });
+    } finally {
+      setImportingExcel(false);
     }
   };
 
@@ -446,6 +500,24 @@ export function ContractEditor({
               >
                 <RefreshCw className={cn("w-4 h-4", isResolving && "animate-spin text-indigo-500")} />
               </button>
+
+              <button
+                onClick={handleExportExcel}
+                disabled={exportingExcel || profileScopedPlaceholders.length === 0}
+                className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-600 bg-white dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all shadow-sm disabled:opacity-50"
+                title="Export contract fields to Excel"
+              >
+                {exportingExcel ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+              </button>
+              <button
+                onClick={() => importFileRef.current?.click()}
+                disabled={importingExcel}
+                className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-600 bg-white dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all shadow-sm disabled:opacity-50"
+                title="Import contract fields from Excel"
+              >
+                {importingExcel ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              </button>
+              <input ref={importFileRef} type="file" accept=".xlsx" className="hidden" onChange={handleImportExcel} />
             </div>
           </div>
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
-import { AlertCircle, Copy, Eye, EyeOff, Filter, History, Link2, Loader2, Pencil, Plus, RefreshCw, Unlink, Wifi, WifiOff } from "lucide-react"
+import { AlertCircle, Copy, Download, Eye, EyeOff, Filter, History, Link2, Loader2, Pencil, Plus, RefreshCw, Unlink, Wifi, WifiOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -18,8 +18,9 @@ import {
 } from "@/app/generic-components/companyCategoryFilters"
 import { cn } from "@/lib/utils"
 import type { Company, KraEmailCredentials } from "../../companies/database"
+import { exportMailboxCompaniesToExcel, exportUnlinkedMailboxesToExcel } from "./exportMailboxes"
 import { Pagination } from "./Pagination"
-import { HEAD_BLUE, TableLoading, SortTh, TD_CLASS, TH_CLASS, useSortedRows, zebraRow } from "./table"
+import { TableLoading, SortTh, TD_CLASS, useTableSort, zebraRow } from "./table"
 import {
   PILL_BUTTON_ACTIVE_CLASS, PILL_BUTTON_CLASS, PRIMARY_PILL_BUTTON_CLASS, SearchSelect, api, fmtDateTime, needsReconnect,
   type AccountRow,
@@ -34,7 +35,7 @@ type ConnState = "connected" | "reconnect" | "not_connected"
 // "failed" = companies with a mailbox Google no longer accepts (needs reconnecting).
 export type MailboxView = "all" | "connected" | "not_connected" | "failed" | "unlinked"
 
-interface CompanyRowData {
+export interface CompanyRowData {
   company: Company
   kraEmail: string
   kraPassword: string
@@ -236,6 +237,7 @@ export function MailboxesPanel({
   // A move/unlink waiting for the person to confirm it (toCompanyId null = unlink).
   const [pendingReassign, setPendingReassign] = useState<{ account: AccountRow; fromName: string; toCompanyId: string | null } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
   const [itemsPerPage, setItemsPerPage] = useState(50)
   const [page, setPage] = useState(0)
 
@@ -302,8 +304,8 @@ export function MailboxesPanel({
     [baseRows, view]
   )
 
-  const companySort = useSortedRows(companyRows, COMPANY_SORT, { key: "company", dir: "asc" })
-  const accountSort = useSortedRows(unlinked, ACCOUNT_SORT, { key: "email", dir: "asc" })
+  const companySort = useTableSort(companyRows, COMPANY_SORT, [{ key: "company", dir: "asc" }])
+  const accountSort = useTableSort(unlinked, ACCOUNT_SORT, [{ key: "email", dir: "asc" }])
 
   useEffect(() => setPage(0), [view, categoryFilters, q, itemsPerPage, accounts.length])
 
@@ -314,6 +316,21 @@ export function MailboxesPanel({
   const start = safePage * itemsPerPage
   const pageCompanyRows = companySort.sorted.slice(start, start + itemsPerPage)
   const pageAccountRows = accountSort.sorted.slice(start, start + itemsPerPage)
+
+  // Exports whichever view is currently open (by-company or unlinked), respecting the search/category
+  // filter already applied — same "export what you're looking at" rule the other tabs' Export follows.
+  const exportCurrent = async () => {
+    setExporting(true)
+    try {
+      if (showingUnlinked) await exportUnlinkedMailboxesToExcel(accountSort.sorted)
+      else await exportMailboxCompaniesToExcel(companySort.sorted, categoryActive ? "Filtered by client category" : "All companies")
+      toast.success("Exported.")
+    } catch (e: any) {
+      toast.error(e.message ?? "Could not export.")
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const assign = async (a: AccountRow, companyId: string) => {
     setBusy(a.id)
@@ -397,6 +414,9 @@ export function MailboxesPanel({
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <Button variant="outline" size="sm" onClick={exportCurrent} disabled={exporting || list.length === 0} className={PILL_BUTTON_CLASS} title="Download the mailboxes shown below as a styled Excel file">
+              {exporting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />} Export
+            </Button>
             <Button variant="outline" size="sm" onClick={() => onSyncFrom()} disabled={activeAccounts.length === 0} className={PILL_BUTTON_CLASS} title="Pull in older mail from a chosen date">
               <History className="h-5 w-5" /> Sync from date
             </Button>
@@ -473,17 +493,17 @@ export function MailboxesPanel({
             <table className="w-full min-w-[1900px] border-separate border-spacing-0 text-base">
               <thead className="sticky top-0 z-30 bg-white shadow-xs">
                 <tr>
-                  <SortTh tone="blue" id="#" sort={companySort.sort} onSort={companySort.toggle} className="w-16 text-center">#</SortTh>
-                  <SortTh tone="blue" id="company" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[260px]">Company</SortTh>
-                  <SortTh tone="blue" id="kra_email" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[240px]">KRA email</SortTh>
-                  <SortTh tone="blue" id="kra_password" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[200px]">KRA email password</SortTh>
-                  <SortTh tone="blue" id="state" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[170px]">Status</SortTh>
-                  <SortTh tone="blue" id="mailboxes" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[340px]">Mailbox</SortTh>
-                  <SortTh tone="blue" id="emails" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[100px]">Emails</SortTh>
-                  <SortTh tone="blue" id="first_email" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[140px]">First email</SortTh>
-                  <SortTh tone="blue" id="last_sync" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[150px]">Last sync</SortTh>
-                  <SortTh tone="blue" id="push" sort={companySort.sort} onSort={companySort.toggle} className="text-left min-w-[150px]">Push</SortTh>
-                  <SortTh tone="blue" id="actions" sort={companySort.sort} onSort={companySort.toggle} className="min-w-[250px] text-left border-r-0">Actions</SortTh>
+                  <SortTh tone="blue" id="#" levels={companySort.levels} onSort={companySort.toggle} className="w-16 text-center">#</SortTh>
+                  <SortTh tone="blue" id="company" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[260px]">Company</SortTh>
+                  <SortTh tone="blue" id="kra_email" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[240px]">KRA email</SortTh>
+                  <SortTh tone="blue" id="kra_password" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[200px]">KRA email password</SortTh>
+                  <SortTh tone="blue" id="state" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[170px]">Status</SortTh>
+                  <SortTh tone="blue" id="mailboxes" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[340px]">Mailbox</SortTh>
+                  <SortTh tone="blue" id="emails" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[100px]">Emails</SortTh>
+                  <SortTh tone="blue" id="first_email" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[140px]">First email</SortTh>
+                  <SortTh tone="blue" id="last_sync" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[150px]">Last sync</SortTh>
+                  <SortTh tone="blue" id="push" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[150px]">Push</SortTh>
+                  <SortTh tone="blue" id="actions" levels={companySort.levels} onSort={companySort.toggle} className="min-w-[250px] text-left border-r-0">Actions</SortTh>
                 </tr>
               </thead>
               <tbody>
@@ -619,14 +639,14 @@ export function MailboxesPanel({
             <table className="w-full min-w-[1150px] border-separate border-spacing-0 text-base">
               <thead className="sticky top-0 z-30 bg-white shadow-xs">
                 <tr>
-                  <SortTh tone="blue" id="#" sort={accountSort.sort} onSort={accountSort.toggle} className="w-16 text-center">#</SortTh>
-                  <SortTh tone="blue" id="email" sort={accountSort.sort} onSort={accountSort.toggle} className="text-left min-w-[260px]">Mailbox</SortTh>
-                  <SortTh tone="blue" id="emails" sort={accountSort.sort} onSort={accountSort.toggle} className="text-left min-w-[100px]">Emails</SortTh>
-                  <SortTh tone="blue" id="first_email" sort={accountSort.sort} onSort={accountSort.toggle} className="text-left min-w-[140px]">First email</SortTh>
-                  <SortTh tone="blue" id="link" sort={accountSort.sort} onSort={accountSort.toggle} className="text-left min-w-[300px]">Link to company</SortTh>
-                  <SortTh tone="blue" id="last_sync" sort={accountSort.sort} onSort={accountSort.toggle} className="text-left min-w-[150px]">Last sync</SortTh>
-                  <SortTh tone="blue" id="push" sort={accountSort.sort} onSort={accountSort.toggle} className="text-left min-w-[150px]">Push</SortTh>
-                  <SortTh tone="blue" id="sync" sort={accountSort.sort} onSort={accountSort.toggle} className="w-28 border-r-0">Sync</SortTh>
+                  <SortTh tone="blue" id="#" levels={accountSort.levels} onSort={accountSort.toggle} className="w-16 text-center">#</SortTh>
+                  <SortTh tone="blue" id="email" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[260px]">Mailbox</SortTh>
+                  <SortTh tone="blue" id="emails" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[100px]">Emails</SortTh>
+                  <SortTh tone="blue" id="first_email" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[140px]">First email</SortTh>
+                  <SortTh tone="blue" id="link" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[300px]">Link to company</SortTh>
+                  <SortTh tone="blue" id="last_sync" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[150px]">Last sync</SortTh>
+                  <SortTh tone="blue" id="push" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[150px]">Push</SortTh>
+                  <SortTh tone="blue" id="sync" levels={accountSort.levels} onSort={accountSort.toggle} className="w-28 border-r-0">Sync</SortTh>
                 </tr>
               </thead>
               <tbody>

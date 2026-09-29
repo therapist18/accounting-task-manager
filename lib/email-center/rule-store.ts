@@ -14,16 +14,16 @@ let cache: { at: number; rules: SubjectRule[] } | null = null
 
 export const RULES_TABLE = "email_classification_rules"
 
-// Columns every rule read/write uses, plus three that arrived in later, independent migrations
-// (extra_patterns 20260927, hard_ignore 20261001, extra_sender_patterns 20261002) — a database can
-// have any subset of them applied, not necessarily all-or-nothing (e.g. extra_patterns applied with
-// real saved wordings, hard_ignore not yet). withOptionalColumnFallback() below drops ONLY the
-// specific column Postgres reports missing and retries, one at a time — never all three together,
-// which would otherwise make a column that genuinely exists (with real data in it) disappear from
-// every response just because a DIFFERENT, unrelated column hadn't been added yet.
+// Columns every rule read/write uses, plus four that arrived in later, independent migrations
+// (extra_patterns 20260927, hard_ignore 20261001, extra_sender_patterns 20261002, notify_priority
+// 20261005) — a database can have any subset of them applied, not necessarily all-or-nothing (e.g.
+// extra_patterns applied with real saved wordings, hard_ignore not yet). withOptionalColumnFallback()
+// below drops ONLY the specific column Postgres reports missing and retries, one at a time — never all
+// four together, which would otherwise make a column that genuinely exists (with real data in it)
+// disappear from every response just because a DIFFERENT, unrelated column hadn't been added yet.
 export const RULE_COLUMNS_BASE =
   "id, match_type, pattern, category_key, confidence, sort_order, is_active, notes, is_ignore, is_notify, sender_pattern, sender_match_type, created_at, created_by_id, updated_at, updated_by_id"
-const OPTIONAL_RULE_COLUMNS = ["extra_patterns", "hard_ignore", "extra_sender_patterns"] as const
+const OPTIONAL_RULE_COLUMNS = ["extra_patterns", "hard_ignore", "extra_sender_patterns", "notify_priority"] as const
 export type OptionalRuleColumn = (typeof OPTIONAL_RULE_COLUMNS)[number]
 export const RULE_COLUMNS = `${RULE_COLUMNS_BASE}, ${OPTIONAL_RULE_COLUMNS.join(", ")}`
 
@@ -50,10 +50,13 @@ function missingRuleColumn(error: { message?: string } | null | undefined): Opti
 export const isMissingExtraColumn = (error: { message?: string } | null | undefined) => missingRuleColumn(error) === "extra_patterns"
 export const isMissingHardIgnoreColumn = (error: { message?: string } | null | undefined) => missingRuleColumn(error) === "hard_ignore"
 export const isMissingExtraSenderColumn = (error: { message?: string } | null | undefined) => missingRuleColumn(error) === "extra_sender_patterns"
+export const isMissingNotifyPriorityColumn = (error: { message?: string } | null | undefined) => missingRuleColumn(error) === "notify_priority"
 export const EXTRA_MIGRATION_MESSAGE =
   "Saving several wordings for one rule needs the 20260927000000_email_rule_extra_patterns.sql migration applied first."
 export const EXTRA_SENDER_MIGRATION_MESSAGE =
   "Saving several senders for one rule needs the 20261002000000_email_rule_extra_sender_patterns.sql migration applied first."
+export const NOTIFY_PRIORITY_MIGRATION_MESSAGE =
+  "Marking a notification as FYI (not urgent) needs the 20261005000000_email_rule_notify_priority.sql migration applied first."
 
 // Runs `run` with an ever-shrinking set of "known missing" optional columns: on an error naming one
 // of the three, that column is added to `dropped` and `run` is retried — up to once per optional
@@ -77,8 +80,9 @@ export async function withOptionalColumnFallback<T>(
   return { data: null, error: new Error("email_classification_rules: too many missing columns"), dropped }
 }
 
-// A rule row as the client sees it: numeric confidence, always a wordings array, and hard_ignore
-// defaulted (false) for a row read before that column existed.
+// A rule row as the client sees it: numeric confidence, always a wordings array, hard_ignore defaulted
+// (false) and notify_priority defaulted ("urgent", today's behaviour) for a row read before those
+// columns existed.
 export function normalizeRuleRow(r: any) {
   return {
     ...r,
@@ -86,6 +90,7 @@ export function normalizeRuleRow(r: any) {
     extra_patterns: Array.isArray(r.extra_patterns) ? r.extra_patterns : [],
     hard_ignore: !!r.hard_ignore,
     extra_sender_patterns: Array.isArray(r.extra_sender_patterns) ? r.extra_sender_patterns : [],
+    notify_priority: r.notify_priority === "informational" ? "informational" : "urgent",
   }
 }
 
@@ -131,6 +136,7 @@ export async function loadSubjectRules(sb: ReturnType<typeof getServiceClient>):
       sender_pattern: r.sender_pattern ?? undefined,
       extra_sender_patterns: Array.isArray(r.extra_sender_patterns) ? (r.extra_sender_patterns as string[]) : [],
       sender_match_type: (r.sender_match_type as RuleMatchType | undefined) ?? undefined,
+      notify_priority: r.notify_priority === "informational" ? "informational" : "urgent",
     }))
 
   cache = { at: Date.now(), rules }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, Clock, Columns3, History, Loader2, Plus, RefreshCw, RotateCcw, Search, Sparkles, Wifi, WifiOff } from "lucide-react"
+import { AlertTriangle, Clock, Columns3, Download, History, Loader2, Plus, RefreshCw, RotateCcw, Search, Sparkles, Wifi, WifiOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -12,14 +12,17 @@ import {
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { CaseDialog, NewCaseDialog } from "./components/CaseDialogs"
-import { CasesTable } from "./components/CasesTable"
+import { CasesTable, TOGGLEABLE_COLUMNS as CASES_COLUMNS } from "./components/CasesTable"
 import { EmailDialog } from "./components/EmailDialog"
 import { MailboxesPanel, type MailboxView } from "./components/MailboxesPanel"
 import { IgnoredPanel } from "./components/IgnoredPanel"
 import { RulesPanel } from "./components/RulesPanel"
 import { SyncDialog } from "./components/SyncDialog"
 import { CompanyPanels, matchesCompanySelection } from "./components/CompanyPanels"
-import { EmailsTable } from "./components/NeedsReview"
+import { EmailsTable, TOGGLEABLE_COLUMNS as EMAIL_COLUMNS } from "./components/NeedsReview"
+import { ColumnVisibilityButton, useColumnVisibility } from "./components/table"
+import { exportCasesToExcel } from "./components/exportCases"
+import { exportEmailsToExcel } from "./components/exportEmails"
 import { fetchCompanies, fetchKraEmailCredentials, saveKraEmailPassword, type Company, type KraEmailCredentials } from "../companies/database"
 import {
   COUNT_BADGE_CLASS, DISPOSITION_LABEL, PILL_BUTTON_ACTIVE_CLASS, PILL_BUTTON_CLASS, PRIMARY_PILL_BUTTON_CLASS, SearchSelect,
@@ -103,6 +106,12 @@ export default function EmailCenterPage() {
   const [notificationFilter, setNotificationFilter] = useState<"active" | "handled">("active")
   // Timestamps show HH:mm by default, like the other modules; the toolbar button hides it.
   const [showTime, setShowTime] = useState(true)
+  // Stats / column-visibility for whichever table is on screen (Cases or Emails — Ignored/Mailboxes/
+  // Rules don't use these). One shared "Stats" toggle; column visibility is kept separately per table
+  // shape since Cases and Emails have entirely different columns.
+  const [showStats, setShowStats] = useState(false)
+  const casesColumns = useColumnVisibility(CASES_COLUMNS)
+  const emailColumns = useColumnVisibility(EMAIL_COLUMNS)
 
   const [accounts, setAccounts] = useState<AccountRow[]>([])
   const [companies, setCompanies] = useState<CompanyOption[]>([])
@@ -507,6 +516,11 @@ export default function EmailCenterPage() {
   const reviewCount = useMemo(() => baseReviewEmails.length, [baseReviewEmails])
   const notificationCount = useMemo(() => baseNotificationEmails.filter((e) => !e.handled_at).length, [baseNotificationEmails])
   const notificationHandledCount = useMemo(() => baseNotificationEmails.filter((e) => !!e.handled_at).length, [baseNotificationEmails])
+  // Of the active basket, how many are actually urgent (vs FYI) — rules decide this per notify_priority.
+  const notificationUrgentCount = useMemo(
+    () => baseNotificationEmails.filter((e) => !e.handled_at && e.priority === "urgent").length,
+    [baseNotificationEmails]
+  )
   const updateCount = useMemo(() => baseUpdateEmails.length, [baseUpdateEmails])
   const ignoreCount = useMemo(() => baseIgnoredEmails.length, [baseIgnoredEmails])
   const unassignedMailboxes = useMemo(() => accounts.filter((a) => !a.company_id).length, [accounts])
@@ -522,6 +536,38 @@ export default function EmailCenterPage() {
 
   const isCaseTab = tab === "inprogress" || tab === "completed"
   const isListTab = tab !== "mailboxes" && tab !== "rules"
+  // Stats/Columns apply to the Cases table and the Emails table (Needs Review / Notifications /
+  // Update) — not Ignored (its own panel), Mailboxes or Rules (its own toolbar).
+  const hasStatsColumns = isCaseTab || tab === "review" || tab === "notifications" || tab === "update"
+  const activeColumnVisibility = isCaseTab ? casesColumns : emailColumns
+
+  // "All companies" / a company name / "Anyone" + assignee, plus the current search — same summary
+  // for every list tab's export, so the file always says exactly what it does and doesn't cover.
+  const [exporting, setExporting] = useState(false)
+  const scopeLabel = useMemo(() => {
+    const parts: string[] = []
+    parts.push(byCompany ? (sidebarCompany ? fullCompanies.find((c) => String(c.id) === sidebarCompany)?.company_name ?? "One company" : "All companies") : (company ? companies.find((c) => c.id === company)?.company_name ?? "One company" : "All companies"))
+    if (isCaseTab) parts.push(assignee === "none" ? "Unassigned" : assignee ? staff.find((s) => s.id === assignee)?.name ?? "One assignee" : "Anyone")
+    if (search.trim()) parts.push(`search "${search.trim()}"`)
+    return parts.join(" · ")
+  }, [byCompany, sidebarCompany, fullCompanies, company, companies, isCaseTab, assignee, staff, search])
+
+  const exportCurrentTab = async () => {
+    setExporting(true)
+    try {
+      if (tab === "inprogress") await exportCasesToExcel(openCases, scopeLabel)
+      else if (tab === "completed") await exportCasesToExcel(closedCases, scopeLabel)
+      else if (tab === "review") await exportEmailsToExcel(reviewEmails, categories, { title: "KRA EMAILS — NEEDS REVIEW", tabLabel: `Needs Review — ${scopeLabel}`, filenameBase: "kra-needs-review" })
+      else if (tab === "notifications") await exportEmailsToExcel(notificationEmails, categories, { title: "KRA EMAILS — NOTIFICATIONS", tabLabel: `Notifications (${notificationFilter}) — ${scopeLabel}`, filenameBase: "kra-notifications", notificationsMode: true })
+      else if (tab === "update") await exportEmailsToExcel(updateEmails, categories, { title: "KRA EMAILS — UPDATE ONLY", tabLabel: `Update — ${scopeLabel}`, filenameBase: "kra-update-only" })
+      else if (tab === "ignored") await exportEmailsToExcel(ignoredEmails, categories, { title: "KRA EMAILS — IGNORED", tabLabel: `Ignored — ${scopeLabel}`, filenameBase: "kra-ignored" })
+      toast.success("Exported.")
+    } catch (e: any) {
+      toast.error(e.message ?? "Could not export.")
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const emptyMessage = tab === "notifications"
     ? notificationFilter === "active" ? "All important notifications are handled." : "Nothing handled yet."
@@ -531,7 +577,17 @@ export default function EmailCenterPage() {
 
   const tabTable = (embedded: boolean) => {
     if (isCaseTab) {
-      return <CasesTable cases={tab === "inprogress" ? openCases : closedCases} onOpen={(c) => setOpenCaseId(c.id)} showTime={showTime} embedded={embedded} loading={loading} />
+      return (
+        <CasesTable
+          cases={tab === "inprogress" ? openCases : closedCases}
+          onOpen={(c) => setOpenCaseId(c.id)}
+          showTime={showTime}
+          embedded={embedded}
+          loading={loading}
+          showStats={showStats}
+          visibleColumns={casesColumns.visible}
+        />
+      )
     }
     if (tab === "ignored") {
       return (
@@ -559,6 +615,8 @@ export default function EmailCenterPage() {
         embedded={embedded}
         notificationsMode={tab === "notifications"}
         onMarkHandled={markHandled}
+        showStats={showStats}
+        visibleColumns={emailColumns.visible}
       />
     )
   }
@@ -695,6 +753,12 @@ export default function EmailCenterPage() {
         </Tabs>
 
         <div className="ml-auto flex items-center gap-2 flex-wrap">
+          {tab === "notifications" && notificationFilter === "active" && notificationUrgentCount > 0 && (
+            <span className="inline-flex items-center gap-1.5 text-base font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-full px-3 py-1" title="Needs eyes now — an account issue, a deadline, real money due">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              {notificationUrgentCount} urgent
+            </span>
+          )}
           {tab === "notifications" && (
             <div className="flex items-center gap-1 p-1 rounded-lg border border-slate-200 bg-white">
               <button
@@ -766,6 +830,40 @@ export default function EmailCenterPage() {
               title="Show a resizable company sidebar and browse one company at a time"
             >
               <Columns3 className="h-5 w-5" /> By company
+            </Button>
+          )}
+
+          {hasStatsColumns && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowStats((v) => !v)}
+              className={cn(PILL_BUTTON_CLASS, showStats && PILL_BUTTON_ACTIVE_CLASS)}
+              title="Show Total/Completed/Missing counts for each column"
+            >
+              Stats
+            </Button>
+          )}
+
+          {hasStatsColumns && (
+            <ColumnVisibilityButton
+              columns={isCaseTab ? CASES_COLUMNS : EMAIL_COLUMNS}
+              visible={activeColumnVisibility.visible}
+              onToggle={activeColumnVisibility.toggle}
+              onShowAll={activeColumnVisibility.showAll}
+            />
+          )}
+
+          {isListTab && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportCurrentTab}
+              disabled={exporting}
+              className={PILL_BUTTON_CLASS}
+              title="Download this tab (respecting the current search/company filter) as a styled Excel file"
+            >
+              {exporting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />} Export
             </Button>
           )}
 

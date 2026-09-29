@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback, type ChangeEvent } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2, RefreshCw, Building2 } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2, RefreshCw, Building2, FileSpreadsheet, Upload, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { CompaniesSidebar } from './components/CompaniesSidebar';
@@ -19,6 +19,8 @@ import { useCompanyDirectors } from './hooks/useCompanyDirectors';
 import { useCompanyIndividualsByType } from './hooks/useCompanyIndividualsByType';
 import type { JobField } from '../master-fields/components/types/database';
 import type { ImageStyle, ImageStyleMap } from './utils/imageStyles';
+import { generateCcContractExcel } from './utils/ccExcelExport';
+import { importCcContractExcel } from './utils/ccExcelImport';
 
 // Stable fallback so `consultantEntityIds` doesn't get a fresh {} literal on
 // every render while `template` is still null (e.g. before the initial fetch
@@ -560,6 +562,58 @@ export default function ConsultancyContractsPage() {
     }
   };
 
+  const [exportingExcel, setExportingExcel] = useState(false);
+  const [importingExcel, setImportingExcel] = useState(false);
+  const importFileRef = useRef<HTMLInputElement>(null);
+
+  const handleExportExcel = async () => {
+    if (!selectedCompanyId) return;
+    setExportingExcel(true);
+    try {
+      await generateCcContractExcel({
+        companyName: selectedCompany?.company_name || 'Company',
+        scalarPlaceholders,
+        allPlaceholders: ccPlaceholders,
+        resolvedValues,
+        overrides: scalarOverrides,
+        arrayData,
+      });
+      toast.success('Contract fields exported to Excel');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to export contract fields');
+    } finally {
+      setExportingExcel(false);
+    }
+  };
+
+  const handleImportExcel = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !selectedCompanyId) return;
+    setImportingExcel(true);
+    try {
+      const result = await importCcContractExcel(file, scalarPlaceholders, ccPlaceholders, resolvedValues, scalarOverrides);
+      if (!result) {
+        toast.error('"Contract Fields" sheet not found — import a file exported from this page.');
+        return;
+      }
+      if (Object.keys(result.overridesPatch).length > 0) {
+        setOverrides((prev) => ({ ...prev, ...result.overridesPatch }));
+      }
+      const blockNames = Object.keys(result.arrayDataPatch);
+      if (blockNames.length > 0) {
+        setArrayData((prev) => ({ ...prev, ...result.arrayDataPatch }));
+      }
+      toast.success('Contract fields imported', {
+        description: `${result.fieldsChanged} field(s) updated${result.skippedLocked ? `, ${result.skippedLocked} read-only field(s) skipped` : ''}${blockNames.length ? `, ${blockNames.length} block(s) refreshed` : ''}.`,
+      });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to import contract fields');
+    } finally {
+      setImportingExcel(false);
+    }
+  };
+
   const selectedCompany = companies.find((c) => String(c.id) === selectedCompanyId) || null;
 
   return (
@@ -599,6 +653,23 @@ export default function ConsultancyContractsPage() {
             >
               {loadingCompanyData ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
             </button>
+            <button
+              onClick={handleExportExcel}
+              disabled={!selectedCompanyId || exportingExcel}
+              title="Export contract fields to Excel"
+              className={cn("p-2 rounded-full transition-all disabled:opacity-40", "text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800")}
+            >
+              {exportingExcel ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={() => importFileRef.current?.click()}
+              disabled={!selectedCompanyId || importingExcel}
+              title="Import contract fields from Excel"
+              className={cn("p-2 rounded-full transition-all disabled:opacity-40", "text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800")}
+            >
+              {importingExcel ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            </button>
+            <input ref={importFileRef} type="file" accept=".xlsx" className="hidden" onChange={handleImportExcel} />
           </div>
         </div>
 

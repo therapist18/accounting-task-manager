@@ -6,6 +6,9 @@ export interface RuleInput {
   is_notify?: boolean
   // Only meaningful when is_ignore is true: drop a match entirely instead of storing it under Ignored.
   hard_ignore?: boolean
+  // Only meaningful when is_notify is true: "urgent" (default) demands attention now, "informational"
+  // still lands in Notifications but reads as FYI.
+  notify_priority?: "urgent" | "informational"
   match_type?: RuleMatchType
   pattern?: string
   extra_patterns?: string[]
@@ -31,6 +34,12 @@ export function parseRuleBody(
   if ("is_ignore" in body) value.is_ignore = !!body.is_ignore
   if ("is_notify" in body) value.is_notify = !!body.is_notify
   if ("hard_ignore" in body) value.hard_ignore = !!body.hard_ignore
+  if ("notify_priority" in body) {
+    if (body.notify_priority !== "urgent" && body.notify_priority !== "informational") {
+      return { ok: false, error: "Notify priority must be 'urgent' or 'informational'." }
+    }
+    value.notify_priority = body.notify_priority
+  }
   if ("match_type" in body) {
     if (body.match_type !== "contains" && body.match_type !== "regex") return { ok: false, error: "Match type must be 'contains' or 'regex'." }
     value.match_type = body.match_type
@@ -121,6 +130,7 @@ export function parseRuleBody(
     } else if (value.is_notify) {
       // Same idea for notifications — "notification" carries the needs_review disposition.
       value.category_key = "notification"
+      value.notify_priority ??= "urgent"
     } else {
       if (!value.pattern) return { ok: false, error: "A classify rule needs a subject pattern." }
       if (!value.category_key) return { ok: false, error: "Category is required." }

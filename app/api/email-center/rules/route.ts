@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { authorize, fail, userNames } from "@/lib/email-center/api"
 import { DEFAULT_SUBJECT_RULES } from "@/lib/email-center/rules"
 import {
-  EXTRA_MIGRATION_MESSAGE, EXTRA_SENDER_MIGRATION_MESSAGE, RULES_TABLE, invalidateRulesCache,
-  normalizeRuleRow, ruleColumns, withOptionalColumnFallback, withoutDroppedColumns,
+  EXTRA_MIGRATION_MESSAGE, EXTRA_SENDER_MIGRATION_MESSAGE, NOTIFY_PRIORITY_MIGRATION_MESSAGE, RULES_TABLE,
+  invalidateRulesCache, normalizeRuleRow, ruleColumns, withOptionalColumnFallback, withoutDroppedColumns,
 } from "@/lib/email-center/rule-store"
 import { parseRuleBody } from "@/lib/email-center/rule-validation"
 
@@ -47,6 +47,7 @@ export async function GET(request: NextRequest) {
         sender_pattern: null,
         extra_sender_patterns: [] as string[],
         sender_match_type: null,
+        notify_priority: "urgent" as const,
         created_at: null,
         updated_at: null,
       }))
@@ -84,9 +85,12 @@ export async function POST(request: NextRequest) {
       (dropped) => sb.from(RULES_TABLE).insert(withoutDroppedColumns(row, dropped)).select(ruleColumns(dropped)).single(),
       (col) => {
         // hard_ignore has a safe default (false) — silently dropping it loses nothing. Real extra
-        // wordings/senders would be lost, so those refuse instead.
+        // wordings/senders would be lost, so those refuse instead. notify_priority also has a safe
+        // default ('urgent') — only an explicit "informational" choice would be silently lost, so only
+        // that refuses; letting a rule save as (the already-correct) 'urgent' never needs to block.
         if (col === "extra_patterns" && parsed.value.extra_patterns?.length) return EXTRA_MIGRATION_MESSAGE
         if (col === "extra_sender_patterns" && parsed.value.extra_sender_patterns?.length) return EXTRA_SENDER_MIGRATION_MESSAGE
+        if (col === "notify_priority" && parsed.value.notify_priority === "informational") return NOTIFY_PRIORITY_MIGRATION_MESSAGE
       }
     )
     if (blocked) return NextResponse.json({ success: false, error: blocked }, { status: 409 })

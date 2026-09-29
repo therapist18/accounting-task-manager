@@ -158,6 +158,9 @@ export interface RuleRow {
   // Ignored tab — for mail that has nothing to do with KRA at all.
   hard_ignore: boolean
   is_notify: boolean
+  // Only meaningful when is_notify is true: "urgent" demands attention now, "informational" still
+  // lands in Notifications but reads as FYI.
+  notify_priority: "urgent" | "informational"
   sender_pattern: string | null
   // Alternative senders; the rule matches sender_pattern OR any of these.
   extra_sender_patterns: string[]
@@ -201,7 +204,11 @@ export type RuleOutcome = { icon: typeof FilePlus2; label: string; tone: string 
 export function ruleOutcome(r: RuleRow, cat: CategoryOption | undefined): RuleOutcome {
   if (r.is_ignore && r.hard_ignore) return { icon: Trash2, label: "Deleted — never stored, no task", tone: "text-red-600" }
   if (r.is_ignore) return { icon: EyeOff, label: "Ignored — stored, no task", tone: "text-slate-500" }
-  if (r.is_notify) return { icon: Bell, label: "Notifications tab — flagged urgent, no task", tone: "text-amber-600" }
+  if (r.is_notify) {
+    return r.notify_priority === "informational"
+      ? { icon: Bell, label: "Notifications tab — FYI, no task", tone: "text-blue-600" }
+      : { icon: Bell, label: "Notifications tab — flagged urgent, no task", tone: "text-amber-600" }
+  }
   if (cat?.creates_case) return { icon: FilePlus2, label: "Opens a task", tone: "text-emerald-600" }
   if (cat?.attaches_to_case) return { icon: Link2, label: "Updates an existing task only", tone: "text-blue-600" }
   if (cat?.disposition === "needs_review") return { icon: ArrowRightCircle, label: "Needs Review — no task", tone: "text-amber-600" }

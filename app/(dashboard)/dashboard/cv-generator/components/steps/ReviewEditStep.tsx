@@ -1,13 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
-import { AlertCircle, ArrowRight, ChevronDown, ChevronRight, Copy, Crosshair, Database, Download, PenLine, FileText as CoverLetterIcon } from "lucide-react";
+import { toast } from "sonner";
+import { AlertCircle, ArrowRight, ChevronDown, ChevronRight, Copy, Crosshair, Database, Download, PenLine, FileText as CoverLetterIcon, LayoutGrid, ListTree, Upload, FileSpreadsheet, Loader2 } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
 import { CvPreviewPanel } from "../CvPreviewPanel";
+import { CvVariablesTable } from "../CvVariablesTable";
 import { type DocumentViewerHandle } from "@/components/contracts/DocumentViewer";
 import type { ComboOption } from "../CreatableCombobox";
+import { generateCvVariablesTemplate } from "../../utils/cvExcelExport";
+import { importCvVariablesFile } from "../../utils/cvExcelImport";
 import {
   ContactEditor,
   SummaryEditor,
@@ -76,6 +80,50 @@ export function ReviewEditStep({
   previewRef,
 }: ReviewEditStepProps) {
   const [showMissingOnly, setShowMissingOnly] = useState(false);
+  const [viewMode, setViewMode] = useState<'form' | 'table'>('form');
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importFileRef = useRef<HTMLInputElement>(null);
+
+  const handleExportVariables = async () => {
+    setExporting(true);
+    try {
+      await generateCvVariablesTemplate(cvData);
+      toast.success('CV data exported');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to export CV data');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleImportVariables = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImporting(true);
+    try {
+      const result = await importCvVariablesFile(file, cvData);
+      if (!result) {
+        toast.error('Could not find any recognizable sheets in this file — import a file exported from this page.');
+        return;
+      }
+      setCvData(result.cvData);
+      const sectionsSummary = result.summary.sections.map((s) => `${s.label}: ${s.rowsImported}`).join(', ');
+      const missingTotal = result.summary.sections.reduce((sum, s) => sum + s.rowsWithMissingRequired, 0);
+      toast.success('CV data imported', {
+        description: [
+          result.summary.scalarFieldsRead > 0 ? `${result.summary.scalarFieldsRead} contact/detail field(s)` : null,
+          sectionsSummary || null,
+          missingTotal > 0 ? `${missingTotal} row(s) still missing required fields` : null,
+        ].filter(Boolean).join(' • ') || undefined,
+      });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to import CV data');
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const isSectionComplete = (sec: { id: string; count: number; incomplete?: boolean }) =>
     sec.incomplete !== undefined ? !sec.incomplete : sec.count > 0 || sec.id === 'contact';
@@ -191,6 +239,13 @@ export function ReviewEditStep({
             <Link href="/dashboard/cv-generator/settings"><Database className="h-3 w-3 mr-1" /> Field Sources</Link>
           </Button>
           <Button size="sm" onClick={() => setShowAdvancedExport(true)} variant="outline" className="w-full text-xs h-7 border-slate-200"><Download className="h-3 w-3 mr-1" /> Advanced Export</Button>
+          <Button size="sm" onClick={handleExportVariables} disabled={exporting} variant="outline" className="w-full text-xs h-7 border-slate-200">
+            {exporting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <FileSpreadsheet className="h-3 w-3 mr-1" />} Export to Excel
+          </Button>
+          <Button size="sm" onClick={() => importFileRef.current?.click()} disabled={importing} variant="outline" className="w-full text-xs h-7 border-slate-200">
+            {importing ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Upload className="h-3 w-3 mr-1" />} Import from Excel
+          </Button>
+          <input ref={importFileRef} type="file" accept=".xlsx" className="hidden" onChange={handleImportVariables} />
           <Button size="sm" onClick={() => setWorkflowStep('collaboration')} className="w-full text-xs bg-custom-blue hover:bg-[#2d5a94] h-7">
             Client Collaboration <ArrowRight className="h-3 w-3 ml-1" />
           </Button>
@@ -201,61 +256,85 @@ export function ReviewEditStep({
 
       {/* Center — Editor Panel */}
       <Panel defaultSize={41} minSize={25} className="bg-white border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-        <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-slate-700 uppercase tracking-wider">{sectionMeta.find(s => s.id === activeSection)?.label || 'Section'}</h2>
-          <span className="text-sm text-slate-400">Confidence Score <span className="text-emerald-600 font-bold">92%</span></span>
+        <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-bold text-slate-700 uppercase tracking-wider truncate">
+            {viewMode === 'table' ? 'All Variables' : (sectionMeta.find(s => s.id === activeSection)?.label || 'Section')}
+          </h2>
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="p-0.5 bg-slate-100 rounded-lg inline-flex items-center shadow-inner">
+              <button
+                onClick={() => setViewMode('form')}
+                className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${viewMode === 'form' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                title="Form view — one section at a time"
+              >
+                <ListTree className="h-3 w-3" /> Form
+              </button>
+              <button
+                onClick={() => setViewMode('table')}
+                className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${viewMode === 'table' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                title="Table view — all sections and fields at once"
+              >
+                <LayoutGrid className="h-3 w-3" /> Table
+              </button>
+            </div>
+            <span className="text-sm text-slate-400">Confidence Score <span className="text-emerald-600 font-bold">92%</span></span>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-6">
 
-          {activeSection === 'contact' && (
+          {viewMode === 'table' && (
+            <CvVariablesTable cvData={cvData} setCvData={setCvData} />
+          )}
+
+          {viewMode === 'form' && activeSection === 'contact' && (
             <ContactEditor cvData={cvData} setCvData={setCvData} applicantId={applicantId} linkedIndividualId={linkedIndividualId} />
           )}
 
-          {activeSection === 'summary' && (
+          {viewMode === 'form' && activeSection === 'summary' && (
             <SummaryEditor cvData={cvData} setCvData={setCvData} onOpenAiWriter={() => setShowAiWriter(true)} />
           )}
 
-          {activeSection === 'experience' && (
+          {viewMode === 'form' && activeSection === 'experience' && (
             <ExperienceEditor cvData={cvData} setCvData={setCvData} collapsedItems={collapsedItems} toggleItem={toggleItem} onOpenAiWriter={() => setShowAiWriter(true)} />
           )}
 
-          {activeSection === 'education' && (
+          {viewMode === 'form' && activeSection === 'education' && (
             <EducationEditor cvData={cvData} setCvData={setCvData} collapsedItems={collapsedItems} toggleItem={toggleItem} />
           )}
 
-          {activeSection === 'skills' && (
+          {viewMode === 'form' && activeSection === 'skills' && (
             <SkillsEditor cvData={cvData} setCvData={setCvData} collapsedItems={collapsedItems} toggleItem={toggleItem} />
           )}
 
-          {activeSection === 'internships' && (
+          {viewMode === 'form' && activeSection === 'internships' && (
             <InternshipsEditor cvData={cvData} setCvData={setCvData} />
           )}
 
-          {activeSection === 'projects' && (
+          {viewMode === 'form' && activeSection === 'projects' && (
             <ProjectsEditor cvData={cvData} setCvData={setCvData} />
           )}
 
-          {activeSection === 'languages' && (
+          {viewMode === 'form' && activeSection === 'languages' && (
             <LanguagesEditor cvData={cvData} setCvData={setCvData} />
           )}
 
-          {activeSection === 'references' && (
+          {viewMode === 'form' && activeSection === 'references' && (
             <ReferencesEditor cvData={cvData} setCvData={setCvData} companyOptions={companyOptions} onCreateCompany={handleCreateCompany} />
           )}
 
-          {activeSection === 'certifications' && (
+          {viewMode === 'form' && activeSection === 'certifications' && (
             <CertificationsEditor cvData={cvData} setCvData={setCvData} />
           )}
 
-          {activeSection === 'achievements' && (
+          {viewMode === 'form' && activeSection === 'achievements' && (
             <AchievementsEditor cvData={cvData} setCvData={setCvData} />
           )}
 
-          {activeSection === 'additionalInfo' && (
+          {viewMode === 'form' && activeSection === 'additionalInfo' && (
             <AdditionalInfoEditor cvData={cvData} setCvData={setCvData} />
           )}
 
-          {activeSection === 'declaration' && (
+          {viewMode === 'form' && activeSection === 'declaration' && (
             <DeclarationEditor cvData={cvData} setCvData={setCvData} />
           )}
 

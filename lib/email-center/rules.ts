@@ -19,7 +19,7 @@ export type RuleResult =
   // hardIgnore mirrors the rule's own hard_ignore — carried here so ingestion doesn't need a second
   // lookup to know whether to store the match or drop it outright.
   | { action: "ignore"; categoryKey: null; confidence: number; ruleId?: string; hardIgnore?: boolean }
-  | { action: "notify"; categoryKey: null; confidence: number; ruleId?: string }
+  | { action: "notify"; categoryKey: null; confidence: number; ruleId?: string; notifyPriority?: "urgent" | "informational" }
   // ruleId is the classify rule that matched (absent for the built-in noise-sender / thread-approval
   // shortcuts below, which aren't rows in the table) — lets a task remember which rule opened it.
   | { action: "classify"; categoryKey: string; confidence: number; ruleId?: string }
@@ -61,6 +61,10 @@ export interface SubjectRule {
   // Only meaningful when is_ignore is true: drop a match entirely instead of storing it under the
   // Ignored tab. For mail that has nothing to do with KRA at all.
   hard_ignore?: boolean
+  // Only meaningful when is_notify is true: "urgent" (default) demands attention now; "informational"
+  // still lands in Notifications but reads as FYI — a password-reset confirmation vs an account-locked
+  // notice are both "notify", but only one of them is actually urgent.
+  notify_priority?: "urgent" | "informational"
 }
 
 // First match wins, so order from most to least specific.
@@ -217,12 +221,15 @@ export function classifyByRules(input: {
   }
 
   // Notify rules: subject/sender-driven important notifications. Like ignore they apply to any
-  // sender and name no category; unlike ignore the mail is stored — flagged urgent in Needs Review
-  // so someone acts on it, with no KRA task/case opened.
+  // sender and name no category; unlike ignore the mail is stored — flagged in Notifications so
+  // someone sees it, with no KRA task/case opened. notify_priority decides how loudly.
   for (const rule of rules) {
     if (rule.is_notify) {
       if (matchesSubject(rule, cleanSubject) && matchesSender(rule, senderEmail)) {
-        return { action: "notify", categoryKey: null, confidence: rule.confidence, ruleId: rule.id }
+        return {
+          action: "notify", categoryKey: null, confidence: rule.confidence, ruleId: rule.id,
+          notifyPriority: rule.notify_priority === "informational" ? "informational" : "urgent",
+        }
       }
     }
   }
