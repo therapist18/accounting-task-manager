@@ -38,6 +38,9 @@ interface Progress {
   failed: number
   capped?: boolean
   error?: string
+  // Why some of `failed` actually failed — each message already got one retry pass server-side (on
+  // top of its own per-call retries), so what's left here survived both and is worth a look.
+  failureReasons: string[]
 }
 
 const PRESETS: Array<{ label: string; iso: () => string }> = [
@@ -79,6 +82,9 @@ export function SyncDialog({
   const [progress, setProgress] = useState<Record<string, Progress>>({})
   const [finished, setFinished] = useState(false)
   const stopRef = useRef(false)
+  // Which mailbox rows have their failure reasons expanded — collapsed by default so a run with a lot
+  // of mailboxes doesn't turn into a wall of error text.
+  const [expandedFailures, setExpandedFailures] = useState<Set<string>>(new Set())
 
   // Reset every time the dialog opens; a preset (opened from a company row) starts in "selected" mode.
   useEffect(() => {
@@ -87,6 +93,7 @@ export function SyncDialog({
     setFinished(false)
     setSearch("")
     setPauseClassification(false)
+    setExpandedFailures(new Set())
     if (presetIds?.length) {
       setScope("selected")
       setSelected(new Set(presetIds))
@@ -113,7 +120,7 @@ export function SyncDialog({
   }, [eligible, search])
 
   const patch = (id: string, p: Partial<Progress>) =>
-    setProgress((prev) => ({ ...prev, [id]: { ...(prev[id] ?? { status: "pending", total: 0, done: 0, ingested: 0, failed: 0 }), ...p } }))
+    setProgress((prev) => ({ ...prev, [id]: { ...(prev[id] ?? { status: "pending", total: 0, done: 0, ingested: 0, failed: 0, failureReasons: [] }), ...p } }))
 
   async function runMailbox(acc: AccountRow, sinceDate: string, untilDate: string) {
     try {
@@ -123,13 +130,14 @@ export function SyncDialog({
         body: JSON.stringify({ accountId: acc.id, action: "list", since: sinceDate, ...(untilDate ? { until: untilDate } : {}) }),
       })
       let queue = listed.ids
-      patch(acc.id, { status: "running", total: queue.length, done: 0, ingested: 0, failed: 0, capped: listed.capped })
+      patch(acc.id, { status: "running", total: queue.length, done: 0, ingested: 0, failed: 0, failureReasons: [], capped: listed.capped })
 
       let done = 0, ingested = 0, failed = 0
+      const failureReasons: string[] = []
       while (queue.length) {
         if (stopRef.current) return patch(acc.id, { status: "stopped" })
         const batch = queue.slice(0, BATCH)
-        const res = await api<{ ingested: number; skipped: number; failed: number; remaining: string[] }>("/api/email-center/sync/backfill", {
+        const res = await api<{ ingested: number; skipped: number; failed: number; remaining: string[]; errors: string[] }>("/api/email-center/sync/backfill", {
           method: "POST",
           body: JSON.stringify({ accountId: acc.id, action: "ingest", ids: batch, skipClassification: pauseClassification }),
         })
@@ -138,7 +146,10 @@ export function SyncDialog({
         done += batch.length - res.remaining.length
         ingested += res.ingested
         failed += res.failed
-        patch(acc.id, { done, ingested, failed })
+        // Each message already survived one retry pass server-side before landing here — keep a
+        // bounded sample of why, not every one across a whole mailbox's run.
+        if (res.errors?.length) failureReasons.push(...res.errors.slice(0, Math.max(0, 20 - failureReasons.length)))
+        patch(acc.id, { done, ingested, failed, failureReasons: [...failureReasons] })
       }
       patch(acc.id, { status: "done" })
     } catch (e: any) {
@@ -323,26 +334,50 @@ export function SyncDialog({
               <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 max-h-56 overflow-y-auto custom-scrollbar">
                 {rows.map((a) => {
                   const p = progress[a.id]
+                  const expanded = expandedFailures.has(a.id)
                   return (
-                    <div key={a.id} className="flex items-center gap-3 px-3.5 py-2.5">
-                      <span className="w-5 shrink-0">
-                        {p.status === "done" ? <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                          : p.status === "error" ? <XCircle className="h-5 w-5 text-red-500" />
-                          : p.status === "pending" || p.status === "stopped" ? <span className="block h-2.5 w-2.5 rounded-full bg-slate-300 mx-auto" />
-                          : <Loader2 className="h-5 w-5 animate-spin text-custom-blue" />}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-base font-medium text-slate-900 truncate">{a.company_name ?? a.email}</span>
-                        <span className="block text-sm text-slate-500 truncate">
-                          {p.status === "pending" && "Waiting…"}
-                          {p.status === "listing" && "Finding messages…"}
-                          {p.status === "stopped" && `Stopped at ${p.done} of ${p.total}`}
-                          {p.status === "error" && <span className="text-red-600">{p.error}</span>}
-                          {(p.status === "running" || p.status === "done") &&
-                            (p.total === 0 ? "Nothing new in that period" : `${p.done} of ${p.total} · ${p.ingested} new${p.failed ? ` · ${p.failed} failed` : ""}`)}
-                          {p.capped && " · very large period — only the newest 30,000 messages were listed; run again with an earlier end date for the rest"}
+                    <div key={a.id} className="px-3.5 py-2.5">
+                      <div className="flex items-center gap-3">
+                        <span className="w-5 shrink-0">
+                          {p.status === "done" ? <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                            : p.status === "error" ? <XCircle className="h-5 w-5 text-red-500" />
+                            : p.status === "pending" || p.status === "stopped" ? <span className="block h-2.5 w-2.5 rounded-full bg-slate-300 mx-auto" />
+                            : <Loader2 className="h-5 w-5 animate-spin text-custom-blue" />}
                         </span>
-                      </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-base font-medium text-slate-900 truncate">{a.company_name ?? a.email}</span>
+                          <span className="block text-sm text-slate-500 truncate">
+                            {p.status === "pending" && "Waiting…"}
+                            {p.status === "listing" && "Finding messages…"}
+                            {p.status === "stopped" && `Stopped at ${p.done} of ${p.total}`}
+                            {p.status === "error" && <span className="text-red-600">{p.error}</span>}
+                            {(p.status === "running" || p.status === "done") &&
+                              (p.total === 0 ? "Nothing new in that period" : `${p.done} of ${p.total} · ${p.ingested} new${p.failed ? ` · ${p.failed} failed` : ""}`)}
+                            {p.capped && " · very large period — only the newest 30,000 messages were listed; run again with an earlier end date for the rest"}
+                          </span>
+                        </span>
+                        {p.failed > 0 && p.failureReasons.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedFailures((prev) => {
+                              const next = new Set(prev)
+                              expanded ? next.delete(a.id) : next.add(a.id)
+                              return next
+                            })}
+                            className="shrink-0 text-sm font-medium text-red-700 hover:underline"
+                          >
+                            {expanded ? "Hide" : "Why?"}
+                          </button>
+                        )}
+                      </div>
+                      {expanded && (
+                        <ul className="mt-1.5 ml-8 space-y-0.5 text-sm text-red-700">
+                          {p.failureReasons.map((reason, i) => <li key={i} className="break-all">{reason}</li>)}
+                          {p.failed > p.failureReasons.length && (
+                            <li className="text-slate-400">+ {p.failed - p.failureReasons.length} more (not shown)</li>
+                          )}
+                        </ul>
+                      )}
                     </div>
                   )
                 })}

@@ -119,6 +119,22 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<ScannerUserRole, PermissionKey[]> 
     "bcl_task_diary.view",
     "applications.view",
   ],
+  // BCL staff — the same non-admin operational set as company_staff, so the roster can be
+  // assigned passport handling work and reach the modules that come with it.
+  bcl_staff: [
+    "dashboard.view",
+    "tasks_requirements.view",
+    "tasks.view",
+    "reports.view",
+    "passport_endorsement.view",
+    "task_basket.view",
+    "automations.view",
+    "templates.view",
+    "letters.view",
+    "diary.view",
+    "bcl_task_diary.view",
+    "applications.view",
+  ],
   petty_cash_user: ["dashboard.view", "reports.view", "diary.view"],
 };
 

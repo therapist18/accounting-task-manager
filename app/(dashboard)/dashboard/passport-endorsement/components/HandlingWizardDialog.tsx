@@ -9,8 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   CheckCircle2,
   Loader2,
@@ -23,8 +22,6 @@ import {
   ChevronRight,
   Save,
   Info,
-  Check,
-  ChevronsUpDown,
   CalendarDays,
   Clock,
   Eraser,
@@ -33,10 +30,14 @@ import {
   MessageSquare,
   SendHorizonal,
   SkipForward,
+  Pencil,
+  MessageCircle,
+  UserRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/hooks/use-toast";
 import { supabase } from "@/lib/supabase/client";
+import { resolvePrimaryPhone, resolveWhatsAppNumber, resolveEmail, normalizeContactDetails, normalizeWhatsAppNumber, formatPhoneForDisplay } from "@/lib/registry/contact";
 import { DateTextInput } from "./PageHeader";
 import {
   upsertHandlingRecord,
@@ -105,42 +106,28 @@ function FormRow({
   );
 }
 
-// Searchable staff picker
+// Searchable staff picker. Uses the app's shared SearchableSelect (the same one the Emails
+// module drives its Case Assignee dropdown with, off the same /api/auth/users/company10 staff
+// list) rather than a hand-rolled Popover + cmdk tree — that keeps the roster rendering and
+// filtering identical to every other staff dropdown in the product.
 function StaffCombobox({ users, value, onChange, placeholder = "Select staff member..." }: any) {
-  const [open, setOpen] = useState(false);
-  const selected = (users || []).find((u: any) => u.id === value);
+  const options = useMemo(
+    () => (users || []).map((u: any) => ({ value: String(u.id), label: u.name })),
+    [users]
+  );
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          className="h-12 w-full justify-between text-base font-normal border-slate-200 bg-white rounded-lg px-3.5 hover:bg-white"
-        >
-          <span className={cn("truncate", !selected && "text-slate-400")}>{selected?.name || placeholder}</span>
-          <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[--radix-popover-trigger-width] max-h-[300px] p-0 z-[200] overflow-hidden" align="start">
-        <Command>
-          <CommandInput placeholder="Search staff..." className="text-base" />
-          <CommandList className="max-h-[240px] overflow-y-auto">
-            <CommandEmpty>No staff found.</CommandEmpty>
-            <CommandGroup>
-              {(users || []).map((u: any) => (
-                <CommandItem key={u.id} value={u.name} onSelect={() => { onChange(u.id); setOpen(false); }} className="text-base py-2">
-                  <Check className={cn("mr-2 h-4 w-4 shrink-0", value === u.id ? "opacity-100" : "opacity-0")} />
-                  {u.name}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+    <SearchableSelect
+      value={value || ""}
+      onValueChange={onChange}
+      options={options}
+      placeholder={placeholder}
+      emptyMessage="No staff found."
+      searchPlaceholder="Search staff..."
+      className="w-full"
+      buttonClassName="h-12 w-full justify-between text-base font-normal border-slate-200 bg-white rounded-lg px-3.5 hover:bg-white hover:text-slate-900"
+      popoverClassName="max-h-[300px] z-[200] overflow-hidden"
+    />
   );
 }
 
@@ -424,24 +411,45 @@ export function HandlingWizardDialog({
   const [clientNotes, setClientNotes] = useState("");
 
   const [existingClientPhone, setExistingClientPhone] = useState<string>("");
+  const [clientWhatsApp, setClientWhatsApp] = useState<string>("");
+  const [clientEmail, setClientEmail] = useState<string>("");
+  const [clientContactName, setClientContactName] = useState<string>("");
   const [phoneSavePrompt, setPhoneSavePrompt] = useState<{ step: "received" | "dispatch"; phone: string } | null>(null);
   const [savingPhoneToRegistry, setSavingPhoneToRegistry] = useState(false);
   const [confirmClearStep, setConfirmClearStep] = useState<string | null>(null);
   const [clearingStep, setClearingStep] = useState(false);
+  const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
+  const [editContactOpen, setEditContactOpen] = useState(false);
+  const [savingContact, setSavingContact] = useState(false);
+
+  // Recipient shown on the notification step. The number shown here is the one the server will
+  // actually dial — the send route re-resolves it from the registry rather than trusting a number
+  // passed in by the browser — so what staff confirm is what gets sent.
+  const whatsAppRecipientName = clientContactName || task?.applicant_name || "the client";
+  const canSendWhatsApp = Boolean(clientWhatsApp) && normalizeWhatsAppNumber(clientWhatsApp).length > 0;
 
   useEffect(() => {
-    if (!open || !task?.individual_id) { setExistingClientPhone(""); return; }
+    if (!open || !task?.individual_id) {
+      setExistingClientPhone("");
+      setClientWhatsApp("");
+      setClientEmail("");
+      setClientContactName("");
+      return;
+    }
     let cancelled = false;
     supabase
       .from("registry_individuals")
-      .select("contact_details")
+      .select("contact_details, full_name")
       .eq("id", task.individual_id)
       .single()
       .then(({ data }) => {
         if (cancelled) return;
-        const raw = data?.contact_details;
-        const contactObj = Array.isArray(raw) ? raw[0] : raw;
-        setExistingClientPhone(contactObj?.phone?.kenyan?.primary || contactObj?.phone?.whatsapp || "");
+        // Shared resolver — registry contact_details is sometimes an object and sometimes an
+        // array, with nested and flat key variants both in use.
+        setExistingClientPhone(resolvePrimaryPhone(data?.contact_details));
+        setClientWhatsApp(resolveWhatsAppNumber(data?.contact_details));
+        setClientEmail(resolveEmail(data?.contact_details));
+        setClientContactName(data?.full_name || "");
       });
     return () => { cancelled = true; };
   }, [open, task?.individual_id]);
@@ -834,6 +842,96 @@ export function HandlingWizardDialog({
     }
   };
 
+  const sendWhatsAppNotification = async () => {
+    if (!task?.individual_id || sendingWhatsApp) return;
+
+    const number = normalizeWhatsAppNumber(clientWhatsApp);
+    if (!number) {
+      toast({
+        title: "No usable number",
+        description: "Add a WhatsApp number for this client before sending.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!notified.message.trim()) {
+      toast({ title: "Message is empty", description: "Write the message to send first.", variant: "destructive" });
+      return;
+    }
+
+    setSendingWhatsApp(true);
+    try {
+      const response = await fetch("/api/passport-endorsement/whatsapp-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ individualId: task.individual_id, message: notified.message }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.error || "WhatsApp send failed.");
+      }
+
+      const sentTo = payload?.data?.sentToDisplay || formatPhoneForDisplay(number);
+      toast({
+        title: "Sent to WhatsApp",
+        description: `Message handed to WhatsApp for ${whatsAppRecipientName} (${sentTo}).`,
+      });
+    } catch (err) {
+      console.error(err);
+      toast({
+        title: "Could not send",
+        description: err instanceof Error ? err.message : "WhatsApp send failed.",
+        variant: "destructive",
+      });
+    } finally {
+      setSendingWhatsApp(false);
+    }
+  };
+
+  // Persists edited contact fields back onto the individual's registry record. Writes the nested
+  // shape used by the rest of the app and leaves every other key in contact_details untouched,
+  // so unrelated contact data on the record isn't lost.
+  const saveClientContact = async (next: { whatsapp: string; primary: string; email: string }) => {
+    if (!task?.individual_id) return;
+    setSavingContact(true);
+    try {
+      const { data: individual, error: fetchError } = await supabase
+        .from("registry_individuals")
+        .select("contact_details")
+        .eq("id", task.individual_id)
+        .single();
+      if (fetchError) throw fetchError;
+
+      const contactObj = normalizeContactDetails(individual?.contact_details);
+      contactObj.phone = contactObj.phone || {};
+      contactObj.phone.kenyan = contactObj.phone.kenyan || {};
+      contactObj.email = contactObj.email || {};
+
+      const whatsapp = next.whatsapp.trim();
+      const primary = next.primary.trim();
+      contactObj.phone.whatsapp = whatsapp;
+      contactObj.phone.kenyan.primary = primary;
+      contactObj.email.primary = next.email.trim();
+
+      const { error: updateError } = await supabase
+        .from("registry_individuals")
+        .update({ contact_details: [contactObj] })
+        .eq("id", task.individual_id);
+      if (updateError) throw updateError;
+
+      setClientWhatsApp(resolveWhatsAppNumber([contactObj]));
+      setExistingClientPhone(resolvePrimaryPhone([contactObj]));
+      setClientEmail(resolveEmail([contactObj]));
+      setEditContactOpen(false);
+      toast({ title: "Saved", description: "Contact details updated on the client's profile." });
+    } catch (err) {
+      console.error(err);
+      toast({ title: "Error", description: "Failed to save the contact details.", variant: "destructive" });
+    } finally {
+      setSavingContact(false);
+    }
+  };
+
   const stepCompletedAt = {
     received: record?.received_at ? `Completed ${fmtDateTime(record.received_at)} · ${bclUsers.find((u) => u.id === record.received_by)?.name || "Staff"}` : null,
     taken: record?.taken_at ? `Completed ${fmtDateTime(record.taken_at)} · ${bclUsers.find((u) => u.id === record.taken_by)?.name || "Staff"}` : null,
@@ -1102,26 +1200,86 @@ export function HandlingWizardDialog({
                       </div>
 
                       {notified.method === "auto_message" && (
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2.5">
-                          <Label className="text-sm font-bold text-slate-700">Message to Send</Label>
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <Label className="text-sm font-bold text-slate-700">Message to Send</Label>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setEditContactOpen(true)}
+                              className="gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900"
+                            >
+                              <Pencil className="h-3.5 w-3.5" /> Edit Contact
+                            </Button>
+                          </div>
+
+                          {/* Who the message is going to, so staff can confirm before sending. */}
+                          <div className="rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 space-y-1">
+                            <div className="flex items-center gap-2 text-sm">
+                              <UserRound className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                              <span className="text-slate-500">To</span>
+                              <span className="font-bold text-slate-800 truncate">{whatsAppRecipientName}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-sm">
+                              <MessageCircle className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                              <span className="text-slate-500">Number</span>
+                              {canSendWhatsApp ? (
+                                <span className="font-mono font-bold text-slate-800">
+                                  {formatPhoneForDisplay(clientWhatsApp) || clientWhatsApp}
+                                </span>
+                              ) : (
+                                <span className="text-amber-700 font-bold">
+                                  {clientWhatsApp
+                                    ? `"${clientWhatsApp}" can't be used for WhatsApp`
+                                    : "No WhatsApp number on file"}
+                                </span>
+                              )}
+                            </div>
+                            {clientEmail && (
+                              <div className="flex items-center gap-2 text-sm">
+                                <span className="text-slate-500 w-[3.25rem] ml-[1.375rem]">Email</span>
+                                <span className="text-slate-600 truncate">{clientEmail}</span>
+                              </div>
+                            )}
+                          </div>
+
                           <Textarea
                             value={notified.message}
                             onChange={(e) => setNotified((p) => ({ ...p, message: e.target.value }))}
                             rows={4}
                             className="text-sm bg-white"
                           />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              navigator.clipboard.writeText(notified.message);
-                              toast({ title: "Copied", description: "Message copied to clipboard." });
-                            }}
-                            className="gap-1.5 text-sm font-bold"
-                          >
-                            <Copy className="h-3.5 w-3.5" /> Copy Message
-                          </Button>
+                          <div className="flex flex-wrap gap-2.5">
+                            <Button
+                              type="button"
+                              onClick={sendWhatsAppNotification}
+                              disabled={sendingWhatsApp || !canSendWhatsApp || !notified.message.trim()}
+                              className="gap-1.5 text-sm font-bold bg-green-600 hover:bg-green-700 text-white"
+                            >
+                              {sendingWhatsApp ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <MessageCircle className="h-3.5 w-3.5" />
+                              )}
+                              {sendingWhatsApp ? "Sending…" : "Send via WhatsApp"}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                navigator.clipboard.writeText(notified.message);
+                                toast({ title: "Copied", description: "Message copied to clipboard." });
+                              }}
+                              className="gap-1.5 text-sm font-bold"
+                            >
+                              <Copy className="h-3.5 w-3.5" /> Copy Message
+                            </Button>
+                          </div>
+                          <p className="text-xs text-slate-500">
+                            Sending uses the number saved on the client&apos;s profile. Edit it above if it looks wrong.
+                          </p>
                         </div>
                       )}
                     </div>
@@ -1209,6 +1367,108 @@ export function HandlingWizardDialog({
             </div>
           </DialogFooter>
         )}
+      </DialogContent>
+
+      <EditContactModal
+        open={editContactOpen}
+        onOpenChange={setEditContactOpen}
+        contactName={whatsAppRecipientName}
+        initial={{ whatsapp: clientWhatsApp, primary: existingClientPhone, email: clientEmail }}
+        isSaving={savingContact}
+        onSave={saveClientContact}
+      />
+    </Dialog>
+  );
+}
+
+function EditContactModal({ open, onOpenChange, contactName, initial, isSaving, onSave }: any) {
+  const [whatsapp, setWhatsapp] = useState(initial.whatsapp || "");
+  const [primary, setPrimary] = useState(initial.primary || "");
+  const [email, setEmail] = useState(initial.email || "");
+
+  // Re-seed each time it opens so a cancelled edit doesn't leave stale values behind.
+  useEffect(() => {
+    if (!open) return;
+    setWhatsapp(initial.whatsapp || "");
+    setPrimary(initial.primary || "");
+    setEmail(initial.email || "");
+  }, [open, initial.whatsapp, initial.primary, initial.email]);
+
+  // Mirror the send route's validation so the problem is caught before a save.
+  const normalized = normalizeWhatsAppNumber(whatsapp);
+  const whatsappInvalid = Boolean(whatsapp.trim()) && !normalized;
+  const normalizedDisplay = normalized ? formatPhoneForDisplay(normalized) : "";
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (whatsappInvalid) return;
+    onSave({ whatsapp: whatsapp.trim(), primary: primary.trim(), email: email.trim() });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md w-full bg-white">
+        <DialogHeader>
+          <DialogTitle>Edit Contact</DialogTitle>
+          <DialogDescription>
+            Update the contact details saved on {contactName}&apos;s profile. These are used for WhatsApp
+            notifications and calls.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-whatsapp" className="text-sm font-bold text-slate-700">WhatsApp Number</Label>
+            <Input
+              id="edit-whatsapp"
+              value={whatsapp}
+              onChange={(e) => setWhatsapp(e.target.value)}
+              placeholder="0712 345 678"
+              autoComplete="off"
+            />
+            {whatsappInvalid ? (
+              <p className="text-xs text-amber-700">
+                WhatsApp can&apos;t use this number. Mobile numbers are 9 digits after 254 — landlines won&apos;t work.
+              </p>
+            ) : normalizedDisplay ? (
+              <p className="text-xs text-slate-500">Will send to {normalizedDisplay}</p>
+            ) : null}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-primary" className="text-sm font-bold text-slate-700">Primary Phone</Label>
+            <Input
+              id="edit-primary"
+              value={primary}
+              onChange={(e) => setPrimary(e.target.value)}
+              placeholder="0712 345 678"
+              autoComplete="off"
+            />
+            <p className="text-xs text-slate-500">The number used when the client is called.</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-email" className="text-sm font-bold text-slate-700">Email</Label>
+            <Input
+              id="edit-email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="client@example.com"
+              autoComplete="off"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isSaving || whatsappInvalid} className="gap-1.5">
+              {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save Contact
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

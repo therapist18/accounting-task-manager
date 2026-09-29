@@ -14,11 +14,16 @@ import type {
 import { getRoleAssignmentsByUserId, setRoleAssignmentsForUser } from "./role-assignments";
 
 export const SCANNER_USERS_TABLE = "scanner_users";
+// Mirrors the `public.user_role` Postgres enum on scanner_users.role (see ScannerUserRole).
+// This list is the app's allowlist: a value in the DB but not here makes normalizeRole throw
+// and takes down every roster-reading route, so both need updating together.
 export const SCANNER_USER_ROLES: ScannerUserRole[] = [
   "general_admin",
   "company_admin",
   "petty_cash_user",
   "officer",
+  "company_staff",
+  "bcl_staff",
   "SuperAdmin",
 ];
 export const SCANNER_USERS_SELECT = [
@@ -166,6 +171,29 @@ function mapManagedScannerUser(row: ScannerUserRow): ManagedAuthUser {
   };
 }
 
+// Listing every user is a bulk read (the staff rosters behind "Received By" / "Handled by"
+// dropdowns read it on each page load), and mapManagedScannerUser throws on a role outside
+// SCANNER_USER_ROLES. That turned a single value missing from the allowlist into a 500 for the
+// whole endpoint — every dropdown silently rendered empty, with the real error only visible in
+// the server log. This guard is what caught bcl_staff: it's a legitimate member of the
+// public.user_role enum that had never been added to SCANNER_USER_ROLES. An unknown role still
+// degrades to the least-privileged staff role and logs a warning, so one bad row can never take
+// the roster down again. Auth (authenticateScannerUserByIdentifier) keeps using the strict
+// mapScannerUser, so this never lets an unknown role sign in with elevated rights.
+function mapManagedScannerUserLenient(row: ScannerUserRow): ManagedAuthUser | null {
+  if (isScannerUserRole(row.role)) return mapManagedScannerUser(row);
+  console.warn(
+    `[auth] scanner_users row ${row.id} has unsupported role ${JSON.stringify(row.role)}; ` +
+      `treating as company_staff and excluding from role-based admin views.`
+  );
+  try {
+    return mapManagedScannerUser({ ...row, role: "company_staff" });
+  } catch (error) {
+    console.error(`[auth] Failed to map scanner_users row ${row.id}:`, error);
+    return null;
+  }
+}
+
 function normalizeOptionalString(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
@@ -212,6 +240,16 @@ async function normalizeManagedUserInput(
   existingUser?: ManagedAuthUser | null,
   userId?: string
 ): Promise<NormalizedManagedUserInput> {
+  // Guard the write side too: without this, an unrecognised role (e.g. a handling-method value
+  // like "bcl_staff" pasted into the role field) gets persisted and then breaks every later read
+  // that maps scanner_users rows, since normalizeRole rejects it. Fail here, at the point of
+  // entry, rather than surfacing as an empty staff dropdown much later.
+  if (!isScannerUserRole(input.role)) {
+    throw new Error(
+      `Unsupported role ${JSON.stringify(input.role)}. Valid roles: ${SCANNER_USER_ROLES.join(", ")}.`
+    );
+  }
+
   const username = normalizeOptionalString(input.username);
   const email = normalizeOptionalString(input.email)?.toLowerCase() ?? null;
   const firstName = normalizeOptionalString(input.firstName);
@@ -325,7 +363,9 @@ export async function listManagedScannerUsers(options?: FetchRowsOptions): Promi
   }
   const { data, error } = await query;
   if (error) throw error;
-  const users = (((data ?? []) as unknown) as ScannerUserRow[]).map(mapManagedScannerUser);
+  const users = (((data ?? []) as unknown) as ScannerUserRow[])
+    .map(mapManagedScannerUserLenient)
+    .filter((user): user is ManagedAuthUser => user !== null);
   return await loadRoleAssignmentsForUsers(users);
 }
 

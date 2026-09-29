@@ -6,12 +6,16 @@ export type TaskManagerRole =
   | "user"
   | "super_admin";
 
+// Mirrors the `public.user_role` Postgres enum on scanner_users.role. Keep these in sync with
+// the database — a value present in the enum but missing here makes normalizeRole throw, which
+// 500s every route that reads the user roster and silently empties the staff dropdowns.
 export type ScannerUserRole =
   | "general_admin"
   | "company_admin"
   | "petty_cash_user"
   | "officer"
   | "company_staff"
+  | "bcl_staff"
   | "SuperAdmin";
 
 export interface AuthUser {

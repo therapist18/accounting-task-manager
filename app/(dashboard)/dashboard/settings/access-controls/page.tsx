@@ -34,6 +34,7 @@ const ROLES: { key: ScannerUserRole; label: string }[] = [
   { key: "general_admin", label: "General Admin" },
   { key: "company_admin", label: "Company Admin" },
   { key: "company_staff", label: "Company Staff" },
+  { key: "bcl_staff", label: "BCL Staff" },
   { key: "officer", label: "Officer" },
   { key: "petty_cash_user", label: "Petty Cash User" },
 ];

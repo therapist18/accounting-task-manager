@@ -150,24 +150,23 @@ export default function TaskBasketPage() {
   }
 
   return (
-    <div className="p-6 h-full flex flex-col bg-[#FAFAFC] overflow-y-auto">
-      <div className="flex items-center justify-between mb-6 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-lg bg-custom-blue flex items-center justify-center">
-            <Inbox className="h-5 w-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-slate-900">Task Basket</h1>
-            <p className="text-xs text-slate-500">
-              Companies past a compliance deadline — Reception's shared open list ({openCount} open)
-            </p>
-          </div>
+    <div className="flex flex-col h-[calc(100vh-4rem)] overflow-hidden bg-slate-50/50">
+      {/* One compact toolbar row (identity + filters + actions), like the Email Center's header rows */}
+      <div className="border-b border-slate-200/80 bg-white px-4 py-2.5 antialiased flex items-center gap-x-3 gap-y-2 flex-wrap shrink-0">
+        <div className="h-9 w-9 rounded-lg bg-custom-blue flex items-center justify-center shrink-0">
+          <Inbox className="h-5 w-5 text-white" />
         </div>
-      </div>
+        <h1 className="text-2xl font-bold text-slate-900 tracking-tight leading-none">Task Basket</h1>
+        <span
+          className="hidden md:inline text-base text-slate-500"
+          title="Companies past a compliance deadline — Reception's shared open list"
+        >
+          {openCount} open
+        </span>
 
-      <div className="flex flex-wrap items-center gap-3 mb-4 shrink-0">
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
         <Select value={moduleFilter} onValueChange={(v) => setModuleFilter(v as TaskBasketModule | "all")}>
-          <SelectTrigger className="w-[220px] h-10 text-base">
+          <SelectTrigger className="w-[220px] h-10 text-base bg-white">
             <SelectValue placeholder="Module" />
           </SelectTrigger>
           <SelectContent>
@@ -179,7 +178,7 @@ export default function TaskBasketPage() {
         </Select>
 
         <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as TaskBasketStatus | "all")}>
-          <SelectTrigger className="w-[160px] h-10 text-base">
+          <SelectTrigger className="w-[160px] h-10 text-base bg-white">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
@@ -224,15 +223,19 @@ export default function TaskBasketPage() {
         >
           {exporting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />} Export
         </Button>
+        </div>
       </div>
 
-      <div className="flex flex-col border border-slate-200 rounded-xl bg-white shadow-sm mb-6">
+      {/* Body — the table owns its scrolling and fills whatever height is left */}
+      <div className="px-3 py-3 flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div className="flex flex-col flex-1 min-h-0 border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden">
         <TaskBasketTable
           items={visibleItems}
           loading={loading}
           onItemResolved={(id) => setItems((prev) => prev.map((i) => (i.id === id ? { ...i, status: "resolved" } : i)))}
           onItemDeleted={(id) => setItems((prev) => prev.filter((i) => i.id !== id))}
         />
+        </div>
       </div>
     </div>
   )

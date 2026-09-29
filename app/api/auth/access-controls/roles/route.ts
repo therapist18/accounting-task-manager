@@ -5,7 +5,7 @@ import { toAuthErrorResponse } from "@/lib/auth/errors";
 import { DEFAULT_ROLE_PERMISSIONS } from "@/lib/auth/permissions";
 import type { ScannerUserRole } from "@/lib/auth/types";
 
-const ALLOWED_ROLES = new Set<ScannerUserRole>(["SuperAdmin", "general_admin", "company_admin", "company_staff", "officer", "petty_cash_user"]);
+const ALLOWED_ROLES = new Set<ScannerUserRole>(["SuperAdmin", "general_admin", "company_admin", "company_staff", "bcl_staff", "officer", "petty_cash_user"]);
 
 export async function GET(request: NextRequest) {
   try {

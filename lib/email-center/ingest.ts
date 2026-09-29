@@ -15,7 +15,7 @@ import { extractWithAi } from "./ai"
 import { CATEGORY_BY_KEY, KRA_JOB_LEVEL, type CategoryDef } from "./categories"
 import { classifyByRules, detectApproval, extractPin, isAutomatedSender, isKraSender } from "./rules"
 import { loadSubjectRules } from "./rule-store"
-import { withSupabaseRetry } from "./retry"
+import { withRetry, withSupabaseRetry } from "./retry"
 import {
   AUTO_CONFIDENCE_THRESHOLD as THRESHOLD,
   type Actor,
@@ -246,14 +246,17 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     .maybeSingle()
   if (existing?.processed_at) return "skipped"
 
-  // 1. Cheap: headers + snippet only.
+  // 1. Cheap: headers + snippet only. withRetry absorbs a transient network blip (heavy concurrent
+  // backfill traffic) before this whole message is given up on.
   const meta = (
-    await gmail.users.messages.get({
-      userId: "me",
-      id: messageId,
-      format: "metadata",
-      metadataHeaders: ["From", "To", "Cc", "Subject", "Date"],
-    })
+    await withRetry(() =>
+      gmail.users.messages.get({
+        userId: "me",
+        id: messageId,
+        format: "metadata",
+        metadataHeaders: ["From", "To", "Cc", "Subject", "Date"],
+      })
+    )
   ).data
   const labels = meta.labelIds ?? []
   if (labels.some((l) => ["DRAFT", "SPAM", "TRASH"].includes(l))) return "skipped"
@@ -313,7 +316,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   // 3. Full fetch — KRA mail, our replies in a case, and unknown senders needing review.
   const needsFull = (direction === "outbound" || kra) && !ruleIgnore
   const payload = needsFull
-    ? (await gmail.users.messages.get({ userId: "me", id: messageId, format: "full" })).data.payload
+    ? (await withRetry(() => gmail.users.messages.get({ userId: "me", id: messageId, format: "full" }))).data.payload
     : undefined
   const body = needsFull ? extractBody(payload) : ""
   const text = body || snippet
@@ -329,7 +332,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     let status: "pending" | "skipped" | "failed" = "skipped"
     if (att.size <= MAX_ATTACHMENT_BYTES) {
       try {
-        const res = await gmail.users.messages.attachments.get({ userId: "me", messageId, id: att.attachmentId })
+        const res = await withRetry(() => gmail.users.messages.attachments.get({ userId: "me", messageId, id: att.attachmentId }))
         const buf = decodeB64(res.data.data ?? "")
         storagePath = `${account.id}/${messageId}/${safeName(att.filename)}`
         // withSupabaseRetry absorbs a transient network blip before this attachment is given up on —
@@ -726,34 +729,60 @@ export interface SyncResult {
 // whatever's already claimed always finishes — and whatever was never claimed comes back as
 // `remaining`; undefined means no cutoff (the regular sync path, already capped at
 // MAX_MESSAGES_PER_SYNC ids so it doesn't need one).
+//
+// A message that throws gets ONE extra full attempt (a second `pass`) before it's finally counted as
+// failed — on top of the retries already inside ingestMessage itself (Supabase + Gmail, via
+// lib/email-center/retry.ts). A transient blip under heavy concurrent backfill traffic is exactly the
+// kind of thing that clears up a few seconds later; this catches whatever slips past the per-call
+// retries (a different transient error each time, or one that needed a bit more time to recover).
 async function ingestConcurrently(
   ctx: Ctx,
   ids: string[],
   budgetMs?: number
 ): Promise<{ ingested: number; skipped: number; failed: number; errors: string[]; remaining: string[] }> {
-  const out = { ingested: 0, skipped: 0, failed: 0, errors: [] as string[], remaining: [] as string[] }
   const started = Date.now()
-  let next = 0
+  let ingested = 0
+  let skipped = 0
+  const errorById = new Map<string, string>()
 
-  const worker = async () => {
-    for (;;) {
-      if (budgetMs !== undefined && Date.now() - started > budgetMs) return
-      const i = next++
-      if (i >= ids.length) return
-      try {
-        const r = await ingestMessage(ctx, ids[i])
-        if (r === "ingested") out.ingested++
-        else out.skipped++
-      } catch (err: any) {
-        out.failed++
-        out.errors.push(`${ids[i]}: ${err?.message ?? err}`)
-        console.error("[email-center] ingest failed", ctx.account.email, ids[i], err)
+  // One pass over `idList`: attempts each id once. Returns ids that threw (candidates for the next
+  // pass) separately from ids never claimed at all because budgetMs ran out (those come back as
+  // `remaining` untouched, for a later server call — never silently retried here).
+  const pass = async (idList: string[]): Promise<{ failed: string[]; unclaimed: string[] }> => {
+    let next = 0
+    const failed: string[] = []
+    const worker = async () => {
+      for (;;) {
+        if (budgetMs !== undefined && Date.now() - started > budgetMs) return
+        const i = next++
+        if (i >= idList.length) return
+        const id = idList[i]
+        try {
+          const r = await ingestMessage(ctx, id)
+          if (r === "ingested") ingested++
+          else skipped++
+          errorById.delete(id) // succeeded on the retry pass — drop the first attempt's failure note
+        } catch (err: any) {
+          failed.push(id)
+          errorById.set(id, err?.message ?? String(err))
+          console.error("[email-center] ingest failed", ctx.account.email, id, err)
+        }
       }
     }
+    await Promise.all(Array.from({ length: Math.min(INGEST_CONCURRENCY, idList.length) }, worker))
+    return { failed, unclaimed: idList.slice(next) }
   }
-  await Promise.all(Array.from({ length: Math.min(INGEST_CONCURRENCY, ids.length) }, worker))
-  out.remaining = ids.slice(next) // never claimed — everything from here on is untouched
-  return out
+
+  const first = await pass(ids)
+  const second = first.failed.length ? await pass(first.failed) : { failed: [] as string[], unclaimed: [] as string[] }
+
+  return {
+    ingested,
+    skipped,
+    failed: second.failed.length,
+    errors: [...errorById.values()].slice(0, 20), // capped — a bad batch shouldn't return hundreds of lines
+    remaining: [...first.unclaimed, ...second.unclaimed],
+  }
 }
 
 async function runPass(sb: SupabaseClient, account: AccountRow, result: SyncResult, max: number) {
@@ -894,7 +923,11 @@ const MAX_LIST_PAGES = 60
 export const BACKFILL_BATCH = 40
 
 async function loadActiveAccount(sb: SupabaseClient, accountId: string): Promise<AccountRow> {
-  const { data: account } = await sb.from("email_accounts").select("*").eq("id", accountId).maybeSingle()
+  // The error was previously ignored here, so a transient network failure (the account row couldn't be
+  // read, not that it doesn't exist) surfaced as the misleading "Mailbox not found." — withSupabaseRetry
+  // absorbs the transient case; a real lookup failure now says so accurately instead of guessing.
+  const { data: account, error } = await withSupabaseRetry(() => sb.from("email_accounts").select("*").eq("id", accountId).maybeSingle())
+  if (error) throw new Error(`Could not load mailbox: ${error.message}`)
   if (!account) throw new Error("Mailbox not found.")
   if (account.status !== "active" || !account.refresh_token) throw new Error(`${account.email} isn't connected — reconnect it first.`)
   return account as AccountRow

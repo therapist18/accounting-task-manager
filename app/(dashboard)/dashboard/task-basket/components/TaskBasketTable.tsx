@@ -174,13 +174,13 @@ export default function TaskBasketTable({
 
   return (
     <>
-      <div>
+      <div className="flex flex-col flex-1 min-h-0">
         {!loading && !items.length ? (
           <div className="py-16 text-center text-sm text-slate-400">
             Nothing here — every company is compliant for this filter.
           </div>
         ) : (
-          <div className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
+          <div className="overflow-hidden flex flex-col flex-1 min-h-0">
             <div className="overflow-auto flex-1 min-h-0 custom-scrollbar">
               <table className="w-full min-w-[1420px] border-separate border-spacing-0 text-base">
                 <thead className="sticky top-0 z-30 bg-white shadow-xs">
