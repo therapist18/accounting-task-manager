@@ -2,7 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const LOG_DIR = fileURLToPath(new URL("../logs/", import.meta.url));
+// The desktop shell passes its userData path down so logs live in the user's
+// profile rather than inside the install directory, which is wiped on every
+// upgrade and is read-only under a per-machine install. Dev has no shell to
+// supply one, so fall back to the module-relative directory.
+const LOG_DIR =
+  process.env.AUTOMATION_LOG_DIR || fileURLToPath(new URL("../logs/", import.meta.url));
 const MAX_LOG_BYTES = 2 * 1024 * 1024;
 
 function writeToFile(level, message) {

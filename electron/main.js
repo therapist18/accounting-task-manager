@@ -332,9 +332,13 @@ function spawnAutomationServer(port) {
     throw new Error(`Automation server not found at ${serverPath}`);
   }
 
-  const env = childEnvironment({ PORT: String(port) });
+  // The automation logger defaults to a directory beside its own module, which
+  // in a packaged app is the install folder. Point it at userData so run logs
+  // survive upgrades and stay writable under a per-machine install.
+  const userDataLogDir = logFilePath ? path.dirname(logFilePath) : path.join(app.getPath("userData"), "logs");
+  const env = childEnvironment({ PORT: String(port), AUTOMATION_LOG_DIR: userDataLogDir });
 
-  appendLog(`Starting automation server on port ${port}`);
+  appendLog(`Starting automation server on port ${port} (logs: ${userDataLogDir})`);
 
   const child = fork(serverPath, [], {
     env,
