@@ -3,8 +3,8 @@ import type { Actor } from "@/lib/email-center/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { authorize, fail } from "@/lib/email-center/api"
 import { CATEGORY_BY_KEY } from "@/lib/email-center/categories"
-import { findOpenCaseByPin, openCaseFromEmail } from "@/lib/email-center/ingest"
-import { classifyByRules, isAutomatedSender, type SubjectRule } from "@/lib/email-center/rules"
+import { APPROVAL_DECISION_CATEGORIES, findCaseByThread, findOpenCaseByPin, openCaseFromEmail, toNairobiYmd } from "@/lib/email-center/ingest"
+import { classifyByRules, detectApproval, isAutomatedSender, type SubjectRule } from "@/lib/email-center/rules"
 import { loadSubjectRules } from "@/lib/email-center/rule-store"
 import { AUTO_CONFIDENCE_THRESHOLD as THRESHOLD } from "@/lib/email-center/types"
 import { withSupabaseRetry } from "@/lib/supabaseRetry"
@@ -14,13 +14,18 @@ import { withSupabaseRetry } from "@/lib/supabaseRetry"
 // emails were ingested can still take effect on them. The client lists the affected emails once, then
 // reclassifies them in batches and reports progress (the same shape as sync/backfill).
 //
-//   { action: "list" }           -> { ids, total }              emails currently in Needs Review
-//   { action: "run", ids: [] }   -> { processed, changed, cases_opened, failed, moved }
+//   { action: "list", since?, until? }  -> { ids, total }        emails currently in Needs Review
+//                                                                 (optionally only those received in
+//                                                                 the given date range, "YYYY-MM-DD")
+//   { action: "run", ids: [] }         -> { processed, changed, deleted, cases_opened, failed, moved }
 //
 // Emails a rule now matches confidently are reclassified exactly as ingestion would have classified
-// them (category, disposition, case opened when the category opens one, ignored for a confident
-// ignore-rule match, or flagged urgent as an important notification); everything a rule still doesn't
-// match stays in Needs Review.
+// them (category, disposition, case opened or attached to via the same thread/PIN lookups ingestion
+// uses, approval detected on an extension/objection response, deleted outright for a confident
+// hard-ignore match — it would never have been stored in the first place — soft-ignored for a plain
+// ignore match, or flagged urgent as an important notification); everything a rule still doesn't match
+// stays in Needs Review. The one gap: reclassify works from the stored snippet only (no Gmail re-fetch,
+// no AI), so AI-extracted fields and full-body approval detection aren't reproduced here.
 
 // Same reasoning as the emails list route's own cap: this used to silently ignore any Needs Review
 // backlog beyond the oldest 1,000, which — at the volumes a first-time full-mailbox backfill leaves
@@ -30,10 +35,12 @@ import { withSupabaseRetry } from "@/lib/supabaseRetry"
 const LIST_MAX = 20000
 const RUN_MAX = 100
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const YMD = /^\d{4}-\d{2}-\d{2}$/
 
 interface ReclassifyResult {
   processed: number
   changed: number
+  deleted: number
   casesOpened: number
   failed: number
   moved: Array<{ id: string; subject: string; category: string | null; disposition: string; case_opened: boolean }>
@@ -47,6 +54,7 @@ async function reclassifyEmails(
 ): Promise<ReclassifyResult> {
   let processed = 0
   let changed = 0
+  let deleted = 0
   let casesOpened = 0
   let failed = 0
   const moved: ReclassifyResult["moved"] = []
@@ -94,9 +102,22 @@ async function reclassifyEmails(
       })
       if (!rule || rule.confidence < THRESHOLD) continue // stays in Needs Review
 
-      // A confident ignore match: had the rule existed when the mail arrived it would never have
-      // been stored. It is stored, so surface it as ignored — it leaves Needs Review either way.
+      // A confident ignore match: had the rule existed when the mail arrived, a hard-ignore rule would
+      // have dropped it before it was ever stored — so delete it now, the same as ingestion would have
+      // skipped it. A plain (soft) ignore rule would still have stored it under Ignored, so it just
+      // moves there instead.
       if (rule.action === "ignore") {
+        if (rule.hardIgnore) {
+          const paths = (Array.isArray(e.attachments) ? e.attachments : [])
+            .map((a: any) => a?.storage_path)
+            .filter(Boolean)
+          if (paths.length) await sb.storage.from("email-attachments").remove(paths)
+          const { error: delErr } = await withSupabaseRetry(() => sb.from("emails").delete().eq("id", e.id))
+          if (delErr) throw new Error(delErr.message)
+          deleted++
+          moved.push({ id: e.id, subject: e.subject, category: null, disposition: "deleted", case_opened: false })
+          continue
+        }
         const { error: upErr } = await withSupabaseRetry(() =>
           sb
             .from("emails")
@@ -146,38 +167,72 @@ async function reclassifyEmails(
       const cat = rule.categoryKey ? CATEGORY_BY_KEY.get(rule.categoryKey) : null
       if (!cat || cat.disposition === "needs_review") continue
 
-      let disposition = cat.disposition
+      let disposition: string = cat.disposition
       let caseId: string | null = e.case_id
       let caseOpened = false
+      let reviewReason: string | null = null
 
-      if (disposition === "action_required" && !e.case_id && cat.creates_case) {
-        const { caseRow } = await openCaseFromEmail(
-          sb,
-          {
-            gmail_message_id: e.gmail_message_id,
-            gmail_thread_id: e.gmail_thread_id,
-            company_id: e.company_id,
-            subject: e.subject,
-            sender_email: e.sender_email,
-            cc_addresses: e.cc_addresses,
-            received_at: e.received_at,
-            kra_pin: e.kra_pin,
-            extracted: e.extracted,
-            snippet: e.snippet ?? "",
-            attachment_names: (Array.isArray(e.attachments) ? e.attachments : []).map((a: any) => a.filename),
-          },
-          cat,
-          actor
-        )
-        caseId = caseRow.id
-        caseOpened = true
-        casesOpened++
-      } else if (disposition === "update_only" && cat.attaches_to_case && !e.case_id) {
-        // An update that belongs to a case still needs a case to attach to; without one it stays in
-        // Needs Review, exactly as ingestion would leave it.
-        const target = await findOpenCaseByPin(sb, e.kra_pin, e.company_id)
-        if (!target) continue
-        caseId = target.id
+      // Same thread-first lookup ingestion uses: a mail that's part of an already-cased thread attaches
+      // to that case instead of ever opening (or being left to open) a duplicate.
+      const threadCase = await findCaseByThread(sb, e.gmail_thread_id)
+
+      if (disposition === "action_required") {
+        if (threadCase) {
+          caseId = threadCase.id
+          if (threadCase.status === "closed") {
+            await withSupabaseRetry(() =>
+              sb.from("email_case").update({ status: "open", completed_by_id: null, completed_at: null, updated_at: now }).eq("id", threadCase.id)
+            )
+          }
+        } else if (!e.case_id && cat.creates_case) {
+          const { caseRow } = await openCaseFromEmail(
+            sb,
+            {
+              gmail_message_id: e.gmail_message_id,
+              gmail_thread_id: e.gmail_thread_id,
+              company_id: e.company_id,
+              subject: e.subject,
+              sender_email: e.sender_email,
+              cc_addresses: e.cc_addresses,
+              received_at: e.received_at,
+              kra_pin: e.kra_pin,
+              extracted: e.extracted,
+              snippet: e.snippet ?? "",
+              attachment_names: (Array.isArray(e.attachments) ? e.attachments : []).map((a: any) => a.filename),
+            },
+            cat,
+            actor
+          )
+          caseId = caseRow.id
+          caseOpened = true
+          casesOpened++
+        }
+      } else if (disposition === "update_only") {
+        const target = e.case_id ? null : threadCase ?? (cat.attaches_to_case ? await findOpenCaseByPin(sb, e.kra_pin, e.company_id) : null)
+        if (target) caseId = target.id
+
+        if (APPROVAL_DECISION_CATEGORIES.has(cat.key)) {
+          // Reclassify only ever has the stored snippet to work with (no Gmail re-fetch, no AI budget
+          // for this operation), so approval detection here is a best effort compared to ingestion's.
+          const approval = detectApproval(e.snippet ?? "")
+          if (!caseId) {
+            disposition = "needs_review"
+            reviewReason = "No related case found for this KRA response."
+          } else if (!approval) {
+            disposition = "needs_review"
+            reviewReason = "Could not tell whether KRA approved or declined."
+          } else {
+            await withSupabaseRetry(() =>
+              sb
+                .from("email_case")
+                .update({ approval_status: approval, approval_date: toNairobiYmd(e.received_at), updated_at: now })
+                .eq("id", caseId as string)
+            )
+          }
+        } else if (!caseId && cat.attaches_to_case) {
+          disposition = "needs_review"
+          reviewReason = "No related case found."
+        }
       }
 
       const { error: upErr } = await withSupabaseRetry(() =>
@@ -189,7 +244,7 @@ async function reclassifyEmails(
             classification_source: "rule",
             disposition,
             case_id: caseId,
-            review_reason: null,
+            review_reason: reviewReason,
             classified_at: now,
             updated_at: now,
           })
@@ -204,13 +259,13 @@ async function reclassifyEmails(
     }
   }
 
-  return { processed, changed, casesOpened, failed, moved }
+  return { processed, changed, deleted, casesOpened, failed, moved }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const { sb, actor } = await authorize(request)
-    const body = (await request.json().catch(() => ({}))) as { action?: string; ids?: unknown }
+    const body = (await request.json().catch(() => ({}))) as { action?: string; ids?: unknown; since?: string; until?: string }
 
     if (body.action === "run") {
       const ids = Array.isArray(body.ids) ? body.ids.filter((x): x is string => typeof x === "string" && UUID.test(x)) : []
@@ -218,18 +273,39 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: `Send between 1 and ${RUN_MAX} email ids.` }, { status: 400 })
       }
       const rules = await loadSubjectRules(sb)
-      const { data: rows, error } = await withSupabaseRetry(() =>
+      const { data: rows, error } = await withSupabaseRetry<any>(() =>
         sb.from("emails").select("*").in("id", ids).eq("disposition", "needs_review")
       )
       if (error) throw new Error(error.message)
-      const { processed, changed, casesOpened, failed, moved } = await reclassifyEmails(sb, actor, rules, rows ?? [])
-      return NextResponse.json({ success: true, processed, changed, cases_opened: casesOpened, failed, moved })
+      const { processed, changed, deleted, casesOpened, failed, moved } = await reclassifyEmails(sb, actor, rules, rows ?? [])
+      return NextResponse.json({ success: true, processed, changed, deleted, cases_opened: casesOpened, failed, moved })
     }
 
-    // Default action: list the emails currently waiting in Needs Review (oldest first).
-    const { data, error } = await withSupabaseRetry(() =>
-      sb.from("emails").select("id").eq("disposition", "needs_review").order("received_at", { ascending: true }).limit(LIST_MAX)
-    )
+    // Default action: list the emails currently waiting in Needs Review (oldest first), optionally
+    // narrowed to a received-date range — lets a big backlog be worked through in smaller, faster
+    // chunks (e.g. "just last week") instead of always pulling in the entire thing.
+    let since: string | undefined
+    let until: string | undefined
+    if (body.since) {
+      if (!YMD.test(body.since)) return NextResponse.json({ success: false, error: "Choose a valid start date." }, { status: 400 })
+      since = body.since
+    }
+    if (body.until) {
+      if (!YMD.test(body.until)) return NextResponse.json({ success: false, error: "Choose a valid end date." }, { status: 400 })
+      if (since && body.until < since) return NextResponse.json({ success: false, error: "The end date can't be before the start date." }, { status: 400 })
+      until = body.until
+    }
+    const list = () => {
+      let q = sb.from("emails").select("id").eq("disposition", "needs_review").order("received_at", { ascending: true }).limit(LIST_MAX)
+      if (since) q = q.gte("received_at", `${since}T00:00:00.000Z`)
+      if (until) {
+        const end = new Date(`${until}T00:00:00.000Z`)
+        end.setUTCDate(end.getUTCDate() + 1) // "until" is inclusive of that whole day
+        q = q.lt("received_at", end.toISOString())
+      }
+      return q
+    }
+    const { data, error } = await withSupabaseRetry<any>(list)
     if (error) throw new Error(error.message)
     const ids = (data ?? []).map((r: any) => r.id)
     return NextResponse.json({ success: true, ids, total: ids.length })

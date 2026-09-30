@@ -59,8 +59,8 @@ interface ColDef {
 const COLUMNS: ColDef[] = [
   { id: "kra_email_from", label: "KRA email from", band: "from", tdClassName: "min-w-[190px] break-all text-sm text-slate-600", sortValue: (r) => r.case.kra_email_from ?? "", renderCell: (c) => c.kra_email_from },
   { id: "kra_email_cc", label: "KRA email CC to", band: "from", tdClassName: "min-w-[190px] break-all text-sm text-slate-500", sortValue: (r) => r.case.kra_email_cc ?? "", renderCell: (c) => c.kra_email_cc || "—" },
-  { id: "email_date", label: "Email date", band: "from", tdClassName: "whitespace-nowrap tabular-nums", sortValue: (r) => r.case.email_date ?? "", renderCell: (c) => fmtDate(c.email_date) },
-  { id: "deadline_date", label: "Deadline date (KRA)", band: "from", tdClassName: "whitespace-nowrap font-semibold tabular-nums", sortValue: (r) => r.case.deadline_date ?? "", renderCell: (c) => fmtDate(c.deadline_date) || <span className="text-slate-300 font-normal">—</span> },
+  { id: "email_date", label: "Email date", band: "from", tdClassName: "whitespace-nowrap tabular-nums", sortValue: (r) => r.case.email_date ?? "", filterValue: (r) => fmtDate(r.case.email_date), renderCell: (c) => fmtDate(c.email_date) },
+  { id: "deadline_date", label: "Deadline date (KRA)", band: "from", tdClassName: "whitespace-nowrap font-semibold tabular-nums", sortValue: (r) => r.case.deadline_date ?? "", filterValue: (r) => fmtDate(r.case.deadline_date), renderCell: (c) => fmtDate(c.deadline_date) || <span className="text-slate-300 font-normal">—</span> },
   { id: "subject", label: "Subject", band: "from", tdClassName: "min-w-[260px]", sortValue: (r) => r.case.subject ?? "", renderCell: (c) => <span className="line-clamp-2 leading-snug font-medium text-slate-900" title={c.subject ?? ""}>{c.subject}</span> },
   { id: "contents", label: "Contents (details)", band: "from", tdClassName: "min-w-[280px]", sortValue: (r) => r.case.contents ?? "", renderCell: (c) => <span className="line-clamp-2 leading-snug text-slate-600" title={c.contents ?? ""}>{c.contents}</span> },
   { id: "attachments_summary", label: "Attached (PDF/Excel)", band: "from", tdClassName: "min-w-[130px] text-sm text-slate-600", sortValue: (r) => r.case.attachments_summary ?? "", renderCell: (c) => c.attachments_summary || <span className="text-slate-300">—</span> },
@@ -69,10 +69,10 @@ const COLUMNS: ColDef[] = [
   { id: "days_given", label: "Days given to respond", band: "from", tdClassName: "text-center tabular-nums font-medium text-slate-700", sortValue: (r) => r.metrics.daysGiven ?? -Infinity, renderCell: (_c, m) => m.daysGiven ?? "—" },
   { id: "days_since", label: "Days: email → today", band: "from", tdClassName: "text-center tabular-nums font-medium text-slate-700", sortValue: (r) => r.metrics.daysSince ?? -Infinity, renderCell: (_c, m) => m.daysSince ?? "—" },
 
-  { id: "respond_date", label: "Respond date", band: "respond", tdClassName: "whitespace-nowrap tabular-nums", sortValue: (r) => r.case.respond_date ?? "", renderCell: (c) => fmtDate(c.respond_date) || "—" },
+  { id: "respond_date", label: "Respond date", band: "respond", tdClassName: "whitespace-nowrap tabular-nums", sortValue: (r) => r.case.respond_date ?? "", filterValue: (r) => fmtDate(r.case.respond_date), renderCell: (c) => fmtDate(c.respond_date) || "—" },
   { id: "responded_by_name", label: "Responded by name", band: "respond", tdClassName: "text-slate-700", sortValue: (r) => r.case.responded_by_name ?? "", renderCell: (c) => (c.respond_date ? c.responded_by_name ?? "BCL" : "—") },
   { id: "respond_contents", label: "Respond contents", band: "respond", tdClassName: "min-w-[280px]", sortValue: (r) => r.case.respond_contents ?? "", renderCell: (c) => <span className="line-clamp-2 leading-snug text-slate-600" title={c.respond_contents ?? ""}>{c.respond_contents || "—"}</span> },
-  { id: "promised_date", label: "Promised time date", band: "respond", tdClassName: "whitespace-nowrap tabular-nums", sortValue: (r) => r.case.promised_date ?? "", renderCell: (c) => fmtDate(c.promised_date) || "—" },
+  { id: "promised_date", label: "Promised time date", band: "respond", tdClassName: "whitespace-nowrap tabular-nums", sortValue: (r) => r.case.promised_date ?? "", filterValue: (r) => fmtDate(r.case.promised_date), renderCell: (c) => fmtDate(c.promised_date) || "—" },
   {
     id: "days_remaining", label: "Days remaining", band: "respond", sortValue: (r) => r.metrics.daysRemaining ?? Infinity,
     tdClassName: "text-center font-bold tabular-nums",
@@ -116,7 +116,7 @@ const COLUMNS: ColDef[] = [
 export const TOGGLEABLE_COLUMNS = COLUMNS.map((c) => ({ id: c.id, label: c.label }))
 
 export function CasesTable({
-  cases, onOpen, showTime, embedded = false, loading = false, showStats = false, visibleColumns: visibility,
+  cases, onOpen, showTime, embedded = false, loading = false, showStats = false, visibleColumns: visibility, selection,
 }: {
   cases: CaseRow[]
   onOpen: (c: CaseRow) => void
@@ -127,6 +127,9 @@ export function CasesTable({
   // list tab's table keeps those controls in one place instead of each growing its own.
   showStats?: boolean
   visibleColumns?: Record<string, boolean>
+  // Row checkboxes (the rule-grouped panels). The header checkbox covers every row in `cases`, not
+  // just the current page.
+  selection?: { selected: Set<string>; onToggle: (id: string) => void; onToggleAll: (ids: string[], on: boolean) => void }
 }) {
   const today = todayYmd()
   const [itemsPerPage, setItemsPerPage] = useState(50)
@@ -167,15 +170,22 @@ export function CasesTable({
     tracking: visibleColumns.filter((c) => c.band === "tracking"),
   }
   const colCount = 2 + visibleColumns.length
+  // The row checkbox lives in the sticky "#" column, which widens to make room — so the Client column
+  // that sticks beside it has to move over by the same amount (mirrors EmailsTable's numWidth pattern).
+  const numWidth = selection ? "w-24 min-w-[6rem] max-w-[6rem]" : "w-16"
+  const clientLeft = selection ? "left-24" : "left-16"
+  const allSelected = !!selection && cases.length > 0 && cases.every((c) => selection.selected.has(c.id))
+  const someSelected = !!selection && !allSelected && cases.some((c) => selection.selected.has(c.id))
 
   const statsRowColumns = useMemo(() => {
     const cols: { id: string; getValue?: (r: Row) => string; className?: string }[] = [
-      { id: "#", className: "sticky left-0 z-40 text-center" },
-      { id: "client", getValue: (r) => r.case.company_name ?? "", className: "sticky left-16 z-40 border-r-2" },
+      { id: "#", className: cn(numWidth, "sticky left-0 z-40 text-center") },
+      { id: "client", getValue: (r) => r.case.company_name ?? "", className: cn("sticky z-40 border-r-2", clientLeft) },
     ]
     visibleColumns.forEach((c) => cols.push({ id: c.id, getValue: (r) => String(c.filterValue ? c.filterValue(r) : c.sortValue(r)) }))
     return cols
-  }, [visibleColumns])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleColumns, numWidth, clientLeft])
 
   return (
     <div className={cn("flex flex-col flex-1 min-h-0 bg-white overflow-hidden", !embedded && "rounded-xl border border-slate-200 shadow-sm")}>
@@ -191,8 +201,20 @@ export function CasesTable({
         <table className="min-w-[2300px] w-full border-separate border-spacing-0 text-base">
           <thead className="sticky top-0 z-30 bg-white shadow-xs">
             <tr>
-              <SortTh tone="blue" id="#" rowSpan={2} levels={levels} onSort={handleSort} className="w-16 sticky left-0 z-40 text-center">#</SortTh>
-              <SortTh id="client" rowSpan={2} levels={levels} onSort={handleSort} className="min-w-[220px] sticky left-16 z-40 text-left bg-[#376bae] hover:bg-[#376bae]/90 text-white border-white/20 border-r-2">
+              <SortTh tone="blue" id="#" rowSpan={2} levels={levels} onSort={handleSort} className={cn(numWidth, "sticky left-0 z-40 text-center")}>
+                {selection ? (
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={(el) => { if (el) el.indeterminate = someSelected }}
+                    onClick={(ev) => ev.stopPropagation()}
+                    onChange={(ev) => selection.onToggleAll(cases.map((c) => c.id), ev.target.checked)}
+                    title={allSelected ? "Clear selection" : `Select all ${cases.length}`}
+                    className="h-4 w-4 align-middle accent-white cursor-pointer"
+                  />
+                ) : "#"}
+              </SortTh>
+              <SortTh id="client" rowSpan={2} levels={levels} onSort={handleSort} className={cn("min-w-[220px] sticky z-40 text-left bg-[#376bae] hover:bg-[#376bae]/90 text-white border-white/20 border-r-2", clientLeft)}>
                 Client / Ref
               </SortTh>
               {(["from", "respond", "tracking"] as Band[]).map((band) =>
@@ -230,10 +252,20 @@ export function CasesTable({
                   onClick={() => onOpen(c)}
                   className={cn("cursor-pointer transition-colors group", rowClass)}
                 >
-                  <td className={cn(td, "sticky left-0 z-20 bg-inherit text-center text-slate-400 font-medium tabular-nums border-r border-slate-200")}>
-                    {start + index + 1}
+                  <td className={cn(td, numWidth, "sticky left-0 z-20 bg-inherit text-center text-slate-400 font-medium tabular-nums border-r border-slate-200")}>
+                    {selection ? (
+                      <div className="flex items-center justify-center gap-2" onClick={(ev) => ev.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selection.selected.has(c.id)}
+                          onChange={() => selection.onToggle(c.id)}
+                          className="h-4 w-4 accent-custom-blue cursor-pointer"
+                        />
+                        <span>{start + index + 1}</span>
+                      </div>
+                    ) : start + index + 1}
                   </td>
-                  <td className={cn(td, "sticky left-16 z-20 bg-inherit font-semibold text-slate-900 border-r-2 border-slate-300")}>
+                  <td className={cn(td, "sticky z-20 bg-inherit font-semibold text-slate-900 border-r-2 border-slate-300", clientLeft)}>
                     <div className="leading-snug text-slate-900 font-semibold">{c.company_name ?? <span className="text-red-500 font-normal">Unassigned company</span>}</div>
                     <div className="text-sm font-normal text-slate-500 mt-1">
                       {c.case_ref}{c.kra_pin ? ` · ${c.kra_pin}` : ""}

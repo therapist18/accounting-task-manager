@@ -17,15 +17,27 @@
 -- 4. return_ack's primary pattern was the bare regex `acknowledg(e)?ment`, matching ANY subject
 --    containing the word — which is what let "Acknowledgement of Objection Application" (and
 --    potentially other matter-specific acknowledgements) get swept into a generic no-task bucket
---    ahead of a more specific rule. Removed outright (not just reprioritized): the specific wordings
---    already on this rule (successfully filed, payment receipt, customs entry confirmations) still
---    cover the common cases; anything else now surfaces in Needs Review instead of being silently
---    misclassified.
+--    ahead of a more specific rule. Removed (not just reprioritized) — BUT replaced with explicit,
+--    safe wordings for the actual high-volume acknowledgement types found by querying the real mail
+--    history (see conversation), because the bare pattern turned out to be the ONLY thing matching by
+--    far the single largest category of KRA mail: routine VAT/PAYE/Company return acknowledgements
+--    (thousands of rows). Losing that pattern without replacing it would have dumped all of them into
+--    Needs Review. The new wordings are specific enough to never match "Acknowledgement of Objection
+--    Application" or "...of Appeal" (neither contains "return", "amendment", "transaction" or
+--    "payment transfer"), so the original collision this migration set out to fix is still fixed.
 --
 -- 5. New: an objection acknowledgement (KRA's receipt confirming an objection was filed, carrying its
 --    reference number) attaches to the objection's case instead of falling into return_ack or being
 --    mistaken for the objection filing itself. Sort order 105 — below "objection" (110), since its
 --    wording also contains "objection application" and would otherwise be caught by that rule first.
+--
+-- 6. demand_penalty gets two more real-world wordings found the same way: "return defaulter" (seen
+--    without the word "payment" in front, so the existing "payment defaulter" wording missed it) and
+--    "inconsistency notice" (a recurring monthly VAT notice with no rule at all before this).
+--
+-- 7. certificate gets "tax amnesty certificate" — a genuine document sent from admin.itax2@kra.go.ke
+--    (209+ occurrences), distinct from the unrelated tax-amnesty AWARENESS marketing blasts (those come
+--    from kenyarevenueauthority@kra.go.ke, already ignored by sender). Nothing matched this before.
 
 UPDATE email_classification_rules
 SET extra_patterns = '{}', updated_at = now()
@@ -36,11 +48,26 @@ SET pattern = 'successfully (received|filed|submitted)',
     extra_patterns = ARRAY[
       'return (received|filed)', 'payment (receipt|confirmation)',
       'payment against payment registration', 'successful completion of payment registration',
-      'accepted customs entry', 'released customs entry'
+      'accepted customs entry', 'released customs entry',
+      'acknowledgement of .*(value added tax|income tax|paye|company) return',
+      'acknowledgement of .*amendment',
+      'acknowledgement for transactions declared',
+      'acknowledgement for payment transfer',
+      'reprint pin certificate'
     ],
-    notes = 'Routine PRN payment and customs clearance confirmations, none of which need a task — no longer matches on the bare word "acknowledgement" alone (see 20261009000000)',
+    notes = 'Routine return/PRN/amendment acknowledgements and customs clearance confirmations, none of which need a task — no longer matches on the bare word "acknowledgement" alone (see 20261009000000)',
     updated_at = now()
 WHERE id = '41d3bf68-a615-48ed-835e-7cbc864de844';
+
+UPDATE email_classification_rules
+SET extra_patterns = extra_patterns || ARRAY['return defaulter', 'inconsistency notice']
+WHERE id = 'a45dfea4-65a2-4ea5-b6a2-4c6b4af69f21'
+  AND NOT ('return defaulter' = ANY(extra_patterns));
+
+UPDATE email_classification_rules
+SET extra_patterns = extra_patterns || ARRAY['tax amnesty certificate']
+WHERE id = 'e79e2959-7b56-464b-89a7-2049c0190e76'
+  AND NOT ('tax amnesty certificate' = ANY(extra_patterns));
 
 INSERT INTO email_classification_rules
   (match_type, pattern, extra_patterns, category_key, confidence, sort_order, is_ignore, is_notify, sender_pattern, sender_match_type, notify_priority, notes)

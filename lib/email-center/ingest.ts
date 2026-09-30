@@ -26,7 +26,7 @@ import {
 const BACKFILL_DAYS = 14
 // update_only categories whose case-attaching step also reads an approved/rejected outcome off the
 // body (extension-of-time requests, and objection decisions — same shape, different KRA matter).
-const APPROVAL_DECISION_CATEGORIES = new Set(["extension_response", "objection_decision"])
+export const APPROVAL_DECISION_CATEGORIES = new Set(["extension_response", "objection_decision"])
 const MAX_MESSAGES_PER_SYNC = 40
 const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
 const LOCK_MS = 90_000
@@ -140,7 +140,7 @@ async function matchCompanyByPin(sb: SupabaseClient, pin: string | null): Promis
   return data && data.length === 1 ? String(data[0].id) : null
 }
 
-async function findCaseByThread(sb: SupabaseClient, threadId: string | null | undefined) {
+export async function findCaseByThread(sb: SupabaseClient, threadId: string | null | undefined) {
   if (!threadId) return null
   const { data } = await sb.from("email_case").select("*").eq("gmail_thread_id", threadId).maybeSingle()
   return data

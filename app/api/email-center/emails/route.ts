@@ -62,9 +62,12 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// DELETE /api/email-center/emails — remove ignored emails from the app (they stay in Gmail).
-// Body: { ids: string[] }. Only rows currently marked Ignored are deleted, so a stale selection can
-// never remove something that has since been reclassified into a case or the review queue.
+// DELETE /api/email-center/emails — remove emails from the app (they stay in Gmail).
+// Body: { ids: string[] }. Only Ignored, Notifications (needs_review + category "notification") and
+// Update-only rows with no case attached are deleted — a stale selection can never remove something
+// that has since been reclassified into a case, or mail that's actually attached to one (an
+// extension-of-time reply, an objection decision) even if its disposition happens to be update_only;
+// that kind of mail should only ever go away via deleting the case itself.
 export async function DELETE(request: NextRequest) {
   try {
     const { sb } = await authorize(request)
@@ -76,7 +79,8 @@ export async function DELETE(request: NextRequest) {
       .from("emails")
       .select("id, attachments")
       .in("id", list)
-      .eq("disposition", "ignore")
+      .is("case_id", null)
+      .or("disposition.eq.ignore,disposition.eq.update_only,and(disposition.eq.needs_review,category_key.eq.notification)")
     if (readErr) throw new Error(readErr.message)
     const targets = rows ?? []
     if (!targets.length) return NextResponse.json({ success: true, deleted: 0, ids: [] })

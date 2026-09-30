@@ -92,6 +92,7 @@ export function EmailsTable({
     company: (e) => e.company_name ?? "Unassigned company",
     category: categoryName,
     status: statusLabel,
+    received: (e) => fmtDateTime(e.received_at, showTime),
   }
   const { filtered, configFor, activeCount: activeFilterCount, clearAll: clearAllFilters } = useColumnFilters(emails, FILTER_VALUE)
 
@@ -164,7 +165,7 @@ export function EmailsTable({
               {isVisible("from") && <SortTh tone="blue" id="from" levels={levels} onSort={toggle} className="min-w-[200px]">From</SortTh>}
               {isVisible("subject") && <SortTh tone="blue" id="subject" levels={levels} onSort={toggle} className="min-w-[280px]">Subject</SortTh>}
               {isVisible("summary") && <SortTh tone="blue" id="summary" levels={levels} onSort={toggle} className="min-w-[300px]">Summary</SortTh>}
-              {isVisible("received") && <SortTh tone="blue" id="received" levels={levels} onSort={toggle} className="min-w-[130px]">Received</SortTh>}
+              {isVisible("received") && <SortTh tone="blue" id="received" levels={levels} onSort={toggle} filter={configFor("received")} className="min-w-[130px]">Received</SortTh>}
               {isVisible("category") && <SortTh tone="blue" id="category" levels={levels} onSort={toggle} filter={configFor("category")} className="min-w-[140px]">Category</SortTh>}
               {isVisible("status") && <SortTh tone="blue" id="status" levels={levels} onSort={toggle} filter={configFor("status")} className="min-w-[130px]">Status</SortTh>}
               {isVisible("case") && <SortTh tone="blue" id="case" levels={levels} onSort={toggle} className="min-w-[90px]">Case</SortTh>}

@@ -43,7 +43,10 @@ export interface CaseRow {
   created_by_id: string | null
   created_by_name?: string | null
   // The rule that auto-opened this case, if any (null for a manually-created case, or one opened
-  // before this link existed). Present on the case detail fetch only.
+  // before this link existed) — already present on the list fetch (a plain column on email_case,
+  // `select("*")`), so the Rules sidebar can group cases by it without a per-case fetch.
+  created_by_rule_id?: string | null
+  // The rule's own details (pattern/category/active) — present on the case detail fetch only.
   created_by_rule?: { pattern: string; category_name: string; is_active: boolean } | null
   assigned_to_id: string | null
   assigned_to_name: string | null
@@ -213,7 +216,11 @@ export function ruleOutcome(r: RuleRow, cat: CategoryOption | undefined): RuleOu
   if (cat?.attaches_to_case) return { icon: Link2, label: "Updates an existing task only", tone: "text-blue-600" }
   if (cat?.disposition === "needs_review") return { icon: ArrowRightCircle, label: "Needs Review — no task", tone: "text-amber-600" }
   if (cat?.disposition === "ignore") return { icon: EyeOff, label: "Ignored — stored, no task", tone: "text-slate-500" }
-  return { icon: XCircle, label: "Recognized as an Update only but not stored — stays in Gmail", tone: "text-slate-400" }
+  // update_only with neither creates_case nor attaches_to_case (return_ack, certificate, statement):
+  // ingest.ts only ever finds a case to attach to via an existing threadCase (attaches_to_case is
+  // false, so the findOpenCaseByPin fallback never runs) — so this is stored only when the mail
+  // happens to land in the same Gmail thread as an already-tracked task; otherwise it's dropped.
+  return { icon: XCircle, label: "Update only — attaches if it's part of an existing task's thread, otherwise dropped (stays in Gmail)", tone: "text-slate-400" }
 }
 
 export const DISPOSITION_LABEL: Record<Disposition, string> = {

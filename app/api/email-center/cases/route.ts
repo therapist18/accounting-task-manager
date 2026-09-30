@@ -125,3 +125,46 @@ export async function POST(request: NextRequest) {
     return fail(error, "cases POST")
   }
 }
+
+// DELETE /api/email-center/cases — { ids: string[] }
+// Deletes the given cases; the case row goes away, but every email attached to them goes back to
+// Needs Review (case_id cleared, disposition reset) rather than being deleted itself — the
+// correspondence is real, stored mail and stays reviewable even though the task wrapper is gone. Same
+// idea as a rule's own "delete this rule and its tasks" cascade in rules/[id]/route.ts.
+export async function DELETE(request: NextRequest) {
+  try {
+    const { sb, actor } = await authorize(request)
+    const { ids } = (await request.json().catch(() => ({}))) as { ids?: unknown }
+    const list = [...new Set((Array.isArray(ids) ? ids : []).map(String))].slice(0, 200)
+    if (!list.length) return NextResponse.json({ success: false, error: "No cases selected." }, { status: 400 })
+
+    const now = new Date().toISOString()
+    const { data: attached, error: findErr } = await withSupabaseRetry<any>(() =>
+      sb.from("emails").select("id").in("case_id", list)
+    )
+    if (findErr) throw new Error(findErr.message)
+
+    if (attached?.length) {
+      const { error: resetErr } = await withSupabaseRetry<any>(() =>
+        sb
+          .from("emails")
+          .update({
+            case_id: null,
+            disposition: "needs_review",
+            review_reason: "Its task was deleted.",
+            updated_by_id: actor.id,
+            updated_at: now,
+          })
+          .in("case_id", list)
+      )
+      if (resetErr) throw new Error(resetErr.message)
+    }
+
+    const { error: delErr } = await withSupabaseRetry<any>(() => sb.from("email_case").delete().in("id", list))
+    if (delErr) throw new Error(delErr.message)
+
+    return NextResponse.json({ success: true, deleted: list.length, emailsReset: attached?.length ?? 0 })
+  } catch (error) {
+    return fail(error, "cases DELETE")
+  }
+}

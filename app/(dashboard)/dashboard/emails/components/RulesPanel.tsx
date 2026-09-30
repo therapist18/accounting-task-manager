@@ -181,6 +181,8 @@ export function RulesPanel({
       sender_match: (r) => (hasSender(r) ? (r.sender_match_type === "regex" ? "Regex" : "Contains") : ""),
       category: categoryLabel,
       active: (r) => (r.is_active ? "Active" : "Inactive"),
+      created: (r) => (r.created_at ? fmtDateTime(r.created_at) : ""),
+      changed: (r) => (r.updated_at ? fmtDateTime(r.updated_at) : r.created_at ? fmtDateTime(r.created_at) : ""),
     }),
     [catByKey] // eslint-disable-line react-hooks/exhaustive-deps
   )
@@ -412,8 +414,8 @@ export function RulesPanel({
                 {isVisible("confidence") && <SortTh tone="blue" id="confidence" levels={levels} onSort={toggle} className="w-36 text-left">Confidence</SortTh>}
                 {isVisible("active") && <SortTh tone="blue" id="active" levels={levels} onSort={toggle} filter={configFor("active")} className="w-28 text-left">Active</SortTh>}
                 {isVisible("notes") && <SortTh tone="blue" id="notes" levels={levels} onSort={toggle} className="min-w-[200px] text-left">Notes</SortTh>}
-                {isVisible("created") && <SortTh tone="blue" id="created" levels={levels} onSort={toggle} className="w-44 text-left">Created</SortTh>}
-                {isVisible("changed") && <SortTh tone="blue" id="changed" levels={levels} onSort={toggle} className="w-44 text-left">Last changed</SortTh>}
+                {isVisible("created") && <SortTh tone="blue" id="created" levels={levels} onSort={toggle} filter={configFor("created")} className="w-44 text-left">Created</SortTh>}
+                {isVisible("changed") && <SortTh tone="blue" id="changed" levels={levels} onSort={toggle} filter={configFor("changed")} className="w-44 text-left">Last changed</SortTh>}
                 <SortTh tone="blue" id="actions" levels={levels} onSort={toggle} className="w-32 border-r-0 text-left">Actions</SortTh>
               </tr>
               {showStats && <StatsRows rows={filtered} columns={statsRowColumns} />}
