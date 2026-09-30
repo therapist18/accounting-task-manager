@@ -146,8 +146,9 @@ export default function EmailCenterPage() {
   const [newCaseOpen, setNewCaseOpen] = useState(false)
   // Shown the moment a rule is created: the rule changes what the mails already sitting in Needs
   // Review would be classified as, so offer to re-run them through it (or skip and leave them).
-  // `pattern` is absent when the dialog was opened from the toolbar's "Reclassify" button instead.
-  const [reclassifyPrompt, setReclassifyPrompt] = useState<{ pattern?: string; is_ignore?: boolean; is_notify?: boolean } | null>(null)
+  // `pattern` is absent when the dialog was opened from the toolbar's "Reclassify" button, or from the
+  // Update tab's own Reclassify button, instead. `scope` defaults to "needs_review" when absent.
+  const [reclassifyPrompt, setReclassifyPrompt] = useState<{ pattern?: string; is_ignore?: boolean; is_notify?: boolean; scope?: "needs_review" | "update_only" } | null>(null)
   const [reclassifying, setReclassifying] = useState(false)
   // 0→100 of a reclassify run, so the dialog shows a "10 of 128" progress bar like syncing does.
   const [reclassifyProgress, setReclassifyProgress] = useState<{ done: number; total: number } | null>(null)
@@ -344,6 +345,8 @@ export default function EmailCenterPage() {
   const reclassifyRangeSet = (reclassifySinceValid && reclassifySinceIso !== "") || (reclassifyUntilValid && reclassifyUntilIso !== "")
 
   const runReclassify = async () => {
+    const scope = reclassifyPrompt?.scope ?? "needs_review"
+    const label = scope === "update_only" ? "Update only" : "Needs Review"
     const since = reclassifySinceValid && reclassifySinceIso ? reclassifySinceIso : undefined
     const until = reclassifyUntilValid && reclassifyUntilIso ? reclassifyUntilIso : undefined
     setReclassifying(true)
@@ -351,11 +354,11 @@ export default function EmailCenterPage() {
     try {
       const listed = await api<{ ids: string[]; total: number }>("/api/email-center/reclassify", {
         method: "POST",
-        body: JSON.stringify({ action: "list", ...(since ? { since } : {}), ...(until ? { until } : {}) }),
+        body: JSON.stringify({ action: "list", scope, ...(since ? { since } : {}), ...(until ? { until } : {}) }),
       })
       if (listed.ids.length === 0) {
-        toast.info(since || until ? "Nothing in Needs Review to reclassify in that date range." : "Nothing in Needs Review to reclassify.")
-        if (!since && !until) setReclassifyDue(false)
+        toast.info(since || until ? `Nothing in ${label} to reclassify in that date range.` : `Nothing in ${label} to reclassify.`)
+        if (scope === "needs_review" && !since && !until) setReclassifyDue(false)
         return
       }
       setReclassifyProgress({ done: 0, total: listed.ids.length })
@@ -371,7 +374,7 @@ export default function EmailCenterPage() {
         const batch = queue.slice(0, 100)
         const res = await api<{ processed: number; changed: number; deleted: number; cases_opened: number; failed: number }>("/api/email-center/reclassify", {
           method: "POST",
-          body: JSON.stringify({ action: "run", ids: batch }),
+          body: JSON.stringify({ action: "run", scope, ids: batch }),
         })
         queue = queue.slice(batch.length)
         done += res.processed
@@ -383,18 +386,19 @@ export default function EmailCenterPage() {
       }
       await loadAll()
       // A ranged run only ever covers part of the backlog, so the toolbar's "a new rule hasn't been run
-      // yet" glow should only clear once a run has actually swept the whole thing.
-      if (!since && !until) setReclassifyDue(false)
+      // yet" glow (Needs Review only — Update only has no such glow) should only clear once a run has
+      // actually swept the whole thing.
+      if (scope === "needs_review" && !since && !until) setReclassifyDue(false)
       const touched = changed + deleted
       const rangeNote = since || until ? ` (${since ? `from ${formatDateToDMY(since)}` : "from the start"}${until ? ` to ${formatDateToDMY(until)}` : ""})` : ""
       const notes = [
         opened ? `${opened} case(s) opened` : "",
         deleted ? `${deleted} deleted (matched a hard-ignore rule)` : "",
       ].filter(Boolean).join(" — ")
-      const failedNote = failed ? ` — ${failed} couldn't be reclassified this run (still in Needs Review, try again later)` : ""
-      if (touched === 0) toast.info(`Reclassified ${listed.ids.length} Needs Review mail(s)${rangeNote} — none matched any rule.${failedNote}`)
-      else if (touched === listed.ids.length) toast.success(`All ${touched} Needs Review mail(s)${rangeNote} reclassified${notes ? ` — ${notes}` : ""}.${failedNote}`)
-      else toast.success(`Reclassified ${touched} of ${listed.ids.length} Needs Review mail(s)${rangeNote}${notes ? ` — ${notes}` : ""}.${failedNote}`)
+      const failedNote = failed ? ` — ${failed} couldn't be reclassified this run (still in ${label}, try again later)` : ""
+      if (touched === 0) toast.info(`Reclassified ${listed.ids.length} ${label} mail(s)${rangeNote} — none matched any rule.${failedNote}`)
+      else if (touched === listed.ids.length) toast.success(`All ${touched} ${label} mail(s)${rangeNote} reclassified${notes ? ` — ${notes}` : ""}.${failedNote}`)
+      else toast.success(`Reclassified ${touched} of ${listed.ids.length} ${label} mail(s)${rangeNote}${notes ? ` — ${notes}` : ""}.${failedNote}`)
     } catch (e: any) {
       toast.error(e.message)
     } finally {
@@ -715,6 +719,8 @@ export default function EmailCenterPage() {
           emptyMessage={emptyMessage}
           notificationsMode={tab === "notifications"}
           onMarkHandled={markHandled}
+          onReclassify={tab === "update" ? () => setReclassifyPrompt({ scope: "update_only" }) : undefined}
+          reclassifying={reclassifying}
           showStats={showStats}
           visibleColumns={emailColumns.visible}
         />
@@ -1071,11 +1077,15 @@ export default function EmailCenterPage() {
       <AlertDialog open={!!reclassifyPrompt} onOpenChange={(o) => !o && !reclassifying && setReclassifyPrompt(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Reclassify mails in Needs Review?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {reclassifyPrompt?.scope === "update_only" ? "Reclassify mail marked Update only?" : "Reclassify mails in Needs Review?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
               {reclassifyPrompt?.pattern
                 ? `The new ${reclassifyPrompt.is_ignore ? "ignore " : reclassifyPrompt.is_notify ? "important-notification " : ""}rule matches “${reclassifyPrompt.pattern}”. Run it against the mails currently in Needs Review now, so the ones it matches are ${reclassifyPrompt.is_ignore ? "ignored" : reclassifyPrompt.is_notify ? "flagged urgent" : "classified (and cases opened where needed)"} automatically?`
-                : "Run the current rules against the mails currently in Needs Review? The ones the rules match confidently are classified (and cases opened where needed), ignored, or flagged as important notifications — the rest stay in Needs Review."}
+                : reclassifyPrompt?.scope === "update_only"
+                  ? "Run the current rules against the mail currently marked Update only? Useful after correcting a rule — anything that should now be classified differently moves there; mail already attached to a case stays attached to it (an ignore or notify match is never applied to it). The rest stays Update only."
+                  : "Run the current rules against the mails currently in Needs Review? The ones the rules match confidently are classified (and cases opened where needed), ignored, or flagged as important notifications — the rest stay in Needs Review."}
             </AlertDialogDescription>
           </AlertDialogHeader>
 

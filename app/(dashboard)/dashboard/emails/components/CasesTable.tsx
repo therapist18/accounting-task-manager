@@ -152,7 +152,11 @@ export function CasesTable({
     COLUMNS.forEach((c) => { if (c.filterValue) fv[c.id] = c.filterValue })
     return fv
   }, [])
-  const { filtered, configFor, activeCount: activeFilterCount, clearAll: clearAllFilters } = useColumnFilters(rows, filterValue)
+  const { filtered, configFor, activeCount: activeFilterCount, clearAll: clearAllFilters } = useColumnFilters(
+    rows,
+    filterValue,
+    ["email_date", "deadline_date", "respond_date", "promised_date"]
+  )
 
   const { levels, sorted: sortedRows, toggle: handleSort } = useTableSort(filtered, sortAccessors, [{ key: "email_date", dir: "desc" }])
 

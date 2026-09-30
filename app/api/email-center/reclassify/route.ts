@@ -10,22 +10,27 @@ import { AUTO_CONFIDENCE_THRESHOLD as THRESHOLD } from "@/lib/email-center/types
 import { withSupabaseRetry } from "@/lib/supabaseRetry"
 
 // POST /api/email-center/reclassify
-// Re-runs the current rules over the emails sitting in Needs Review, so a rule added after those
-// emails were ingested can still take effect on them. The client lists the affected emails once, then
-// reclassifies them in batches and reports progress (the same shape as sync/backfill).
+// Re-runs the current rules over the emails sitting in a given disposition, so a rule added or edited
+// after those emails were classified can still take effect on them. The client lists the affected
+// emails once, then reclassifies them in batches and reports progress (the same shape as sync/backfill).
 //
-//   { action: "list", since?, until? }  -> { ids, total }        emails currently in Needs Review
-//                                                                 (optionally only those received in
-//                                                                 the given date range, "YYYY-MM-DD")
-//   { action: "run", ids: [] }         -> { processed, changed, deleted, cases_opened, failed, moved }
+//   { action: "list", scope?, since?, until? }  -> { ids, total }   emails currently in `scope`
+//                                                                   (optionally only those received in
+//                                                                   the given date range, "YYYY-MM-DD")
+//   { action: "run", ids: [] }                  -> { processed, changed, deleted, cases_opened, failed, moved }
+//
+// `scope` is "needs_review" (default — a rule now confidently matching mail that never matched
+// anything before) or "update_only" (mail that WAS confidently classified, being re-run after a rule
+// correction; guarded so an ignore/notify match never detaches it from a case it's already attached to
+// — see the guard in reclassifyEmails()).
 //
 // Emails a rule now matches confidently are reclassified exactly as ingestion would have classified
 // them (category, disposition, case opened or attached to via the same thread/PIN lookups ingestion
 // uses, approval detected on an extension/objection response, deleted outright for a confident
 // hard-ignore match — it would never have been stored in the first place — soft-ignored for a plain
 // ignore match, or flagged urgent as an important notification); everything a rule still doesn't match
-// stays in Needs Review. The one gap: reclassify works from the stored snippet only (no Gmail re-fetch,
-// no AI), so AI-extracted fields and full-body approval detection aren't reproduced here.
+// stays as it is. The one gap: reclassify works from the stored snippet only (no Gmail re-fetch, no
+// AI), so AI-extracted fields and full-body approval detection aren't reproduced here.
 
 // Same reasoning as the emails list route's own cap: this used to silently ignore any Needs Review
 // backlog beyond the oldest 1,000, which — at the volumes a first-time full-mailbox backfill leaves
@@ -36,6 +41,20 @@ const LIST_MAX = 20000
 const RUN_MAX = 100
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const YMD = /^\d{4}-\d{2}-\d{2}$/
+// Which disposition Reclassify targets — defaults to Needs Review (a rule edit taking effect on mail
+// that never confidently matched anything yet); Update-only lets the same run also pick up mail that
+// was confidently classified before a rule was corrected. Every branch in reclassifyEmails() already
+// works from the row's data alone, not from what disposition it currently holds, so no scope-specific
+// logic is needed there beyond the ignore/notify-on-a-cased-row guard above.
+const SCOPES = ["needs_review", "update_only"] as const
+type ReclassifyScope = (typeof SCOPES)[number]
+// Rule matching itself is cheap, in-memory regex work — what actually takes time per matched row is
+// waiting on Supabase (a thread-case lookup, maybe a case open/update, then the email's own update).
+// Running several rows at once instead of one after another turns that into mostly-overlapped network
+// wait instead of one row's worth of latency multiplied by however many are in the batch. Case-opening's
+// own unique-constraint-then-refetch fallback (openCaseFromEmail) already makes two rows racing to open
+// the same thread's case safe, so this needs no extra locking here.
+const RECLASSIFY_CONCURRENCY = 8
 
 interface ReclassifyResult {
   processed: number
@@ -52,45 +71,34 @@ async function reclassifyEmails(
   rules: SubjectRule[],
   rows: any[]
 ): Promise<ReclassifyResult> {
-  let processed = 0
   let changed = 0
   let deleted = 0
   let casesOpened = 0
   let failed = 0
   const moved: ReclassifyResult["moved"] = []
 
-  for (const e of rows) {
-    processed++
-    // One row's failure (a transient blip that outlasted its own retries, or anything else) no longer
-    // aborts the whole batch — everything already changed earlier in this loop is kept, and this row
-    // just stays in Needs Review to be picked up by the next Reclassify run, same as an unmatched one.
+  // One row's failure (a transient blip that outlasted its own retries, or anything else) no longer
+  // aborts the whole batch — everything already changed by other rows is kept, and this row just stays
+  // in Needs Review to be picked up by the next Reclassify run, same as an unmatched one.
+  const processOne = async (e: any) => {
     try {
-      if (e.direction === "outbound") continue
+      if (e.direction === "outbound") return
 
       const now = new Date().toISOString()
 
-      // A no-reply/alerts sender is auto-ignored now, whatever the rules: clear legacy needs-review mail
-      // from such senders the same way ingestion would have handled it.
+      // A no-reply/alerts sender, whatever the rules: ingestion now drops this mail before it's ever
+      // stored, so an already-stored row from before that change (or before this account's mail was
+      // recognized as automated) is deleted outright too, the same as a hard-ignore rule match.
       if (!e.case_id && isAutomatedSender(e.sender_email)) {
-        const { error: upErr } = await withSupabaseRetry(() =>
-          sb
-            .from("emails")
-            .update({
-              category_key: "system_noise",
-              category_confidence: 0.92,
-              classification_source: "rule",
-              disposition: "ignore",
-              priority: "low",
-              review_reason: null,
-              classified_at: now,
-              updated_at: now,
-            })
-            .eq("id", e.id)
-        )
-        if (upErr) throw new Error(upErr.message)
-        changed++
-        moved.push({ id: e.id, subject: e.subject, category: "system_noise", disposition: "ignore", case_opened: false })
-        continue
+        const paths = (Array.isArray(e.attachments) ? e.attachments : [])
+          .map((a: any) => a?.storage_path)
+          .filter(Boolean)
+        if (paths.length) await sb.storage.from("email-attachments").remove(paths)
+        const { error: delErr } = await withSupabaseRetry(() => sb.from("emails").delete().eq("id", e.id))
+        if (delErr) throw new Error(delErr.message)
+        deleted++
+        moved.push({ id: e.id, subject: e.subject, category: null, disposition: "deleted", case_opened: false })
+        return
       }
 
       const rule = classifyByRules({
@@ -100,7 +108,13 @@ async function reclassifyEmails(
         threadHasCase: !!e.case_id,
         rules,
       })
-      if (!rule || rule.confidence < THRESHOLD) continue // stays in Needs Review
+      if (!rule || rule.confidence < THRESHOLD) return // stays in Needs Review
+
+      // An ignore or notify match on a mail that's already attached to a real case (reclassify can run
+      // over Update-only mail too, unlike ingestion which only ever sees a fresh, uncased message) is
+      // left alone rather than un-classified out from under that case — the same guard the automated-
+      // sender check above already applies.
+      if ((rule.action === "ignore" || rule.action === "notify") && e.case_id) return
 
       // A confident ignore match: had the rule existed when the mail arrived, a hard-ignore rule would
       // have dropped it before it was ever stored — so delete it now, the same as ingestion would have
@@ -116,7 +130,7 @@ async function reclassifyEmails(
           if (delErr) throw new Error(delErr.message)
           deleted++
           moved.push({ id: e.id, subject: e.subject, category: null, disposition: "deleted", case_opened: false })
-          continue
+          return
         }
         const { error: upErr } = await withSupabaseRetry(() =>
           sb
@@ -136,7 +150,7 @@ async function reclassifyEmails(
         if (upErr) throw new Error(upErr.message)
         changed++
         moved.push({ id: e.id, subject: e.subject, category: "system_noise", disposition: "ignore", case_opened: false })
-        continue
+        return
       }
 
       // An important-notification match: store + flagged, Needs Review, no case — exactly as ingestion.
@@ -161,11 +175,11 @@ async function reclassifyEmails(
         if (upErr) throw new Error(upErr.message)
         changed++
         moved.push({ id: e.id, subject: e.subject, category: "notification", disposition: "needs_review", case_opened: false })
-        continue
+        return
       }
 
       const cat = rule.categoryKey ? CATEGORY_BY_KEY.get(rule.categoryKey) : null
-      if (!cat || cat.disposition === "needs_review") continue
+      if (!cat || cat.disposition === "needs_review") return
 
       let disposition: string = cat.disposition
       let caseId: string | null = e.case_id
@@ -259,13 +273,26 @@ async function reclassifyEmails(
     }
   }
 
-  return { processed, changed, deleted, casesOpened, failed, moved }
+  let next = 0
+  const worker = async () => {
+    for (;;) {
+      const i = next++
+      if (i >= rows.length) return
+      await processOne(rows[i])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(RECLASSIFY_CONCURRENCY, rows.length) }, worker))
+
+  return { processed: rows.length, changed, deleted, casesOpened, failed, moved }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const { sb, actor } = await authorize(request)
-    const body = (await request.json().catch(() => ({}))) as { action?: string; ids?: unknown; since?: string; until?: string }
+    const body = (await request.json().catch(() => ({}))) as {
+      action?: string; ids?: unknown; since?: string; until?: string; scope?: string
+    }
+    const scope: ReclassifyScope = SCOPES.includes(body.scope as ReclassifyScope) ? (body.scope as ReclassifyScope) : "needs_review"
 
     if (body.action === "run") {
       const ids = Array.isArray(body.ids) ? body.ids.filter((x): x is string => typeof x === "string" && UUID.test(x)) : []
@@ -274,16 +301,16 @@ export async function POST(request: NextRequest) {
       }
       const rules = await loadSubjectRules(sb)
       const { data: rows, error } = await withSupabaseRetry<any>(() =>
-        sb.from("emails").select("*").in("id", ids).eq("disposition", "needs_review")
+        sb.from("emails").select("*").in("id", ids).eq("disposition", scope)
       )
       if (error) throw new Error(error.message)
       const { processed, changed, deleted, casesOpened, failed, moved } = await reclassifyEmails(sb, actor, rules, rows ?? [])
       return NextResponse.json({ success: true, processed, changed, deleted, cases_opened: casesOpened, failed, moved })
     }
 
-    // Default action: list the emails currently waiting in Needs Review (oldest first), optionally
-    // narrowed to a received-date range — lets a big backlog be worked through in smaller, faster
-    // chunks (e.g. "just last week") instead of always pulling in the entire thing.
+    // Default action: list the emails currently sitting in the target disposition (oldest first),
+    // optionally narrowed to a received-date range — lets a big backlog be worked through in smaller,
+    // faster chunks (e.g. "just last week") instead of always pulling in the entire thing.
     let since: string | undefined
     let until: string | undefined
     if (body.since) {
@@ -296,7 +323,7 @@ export async function POST(request: NextRequest) {
       until = body.until
     }
     const list = () => {
-      let q = sb.from("emails").select("id").eq("disposition", "needs_review").order("received_at", { ascending: true }).limit(LIST_MAX)
+      let q = sb.from("emails").select("id").eq("disposition", scope).order("received_at", { ascending: true }).limit(LIST_MAX)
       if (since) q = q.gte("received_at", `${since}T00:00:00.000Z`)
       if (until) {
         const end = new Date(`${until}T00:00:00.000Z`)

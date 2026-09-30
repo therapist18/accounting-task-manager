@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, Briefcase, FileImage, FileSpreadsheet, FileText, Lightbulb, Loader2, Mail, Paperclip } from "lucide-react"
+import { AlertTriangle, Briefcase, Copy, FileImage, FileSpreadsheet, FileText, Lightbulb, Loader2, Mail, Paperclip } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
@@ -19,6 +19,15 @@ import {
 const bodyCache = new Map<string, string>()
 
 const cleanSubject = (subject: string) => subject.replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, "").trim()
+
+async function copyToClipboard(value: string, label: string) {
+  try {
+    await navigator.clipboard.writeText(value)
+    toast.success(`${label} copied.`)
+  } catch {
+    toast.error("Could not copy to the clipboard.")
+  }
+}
 
 function fileSize(bytes: number | null): string {
   if (!bytes) return ""
@@ -248,6 +257,23 @@ export function EmailDialog({
                 {(shown.priority === "urgent" || shown.priority === "high") && (
                   <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200 capitalize">{shown.priority}</span>
                 )}
+              </div>
+
+              {/* Record ids — for looking a specific mail up in the database (e.g. confirming a
+                  reclassify actually deleted it) rather than anything a user needs day to day. */}
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+                <span className="inline-flex items-center gap-1">
+                  ID <span className="font-mono text-slate-500">{shown.id}</span>
+                  <button type="button" onClick={() => copyToClipboard(shown.id, "Email ID")} className="p-0.5 rounded hover:bg-slate-100 hover:text-slate-700" title="Copy email ID">
+                    <Copy className="h-3 w-3" />
+                  </button>
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  Gmail ID <span className="font-mono text-slate-500">{shown.gmail_message_id}</span>
+                  <button type="button" onClick={() => copyToClipboard(shown.gmail_message_id, "Gmail message ID")} className="p-0.5 rounded hover:bg-slate-100 hover:text-slate-700" title="Copy Gmail message ID">
+                    <Copy className="h-3 w-3" />
+                  </button>
+                </span>
               </div>
 
               {/* Sender row */}

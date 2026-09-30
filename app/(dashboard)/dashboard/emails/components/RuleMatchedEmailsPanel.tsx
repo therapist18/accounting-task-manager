@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Inbox, ListFilter, Loader2, Search, Trash2, UserRound, X } from "lucide-react"
+import { Inbox, ListFilter, Loader2, Search, Sparkles, Trash2, UserRound, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -93,6 +93,8 @@ export function RuleMatchedEmailsPanel({
   emptyMessage,
   notificationsMode = false,
   onMarkHandled,
+  onReclassify,
+  reclassifying,
   showStats,
   visibleColumns,
 }: {
@@ -114,6 +116,11 @@ export function RuleMatchedEmailsPanel({
   emptyMessage: string
   notificationsMode?: boolean
   onMarkHandled?: (e: EmailRow) => void
+  // Present only for the Update tab: re-runs the current rules against this tab's own mail (so a rule
+  // correction can be re-applied to mail it already classified, not just to Needs Review). Absent for
+  // Notifications — those don't offer this.
+  onReclassify?: () => void
+  reclassifying?: boolean
   // Both owned by the page's shared toolbar (Stats / Columns buttons).
   showStats: boolean
   visibleColumns: Record<string, boolean>
@@ -288,6 +295,19 @@ export function RuleMatchedEmailsPanel({
           <div className="shrink-0 flex items-center gap-2 flex-wrap min-h-14 px-4 py-2 border-b border-slate-200/80">
             <p className="text-base font-semibold text-slate-800 truncate max-w-[36rem]" title={heading}>{heading}</p>
             <span className="text-base text-slate-500">{visible.length} email{visible.length === 1 ? "" : "s"}</span>
+
+            {onReclassify && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={reclassifying}
+                onClick={onReclassify}
+                className="h-9 px-3 gap-1.5 rounded-md border-slate-200 text-base font-medium"
+                title="Re-run the current rules against every Update-only mail — useful after correcting a rule"
+              >
+                {reclassifying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} Reclassify
+              </Button>
+            )}
 
             {selected.size > 0 && (
               <div className="ml-auto flex items-center gap-2 flex-wrap rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5">

@@ -92,9 +92,11 @@ export function EmailsTable({
     company: (e) => e.company_name ?? "Unassigned company",
     category: categoryName,
     status: statusLabel,
-    received: (e) => fmtDateTime(e.received_at, showTime),
+    // Always includes the time (regardless of the Show/Hide Time toggle) so typing a time into the
+    // filter works whether or not the column itself is currently displaying one.
+    received: (e) => fmtDateTime(e.received_at, true),
   }
-  const { filtered, configFor, activeCount: activeFilterCount, clearAll: clearAllFilters } = useColumnFilters(emails, FILTER_VALUE)
+  const { filtered, configFor, activeCount: activeFilterCount, clearAll: clearAllFilters } = useColumnFilters(emails, FILTER_VALUE, ["received"])
 
   const { levels, sorted, toggle } = useTableSort(filtered, SORT_VALUE, [{ key: "received", dir: "desc" }])
 

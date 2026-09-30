@@ -186,7 +186,7 @@ export function RulesPanel({
     }),
     [catByKey] // eslint-disable-line react-hooks/exhaustive-deps
   )
-  const { filtered, configFor, activeCount: activeFilterCount, clearAll: clearAllFilters } = useColumnFilters(visible, FILTER_VALUE)
+  const { filtered, configFor, activeCount: activeFilterCount, clearAll: clearAllFilters } = useColumnFilters(visible, FILTER_VALUE, ["created", "changed"])
   const { levels, sorted, toggle } = useTableSort(filtered, sortAccessors, [{ key: "order", dir: "asc" }])
   const { visible: visibleCols, isVisible, toggle: toggleColumn, showAll } = useColumnVisibility(TOGGLEABLE_COLUMNS)
   const [showStats, setShowStats] = useState(false)

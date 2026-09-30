@@ -281,11 +281,11 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   // 2. Decide from sender + subject alone whether this email is worth a full fetch at all.
   if (direction === "outbound" && !threadCase) return "skipped" // our mail outside any KRA case
 
-  // Automated mail from a non-KRA "no-reply"/"alerts" address, outside any case thread: auto-ignore
-  // it. Like a rule ignore this is decided from headers alone, but unlike one it is STORED — marked
-  // ignored, the same as hitting Ignore in the UI — so it lands under the ignored tab's "Automated"
-  // filter instead of disappearing entirely. Skipped while paused — it should land in Needs Review too.
-  const autoIgnore = !paused && direction === "inbound" && !kra && !threadCase && isAutomatedSender(senderEmail)
+  // Automated mail from a non-KRA "no-reply"/"alerts" address, outside any case thread: never KRA,
+  // never opens a case or a review item — for now, drop it before it's ever stored (same as a
+  // hard-ignore rule match) rather than storing it under the Ignored tab. Skipped while paused — it
+  // should land in Needs Review too.
+  if (!paused && direction === "inbound" && !kra && !threadCase && isAutomatedSender(senderEmail)) return "skipped"
 
   // Set when a confident ignore rule matches: the mail is stored as ignored (headers only — no body,
   // no attachments, no AI), tagged with the rule, so the Ignored tab can show what each rule caught.
@@ -293,7 +293,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
 
   // While paused this whole cheap pass is skipped too: it's what would otherwise drop hard-ignore
   // matches, non-KRA noise and confidently-informational KRA mail before ever reaching Needs Review.
-  if (direction === "inbound" && !autoIgnore && !paused) {
+  if (direction === "inbound" && !paused) {
     const cheap = classifyByRules({ subject, body: snippet, senderEmail, threadHasCase: !!threadCase, rules })
     // Confident ignore rules are checked before classification and name no category: whatever the
     // sender, matching mail never opens a case or reaches review. Below the threshold it still goes
@@ -406,13 +406,6 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     source = "rule"
     disposition = "ignore"
     matchedRuleId = ruleIgnore.ruleId
-  } else if (autoIgnore) {
-    // No-reply automated mail: never KRA, never opens a case or a review item. Store it marked
-    // ignored so staff can see what came in under the ignored tab's "No-reply" filter.
-    categoryKey = "system_noise"
-    confidence = 0.92
-    source = "rule"
-    disposition = "ignore"
   } else if (paused) {
     // Recovery mode: skip rules and AI entirely, store as-is straight into Needs Review so a human (or
     // a later Reclassify run, once the rules are finished) decides what happens to it.

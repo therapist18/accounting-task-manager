@@ -77,20 +77,20 @@ export function useTableSort<T>(
   return { levels, sorted, toggle }
 }
 
-// A single column's header filter: a funnel icon that opens a searchable checklist of the column's
-// distinct values (computed by the caller — usually from every row, not just what other filters have
-// already narrowed down, so the option list doesn't shrink out from under you as you filter).
-export interface ColumnFilterConfig {
-  options: string[]
-  selected: Set<string>
-  onToggle: (value: string) => void
-  onClear: () => void
-}
+// A single column's header filter: normally a funnel icon that opens a searchable checklist of the
+// column's distinct values (computed by the caller — usually from every row, not just what other
+// filters have already narrowed down, so the option list doesn't shrink out from under you as you
+// filter). A date/timestamp column instead gets a free-text box: typing "2025", "14/03" or "10:30"
+// matches anywhere in the column's displayed value, so a year, a specific date or a specific time all
+// work without having to hunt for (and tick) every exact timestamp that falls in it.
+export type ColumnFilterConfig =
+  | { kind: "checklist"; options: string[]; selected: Set<string>; onToggle: (value: string) => void; onClear: () => void }
+  | { kind: "text"; value: string; onChange: (value: string) => void; onClear: () => void }
 
-function ColumnFilterButton({ options, selected, onToggle, onClear, tone }: ColumnFilterConfig & { tone: "neutral" | "blue" }) {
+function ColumnFilterButton({ filter, tone }: { filter: ColumnFilterConfig; tone: "neutral" | "blue" }) {
   const [q, setQ] = useState("")
-  const active = selected.size > 0
-  const shown = q ? options.filter((o) => o.toLowerCase().includes(q.toLowerCase())) : options
+  const active = filter.kind === "text" ? filter.value.trim() !== "" : filter.selected.size > 0
+  const shown = filter.kind === "checklist" && q ? filter.options.filter((o) => o.toLowerCase().includes(q.toLowerCase())) : filter.kind === "checklist" ? filter.options : []
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -109,23 +109,38 @@ function ColumnFilterButton({ options, selected, onToggle, onClear, tone }: Colu
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-64 p-0" align="start" onClick={(e) => e.stopPropagation()}>
-        {options.length > 8 && (
-          <div className="p-2 border-b border-slate-100">
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className="h-8 text-sm" autoFocus />
+        {filter.kind === "text" ? (
+          <div className="p-2.5 space-y-1.5">
+            <Input
+              value={filter.value}
+              onChange={(e) => filter.onChange(e.target.value)}
+              placeholder="Type a year, date, or time…"
+              className="h-8 text-sm"
+              autoFocus
+            />
+            <p className="text-xs text-slate-400 px-0.5">Matches anywhere in the date, e.g. “2025”, “14/03”, or “10:30”.</p>
           </div>
+        ) : (
+          <>
+            {filter.options.length > 8 && (
+              <div className="p-2 border-b border-slate-100">
+                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className="h-8 text-sm" autoFocus />
+              </div>
+            )}
+            <div className="max-h-64 overflow-y-auto py-1">
+              {shown.length === 0 && <div className="px-3 py-2 text-sm text-slate-400">No values.</div>}
+              {shown.map((o) => (
+                <label key={o} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 cursor-pointer">
+                  <Checkbox checked={filter.selected.has(o)} onCheckedChange={() => filter.onToggle(o)} />
+                  <span className="truncate font-normal text-slate-700">{o}</span>
+                </label>
+              ))}
+            </div>
+          </>
         )}
-        <div className="max-h-64 overflow-y-auto py-1">
-          {shown.length === 0 && <div className="px-3 py-2 text-sm text-slate-400">No values.</div>}
-          {shown.map((o) => (
-            <label key={o} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 cursor-pointer">
-              <Checkbox checked={selected.has(o)} onCheckedChange={() => onToggle(o)} />
-              <span className="truncate font-normal text-slate-700">{o}</span>
-            </label>
-          ))}
-        </div>
         {active && (
           <div className="border-t border-slate-100 p-1.5">
-            <button type="button" onClick={onClear} className="w-full text-center text-sm text-custom-blue hover:underline py-1">Clear filter</button>
+            <button type="button" onClick={filter.onClear} className="w-full text-center text-sm text-custom-blue hover:underline py-1">Clear filter</button>
           </div>
         )}
       </PopoverContent>
@@ -134,17 +149,26 @@ function ColumnFilterButton({ options, selected, onToggle, onClear, tone }: Colu
 }
 
 // Per-column filters over a row set: each key in `getValue` is a column id, the accessor its
-// filterable text. Options for a column are drawn from `rows` as given (not re-narrowed by other
-// active filters), so opening one column's filter never hides values another filter would still allow.
-export function useColumnFilters<T>(rows: T[], getValue: Record<string, (row: T) => string>) {
-  const [filters, setFilters] = useState<Record<string, Set<string>>>({})
+// filterable text. Options for a checklist column are drawn from `rows` as given (not re-narrowed by
+// other active filters), so opening one column's filter never hides values another filter would still
+// allow. `textColumns` marks columns (normally dates/timestamps) that get the free-text substring
+// filter instead of a checklist.
+export function useColumnFilters<T>(rows: T[], getValue: Record<string, (row: T) => string>, textColumns: string[] = []) {
+  const [checklist, setChecklist] = useState<Record<string, Set<string>>>({})
+  const [text, setText] = useState<Record<string, string>>({})
+  const isText = (key: string) => textColumns.includes(key)
 
   const filtered = useMemo(() => {
-    const keys = Object.keys(filters).filter((k) => filters[k]?.size)
-    if (!keys.length) return rows
-    return rows.filter((r) => keys.every((k) => filters[k].has(getValue[k]?.(r) ?? "")))
+    const checklistKeys = Object.keys(checklist).filter((k) => checklist[k]?.size)
+    const textKeys = Object.keys(text).filter((k) => text[k]?.trim())
+    if (!checklistKeys.length && !textKeys.length) return rows
+    return rows.filter(
+      (r) =>
+        checklistKeys.every((k) => checklist[k].has(getValue[k]?.(r) ?? "")) &&
+        textKeys.every((k) => (getValue[k]?.(r) ?? "").toLowerCase().includes(text[k].trim().toLowerCase()))
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, filters])
+  }, [rows, checklist, text])
 
   const optionsFor = (key: string) =>
     Array.from(new Set(rows.map((r) => getValue[key]?.(r) ?? "").filter((v) => v !== ""))).sort((a, b) =>
@@ -152,22 +176,24 @@ export function useColumnFilters<T>(rows: T[], getValue: Record<string, (row: T)
     )
 
   const toggle = (key: string, value: string) =>
-    setFilters((f) => {
+    setChecklist((f) => {
       const set = new Set(f[key] ?? [])
       set.has(value) ? set.delete(value) : set.add(value)
       return { ...f, [key]: set }
     })
 
-  const clear = (key: string) => setFilters((f) => { const next = { ...f }; delete next[key]; return next })
-  const clearAll = () => setFilters({})
-  const activeCount = Object.values(filters).filter((s) => s?.size).length
+  const clear = (key: string) => {
+    setChecklist((f) => { const next = { ...f }; delete next[key]; return next })
+    setText((t) => { const next = { ...t }; delete next[key]; return next })
+  }
+  const clearAll = () => { setChecklist({}); setText({}) }
+  const activeCount =
+    Object.values(checklist).filter((s) => s?.size).length + Object.values(text).filter((v) => v?.trim()).length
 
-  const configFor = (key: string): ColumnFilterConfig => ({
-    options: optionsFor(key),
-    selected: filters[key] ?? new Set(),
-    onToggle: (value) => toggle(key, value),
-    onClear: () => clear(key),
-  })
+  const configFor = (key: string): ColumnFilterConfig =>
+    isText(key)
+      ? { kind: "text", value: text[key] ?? "", onChange: (value) => setText((t) => ({ ...t, [key]: value })), onClear: () => clear(key) }
+      : { kind: "checklist", options: optionsFor(key), selected: checklist[key] ?? new Set(), onToggle: (value) => toggle(key, value), onClear: () => clear(key) }
 
   return { filtered, configFor, clearAll, activeCount }
 }
@@ -198,7 +224,7 @@ export function SortTh({
       <div className="inline-flex items-center gap-1.5 justify-between w-full">
         <span className="truncate">{children}</span>
         <span className="inline-flex items-center gap-1.5 shrink-0">
-          {filter && <ColumnFilterButton {...filter} tone={tone} />}
+          {filter && <ColumnFilterButton filter={filter} tone={tone} />}
           {active && levels.length > 1 && (
             <span className={cn("text-[10px] font-bold rounded-full w-3.5 h-3.5 inline-flex items-center justify-center leading-none", tone === "blue" ? "bg-white/25" : "bg-slate-300 text-slate-700")}>
               {idx + 1}
