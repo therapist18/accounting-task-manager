@@ -28,13 +28,23 @@
     "directories": {
       "output": "dist-electron"
     },
-    "files": [
-      "**/*",
-      "!automation-server/**",
-      "!**/node_modules/**/*.d.ts",
-      "!**/node_modules/**/*.map",
-      "!**/*.md"
-    ],
+      "files": [
+        "package.json",
+        "electron/**/*",
+        "!**/node_modules/**/*",
+        "node_modules/@supabase/**/*",
+        "node_modules/@types/**/*",
+        "node_modules/iceberg-js/**/*",
+        "node_modules/tr46/**/*",
+        "node_modules/tslib/**/*",
+        "node_modules/undici-types/**/*",
+        "node_modules/webidl-conversions/**/*",
+        "node_modules/whatwg-url/**/*",
+        "node_modules/ws/**/*",
+        "!**/*.d.ts",
+        "!**/*.map",
+        "!**/*.md"
+      ],
     "extraResources": [
       {
         "from": ".next/standalone",

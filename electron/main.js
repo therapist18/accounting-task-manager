@@ -146,8 +146,9 @@ async function resetStaleRuns(userId) {
 function parseEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
 
-  for (const line of fs.readFileSync(filePath, "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim();
+  const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = lines[i].trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
 
     const separatorIndex = trimmed.indexOf("=");
@@ -155,15 +156,32 @@ function parseEnvFile(filePath) {
 
     const key = trimmed.slice(0, separatorIndex).trim();
     let value = trimmed.slice(separatorIndex + 1).trim();
+    if (!key) continue;
 
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
+    const quote = value[0];
+    if (quote === '"' || quote === "'") {
+      if (value.length > 1 && value.endsWith(quote)) {
+        value = value.slice(1, -1);
+      } else {
+        // A quoted value can span several physical lines, which is how a PEM
+        // private key is normally stored. Without consuming the continuation
+        // lines the value is truncated to its opening line and Firebase
+        // rejects the key with "Invalid PEM formatted message".
+        const parts = [value.slice(1)];
+        while (i + 1 < lines.length) {
+          i += 1;
+          const closingIndex = lines[i].indexOf(quote);
+          if (closingIndex !== -1) {
+            parts.push(lines[i].slice(0, closingIndex));
+            break;
+          }
+          parts.push(lines[i]);
+        }
+        value = parts.join("\n");
+      }
     }
 
-    if (key && process.env[key] === undefined) {
+    if (process.env[key] === undefined) {
       process.env[key] = value.replace(/\\n/g, "\n");
     }
   }
