@@ -7,6 +7,7 @@ import { Toaster } from "@/components/ui/toaster"
 import { canAccessPath } from "@/lib/auth/access-controls"
 import { getServerAppSession } from "@/lib/auth/session"
 import AppSidebar from "@/components/sidebar"
+import TaskBasketNotifier from "@/components/task-basket-notifier"
 
 export default async function DashboardLayout({
   children,
@@ -41,6 +42,9 @@ export default async function DashboardLayout({
     )
   }
 
+  // Only people who can open the Task Basket are told about it filling up.
+  const canSeeTaskBasket = !!session && (await canAccessPath(session.user, "/dashboard/task-basket"))
+
   return (
     <SidebarProvider>
       <div className="flex h-screen w-screen overflow-hidden dark:bg-zinc-950">
@@ -54,6 +58,7 @@ export default async function DashboardLayout({
         </SidebarInset>
       </div>
       <Toaster />
+      {canSeeTaskBasket && session && <TaskBasketNotifier userId={String(session.user.id)} />}
     </SidebarProvider>
   )
 }

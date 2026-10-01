@@ -114,6 +114,44 @@ export async function deleteTaskBasketItem(id: string): Promise<void> {
   }
 }
 
+// The routes cap one request at 500 ids; a larger selection is sent in chunks.
+const BULK_CHUNK_SIZE = 500
+
+async function postInChunks(url: string, ids: string[], extra: Record<string, unknown>, failure: string) {
+  const results: any[] = []
+  for (let i = 0; i < ids.length; i += BULK_CHUNK_SIZE) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: ids.slice(i, i + BULK_CHUNK_SIZE), ...extra }),
+    })
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}))
+      throw new Error(body.error || failure)
+    }
+    results.push(await response.json())
+  }
+  return results
+}
+
+// Only open rows are resolved server-side; `skipped` is how many of the selection were already
+// resolved (or gone), so the caller can say so instead of claiming all N were done.
+export async function resolveTaskBasketItems(
+  ids: string[],
+  resolutionNote: string,
+): Promise<{ resolvedIds: string[]; skipped: number }> {
+  const results = await postInChunks("/api/task-basket/resolve", ids, { resolution_note: resolutionNote }, "Failed to resolve task basket items.")
+  return {
+    resolvedIds: results.flatMap((r) => r.resolvedIds || []),
+    skipped: results.reduce((sum, r) => sum + (r.skipped || 0), 0),
+  }
+}
+
+export async function deleteTaskBasketItems(ids: string[]): Promise<{ deletedIds: string[] }> {
+  const results = await postInChunks("/api/task-basket/delete", ids, {}, "Failed to delete task basket items.")
+  return { deletedIds: results.flatMap((r) => r.deletedIds || []) }
+}
+
 export async function getOpenTaskBasketCount(): Promise<number> {
   const { count, error } = await supabase
     .from("task_basket_items")

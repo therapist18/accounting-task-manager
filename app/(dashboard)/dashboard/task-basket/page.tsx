@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { differenceInCalendarDays } from "date-fns"
-import { Download, Filter, Inbox, Loader2 } from "lucide-react"
+import { CheckCheck, Download, Filter, Inbox, Loader2, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/lib/hooks/use-toast"
@@ -27,6 +27,8 @@ import { fetchCompanies, type Company } from "../companies/database"
 import { exportRowsToExcel, timestampedFilename, type ExcelColumn } from "../emails/components/excelExport"
 import { PILL_BUTTON_ACTIVE_CLASS, PILL_BUTTON_CLASS } from "../emails/components/shared"
 import TaskBasketTable from "./components/TaskBasketTable"
+import BulkResolveDialog from "./components/BulkResolveDialog"
+import BulkDeleteDialog from "./components/BulkDeleteDialog"
 
 function currentCycleMonth() {
   const now = new Date()
@@ -114,34 +116,58 @@ export default function TaskBasketPage() {
   const categoryActive = !!categoryFilters && Object.values(categoryFilters.categories || {}).some(Boolean)
   const [exporting, setExporting] = useState(false)
 
-  // Exports exactly what's on screen (the current filter's full list, not just the page), and prints
-  // the Total / Completed / Missing figures the stats bar shows into the workbook's header band.
-  const handleExport = async () => {
-    if (!visibleItems.length) return
+  // Bulk selection. Held here (not in the table) so the action bar can sit in the page chrome, and
+  // pruned whenever the visible list changes: a filter change or a deleted row must never leave a
+  // hidden id selected, because a bulk Delete/Resolve would then act on rows the user can't see.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkResolveOpen, setBulkResolveOpen] = useState(false)
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (!prev.size) return prev
+      const visible = new Set(visibleItems.map((i) => i.id))
+      const next = new Set([...prev].filter((id) => visible.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [visibleItems])
+
+  const selectedItems = useMemo(
+    () => visibleItems.filter((i) => selectedIds.has(i.id)),
+    [visibleItems, selectedIds]
+  )
+  const selectedOpenCount = useMemo(() => selectedItems.filter((i) => i.status === "open").length, [selectedItems])
+
+  // Exports exactly what's on screen (the current filter's full list, not just the page) — or just the
+  // ticked rows when called with them — and prints the Total / Completed / Missing figures the stats
+  // bar shows into the workbook's header band.
+  const handleExport = async (rows: TaskBasketItem[] = visibleItems) => {
+    if (!rows.length) return
     setExporting(true)
     try {
-      const completed = visibleItems.filter((i) => i.status === "resolved").length
-      const missing = visibleItems.length - completed
+      const completed = rows.filter((i) => i.status === "resolved").length
+      const missing = rows.length - completed
       const filterNotes = [
+        rows !== visibleItems ? `${rows.length} selected row${rows.length === 1 ? "" : "s"}` : null,
         moduleFilter !== "all" ? `Module: ${TASK_BASKET_MODULE_LABELS[moduleFilter]}` : "All modules",
         `Status: ${statusFilter}`,
         `Cycle: ${cycleMonth}`,
         categoryActive ? "Client category filter applied" : "No client category filter",
-      ].join(" · ")
+      ].filter(Boolean).join(" · ")
       await exportRowsToExcel({
         title: "Task Basket",
         subtitle: filterNotes,
         sheetName: "Task Basket",
         filename: timestampedFilename(`task-basket-${cycleMonth}`),
         columns: EXPORT_COLUMNS,
-        rows: visibleItems,
+        rows,
         stats: [
-          { label: "Total", value: visibleItems.length },
+          { label: "Total", value: rows.length },
           { label: "Missing", value: missing, color: missing > 0 ? "FFDC2626" : "FF94A3B8" },
           { label: "Completed", value: completed, color: "FF059669" },
         ],
       })
-      toast({ title: "Exported", description: `${visibleItems.length} rows written to Excel.` })
+      toast({ title: "Exported", description: `${rows.length} rows written to Excel.` })
     } catch (error: any) {
       toast({ title: "Export failed", description: error.message, variant: "destructive" })
     } finally {
@@ -216,7 +242,7 @@ export default function TaskBasketPage() {
         <Button
           variant="outline"
           size="sm"
-          onClick={handleExport}
+          onClick={() => handleExport()}
           disabled={exporting || visibleItems.length === 0}
           className={PILL_BUTTON_CLASS}
           title="Download the filtered rows as a styled Excel file"
@@ -226,17 +252,88 @@ export default function TaskBasketPage() {
         </div>
       </div>
 
+      {/* Bulk action bar — only while something is ticked, so it costs no space the rest of the time */}
+      {selectedItems.length > 0 && (
+        <div className="shrink-0 border-b border-blue-200 bg-blue-50 px-4 py-2 flex items-center gap-2 flex-wrap">
+          <span className="text-base font-semibold text-blue-900">
+            {selectedItems.length} selected
+          </span>
+          <span className="hidden md:inline text-sm text-blue-700">
+            {selectedOpenCount} open · {selectedItems.length - selectedOpenCount} resolved
+          </span>
+          <div className="ml-auto flex items-center gap-2 flex-wrap">
+            <Button
+              size="sm"
+              variant="outline"
+              className={PILL_BUTTON_CLASS}
+              disabled={selectedOpenCount === 0}
+              onClick={() => setBulkResolveOpen(true)}
+              title={selectedOpenCount === 0 ? "No open rows in the selection" : "Mark the selected open rows as resolved"}
+            >
+              <CheckCheck className="h-5 w-5" /> Mark resolved
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className={PILL_BUTTON_CLASS}
+              disabled={exporting}
+              onClick={() => handleExport(selectedItems)}
+              title="Download only the selected rows as an Excel file"
+            >
+              {exporting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />} Export selected
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className={cn(PILL_BUTTON_CLASS, "text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700")}
+              onClick={() => setBulkDeleteOpen(true)}
+            >
+              <Trash2 className="h-5 w-5" /> Delete
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setSelectedIds(new Set())}
+              title="Clear the selection"
+            >
+              <X className="h-5 w-5" /> Clear
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Body — the table owns its scrolling and fills whatever height is left */}
       <div className="px-3 py-3 flex-1 min-h-0 flex flex-col overflow-hidden">
         <div className="flex flex-col flex-1 min-h-0 border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden">
         <TaskBasketTable
           items={visibleItems}
           loading={loading}
+          selectedIds={selectedIds}
+          onSelectionChange={setSelectedIds}
           onItemResolved={(id) => setItems((prev) => prev.map((i) => (i.id === id ? { ...i, status: "resolved" } : i)))}
           onItemDeleted={(id) => setItems((prev) => prev.filter((i) => i.id !== id))}
         />
         </div>
       </div>
+
+      <BulkResolveDialog
+        items={selectedItems}
+        open={bulkResolveOpen}
+        onOpenChange={setBulkResolveOpen}
+        // Reload instead of patching rows locally: the server stamps resolved_by/resolved_at, and the
+        // table's "Resolved … by …" line would read "automatically" until the next refresh.
+        onResolved={() => { setSelectedIds(new Set()); load() }}
+      />
+      <BulkDeleteDialog
+        items={selectedItems}
+        open={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
+        onDeleted={(ids) => {
+          const gone = new Set(ids)
+          setItems((prev) => prev.filter((i) => !gone.has(i.id)))
+          setSelectedIds(new Set())
+        }}
+      />
     </div>
   )
 }

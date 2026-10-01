@@ -478,12 +478,23 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
       reviewReason = notifyPriority === "informational" ? "Important notification (FYI) — no action needed." : "Important notification — requires attention."
     }
 
-    if (confidence < THRESHOLD && !notifyFlag) {
+    // Not from KRA, nothing (ignore/notify rule, noise-sender check) already caught it, and it isn't
+    // part of a case thread already being tracked: there's no rule type for "anything that isn't KRA",
+    // so this catch-all lives here instead. Needs Review is for KRA correspondence someone has to look
+    // at — ordinary non-KRA business mail (bank statements, vendor invoices, SaaS/account noise, etc.)
+    // has nothing to do in this tool, so it's parked under Ignored (soft — still visible, still
+    // resyncable) rather than left to pile up forever. threadCase is checked first so a reply that
+    // genuinely belongs to an already-tracked case is never silently dropped just because its sender
+    // isn't @kra.go.ke.
+    if (!notifyFlag && !kra && !threadCase && categoryKey !== "system_noise") {
+      categoryKey = "system_noise"
+      confidence = 0.5 // heuristic, not a specific rule match — cosmetic only, disposition is set directly
+      source = "rule"
+      disposition = "ignore"
+      reviewReason = null
+    } else if (confidence < THRESHOLD && !notifyFlag) {
       disposition = "needs_review"
       reviewReason = "Low classification confidence — please confirm."
-    } else if (!kra && categoryKey !== "system_noise" && !notifyFlag) {
-      disposition = "needs_review"
-      reviewReason = "Sender is not KRA."
     }
 
     if (disposition === "action_required") {

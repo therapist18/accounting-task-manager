@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { authorize, fail } from "@/lib/email-center/api"
 import { CATEGORY_BY_KEY } from "@/lib/email-center/categories"
 import { APPROVAL_DECISION_CATEGORIES, findCaseByThread, findOpenCaseByPin, openCaseFromEmail, toNairobiYmd } from "@/lib/email-center/ingest"
-import { classifyByRules, detectApproval, isAutomatedSender, type SubjectRule } from "@/lib/email-center/rules"
+import { classifyByRules, detectApproval, isAutomatedSender, isKraSender, type SubjectRule } from "@/lib/email-center/rules"
 import { loadSubjectRules } from "@/lib/email-center/rule-store"
 import { AUTO_CONFIDENCE_THRESHOLD as THRESHOLD } from "@/lib/email-center/types"
 import { withSupabaseRetry } from "@/lib/supabaseRetry"
@@ -108,7 +108,33 @@ async function reclassifyEmails(
         threadHasCase: !!e.case_id,
         rules,
       })
-      if (!rule || rule.confidence < THRESHOLD) return // stays in Needs Review
+      if (!rule || rule.confidence < THRESHOLD) {
+        // Same catch-all ingestion now applies: a non-KRA sender with nothing else matching, and no
+        // case tracking this thread, has nothing to do sitting in Needs Review — there's no rule type
+        // for "anything that isn't KRA", so this lives in code (mirrors the matching block in
+        // ingest.ts). A reply that's genuinely part of an already-tracked case is left alone.
+        if (!e.case_id && !isKraSender(e.sender_email) && !(await findCaseByThread(sb, e.gmail_thread_id))) {
+          const { error: upErr } = await withSupabaseRetry(() =>
+            sb
+              .from("emails")
+              .update({
+                category_key: "system_noise",
+                category_confidence: 0.5,
+                classification_source: "rule",
+                disposition: "ignore",
+                priority: "low",
+                review_reason: null,
+                classified_at: now,
+                updated_at: now,
+              })
+              .eq("id", e.id)
+          )
+          if (upErr) throw new Error(upErr.message)
+          changed++
+          moved.push({ id: e.id, subject: e.subject, category: "system_noise", disposition: "ignore", case_opened: false })
+        }
+        return // otherwise stays in Needs Review
+      }
 
       // An ignore or notify match on a mail that's already attached to a real case (reclassify can run
       // over Update-only mail too, unlike ingestion which only ever sees a fresh, uncased message) is

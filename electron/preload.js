@@ -14,7 +14,11 @@ contextBridge.exposeInMainWorld("desktop", {
   // Lets the renderer raise a native toast without reaching for the DOM
   // Notification API, which Electron's sandboxed webContents does not grant
   // permission for.
-  notify: ({ title, body }) => ipcRenderer.invoke("app:notify", { title, body }),
+  // `navigateTo` (an in-app path) makes clicking the toast open that page.
+  notify: ({ title, body, navigateTo }) => ipcRenderer.invoke("app:notify", { title, body, navigateTo }),
+
+  // A notification that carried `navigateTo` was clicked - go to that in-app path.
+  onNavigate: (handler) => subscribe("app:navigate", handler),
 
   // Tells main which user is signed in so a crashed session's in-flight runs
   // can be reset on next launch instead of showing as permanently running.

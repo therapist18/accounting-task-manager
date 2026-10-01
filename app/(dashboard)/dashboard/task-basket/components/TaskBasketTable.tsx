@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { differenceInCalendarDays, format } from "date-fns";
 import {
@@ -31,9 +32,12 @@ interface TaskBasketTableProps {
   loading?: boolean;
   onItemResolved: (id: string) => void;
   onItemDeleted: (id: string) => void;
+  /** Ids ticked for a bulk action. Owned by the page, which renders the bulk action bar. */
+  selectedIds: Set<string>;
+  onSelectionChange: (ids: Set<string>) => void;
 }
 
-const COLUMN_COUNT = 11;
+const COLUMN_COUNT = 12;
 
 // Days an open item has been sitting in the basket — the "Overdue" column and its sort key. Resolved
 // rows have no overdue clock, so they sort to 0 rather than to a negative age.
@@ -66,6 +70,7 @@ const ACCESSORS: Record<string, (item: TaskBasketItem) => string | number> = {
 // the row labels under the "#" column.
 const STATS_COLUMNS: StatsColumn<TaskBasketItem>[] = [
   { id: "#" },
+  { id: "select" },
   { id: "company" },
   { id: "companyId" },
   { id: "module" },
@@ -144,6 +149,8 @@ export default function TaskBasketTable({
   loading = false,
   onItemResolved,
   onItemDeleted,
+  selectedIds,
+  onSelectionChange,
 }: TaskBasketTableProps) {
   const [resolvingItem, setResolvingItem] = useState<TaskBasketItem | null>(
     null,
@@ -172,6 +179,29 @@ export default function TaskBasketTable({
     .slice(pageStart, pageStart + itemsPerPage)
     .map((item, i) => ({ item, number: pageStart + i + 1 }));
 
+  // Selection. The header box acts on the rows of the page being viewed; "Select all N" in the banner
+  // reaches the whole filtered list (Gmail-style), since a bulk action over 46 companies shouldn't
+  // mean paging through and ticking page by page.
+  const pageIds = pageRows.map(({ item }) => item.id);
+  const selectedOnPage = pageIds.filter((id) => selectedIds.has(id)).length;
+  const allPageSelected = pageIds.length > 0 && selectedOnPage === pageIds.length;
+  const allSelected = items.length > 0 && items.every((i) => selectedIds.has(i.id));
+
+  const toggleOne = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onSelectionChange(next);
+  };
+  const togglePage = () => {
+    const next = new Set(selectedIds);
+    if (allPageSelected) pageIds.forEach((id) => next.delete(id));
+    else pageIds.forEach((id) => next.add(id));
+    onSelectionChange(next);
+  };
+  const selectAllFiltered = () => onSelectionChange(new Set(items.map((i) => i.id)));
+  const clearSelection = () => onSelectionChange(new Set());
+
   return (
     <>
       <div className="flex flex-col flex-1 min-h-0">
@@ -181,6 +211,21 @@ export default function TaskBasketTable({
           </div>
         ) : (
           <div className="overflow-hidden flex flex-col flex-1 min-h-0">
+            {!loading && allSelected ? (
+              <div className="shrink-0 flex items-center justify-center gap-2 border-b border-blue-100 bg-blue-50 px-3 py-1.5 text-sm text-blue-900">
+                All {items.length} item{items.length === 1 ? "" : "s"} in this filter are selected.
+                <button type="button" onClick={clearSelection} className="font-semibold underline underline-offset-2">
+                  Clear selection
+                </button>
+              </div>
+            ) : !loading && allPageSelected && items.length > pageRows.length ? (
+              <div className="shrink-0 flex items-center justify-center gap-2 border-b border-blue-100 bg-blue-50 px-3 py-1.5 text-sm text-blue-900">
+                All {pageRows.length} on this page are selected.
+                <button type="button" onClick={selectAllFiltered} className="font-semibold underline underline-offset-2">
+                  Select all {items.length}
+                </button>
+              </div>
+            ) : null}
             <div className="overflow-auto flex-1 min-h-0 custom-scrollbar">
               <table className="w-full min-w-[1420px] border-separate border-spacing-0 text-base">
                 <thead className="sticky top-0 z-30 bg-white shadow-xs">
@@ -194,6 +239,14 @@ export default function TaskBasketTable({
                     >
                       #
                     </SortTh>
+                    <th className="w-10 px-3 py-2.5 text-center border-b border-slate-200/80">
+                      <Checkbox
+                        checked={allPageSelected ? true : selectedOnPage > 0 ? "indeterminate" : false}
+                        onCheckedChange={togglePage}
+                        disabled={loading || pageIds.length === 0}
+                        aria-label="Select all rows on this page"
+                      />
+                    </th>
                     <SortTh
                       id="companyId"
                       levels={levels}
@@ -297,7 +350,13 @@ export default function TaskBasketTable({
                       const isOpen = item.status === "open";
                       const expanded = expandedId === item.id;
                       return [
-                        <tr key={item.id} className={zebraRow(index)}>
+                        <tr
+                          key={item.id}
+                          className={cn(
+                            zebraRow(index),
+                            selectedIds.has(item.id) && "!bg-blue-50/70",
+                          )}
+                        >
                           <td
                             className={cn(
                               TD_CLASS,
@@ -305,6 +364,13 @@ export default function TaskBasketTable({
                             )}
                           >
                             {number}
+                          </td>
+                          <td className={cn(TD_CLASS, "text-center")}>
+                            <Checkbox
+                              checked={selectedIds.has(item.id)}
+                              onCheckedChange={() => toggleOne(item.id)}
+                              aria-label={`Select ${item.company_name}`}
+                            />
                           </td>
                           <td
                             className={cn(

@@ -389,7 +389,7 @@ function releasePowerSaveBlocker() {
   appendLog("Power save blocker released");
 }
 
-function notify({ title, body, jobId, status }) {
+function notify({ title, body, jobId, status, navigateTo }) {
   if (!Notification.isSupported()) {
     appendLog(`Notification skipped (unsupported): ${title} - ${body}`);
     return;
@@ -409,6 +409,11 @@ function notify({ title, body, jobId, status }) {
     mainWindow.focus();
     if (jobId) {
       mainWindow.webContents.send("automation:navigate", { jobId, status });
+    }
+    // A page inside the app (e.g. the Task Basket). Only in-app paths are forwarded, so a renderer
+    // can't use a notification click to send the window somewhere else.
+    if (navigateTo && String(navigateTo).startsWith("/") && !String(navigateTo).startsWith("//")) {
+      mainWindow.webContents.send("app:navigate", { path: String(navigateTo) });
     }
   });
 
@@ -651,9 +656,9 @@ ipcMain.handle("app:get-info", () => ({
   platform: process.platform,
 }));
 
-ipcMain.handle("app:notify", (_event, { title, body } = {}) => {
+ipcMain.handle("app:notify", (_event, { title, body, navigateTo } = {}) => {
   if (!title) return false;
-  notify({ title: String(title), body: body ? String(body) : "" });
+  notify({ title: String(title), body: body ? String(body) : "", navigateTo });
   return true;
 });
 
