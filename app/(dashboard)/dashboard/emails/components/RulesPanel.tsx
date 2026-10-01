@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, Bell, CheckCircle2, Download, EyeOff, Info, Loader2, Mail, Pencil, Plus, Tag, Trash2, XCircle } from "lucide-react"
+import { AlertTriangle, Bell, CheckCircle2, Download, EyeOff, FlaskConical, Info, Loader2, Mail, Pencil, Plus, Tag, Trash2, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -20,6 +20,8 @@ import {
 } from "./table"
 import { PRIMARY_PILL_BUTTON_CLASS, SearchSelect, api, fmtDateTime, ruleOutcome, type CategoryOption, type RuleRow } from "./shared"
 import { exportRulesToExcel } from "./exportRules"
+import { RuleTesterDialog } from "./RuleTesterDialog"
+import { compileRule } from "@/lib/email-center/rules"
 
 // The Rules tab: the subject rules that drive automatic classification, auto-ignore and important
 // notifications, editable without a deploy. Rules are tried lowest "Order" first and the first match
@@ -62,26 +64,53 @@ const TOGGLEABLE_COLUMNS = [
 ]
 
 
-const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-
 // A rule's subject wordings, one per line in the editor: the first is the rule's primary pattern, the rest
 // are alternative wordings. The rule matches when ANY of them matches.
 const splitWordings = (text: string) => text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
 
-// Same matching the server does (contains = escaped, case-insensitive, any wording), so the tester never
-// disagrees with ingestion. Reports which wording matched, which is what makes a long list easy to debug.
-function testWordings(matchType: string, wordings: string[], sample: string): { state: "match" | "no" | "invalid" | "empty"; matched?: string } {
-  if (!wordings.length || !sample.trim()) return { state: "empty" }
+interface DraftTestResult {
+  state: "match" | "no" | "invalid" | "empty"
+  matchedSubject?: string
+  matchedSender?: string
+  // Set on "no": which side(s) actually failed, so the message can say which — "both must match" means
+  // either side alone failing fails the whole rule.
+  subjectFailed?: boolean
+  senderFailed?: boolean
+}
+
+// Tests a DRAFT (not yet saved) against a sample subject/sender using the exact same matching the real
+// engine does (compileRule, from lib/email-center/rules — same cache, same contains-escaping, same
+// case-insensitivity), so this never quietly disagrees with what ingestion/Reclassify would actually
+// do. Unlike testing the subject alone, this also honors "when you fill in both, both must match": a
+// rule with a sender set that doesn't get a matching sender here reports "no", even if the subject half
+// matches fine — the old subject-only tester couldn't tell you that at all.
+function testDraft(
+  matchType: "contains" | "regex", wordings: string[],
+  senderMatchType: "contains" | "regex", senders: string[],
+  sampleSubject: string, sampleSender: string
+): DraftTestResult {
+  if (!sampleSubject.trim() && !sampleSender.trim()) return { state: "empty" }
+
   let invalid = false
-  for (const w of wordings) {
-    try {
-      const re = new RegExp(matchType === "contains" ? escapeRegex(w) : w, "i")
-      if (re.test(sample)) return { state: "match", matched: w }
-    } catch {
-      invalid = true
+  const testAgainst = (type: "contains" | "regex", patterns: string[], sample: string): string | undefined => {
+    for (const p of patterns) {
+      const re = compileRule({ match_type: type, pattern: p })
+      if (!re) { invalid = true; continue }
+      if (re.test(sample)) return p
     }
+    return undefined
   }
-  return { state: invalid ? "invalid" : "no" }
+
+  // No wordings/senders configured on that side = that side imposes no condition (matches anything),
+  // exactly like matchesSubject()/matchesSender() treat an empty list.
+  const matchedSubject = wordings.length ? testAgainst(matchType, wordings, sampleSubject) : undefined
+  const subjectOk = !wordings.length || !!matchedSubject
+  const matchedSender = senders.length ? testAgainst(senderMatchType, senders, sampleSender) : undefined
+  const senderOk = !senders.length || !!matchedSender
+
+  if (invalid) return { state: "invalid" }
+  if (subjectOk && senderOk) return { state: "match", matchedSubject, matchedSender }
+  return { state: "no", subjectFailed: !subjectOk, senderFailed: !senderOk }
 }
 
 // One numbered section of the Add/Edit dialog: what to decide first comes first, and each step says what
@@ -192,6 +221,11 @@ export function RulesPanel({
   const [showStats, setShowStats] = useState(false)
   const colCount = 2 + TOGGLEABLE_COLUMNS.filter((c) => isVisible(c.id)).length
 
+  // "Test a subject" — same idea as the per-rule "Try it" box, but run against every active rule at
+  // once via the real engine (classifyByRules), so the answer is exactly what ingestion/Reclassify
+  // would decide, not a second hand-written approximation — see RuleTesterDialog.
+  const [testerOpen, setTesterOpen] = useState(false)
+
   const statsRowColumns = useMemo(() => {
     const cols: { id: string; getValue?: (r: RuleRow) => string }[] = [{ id: "#" }]
     if (isVisible("order")) cols.push({ id: "order", getValue: (r) => String(r.sort_order) })
@@ -213,6 +247,9 @@ export function RulesPanel({
 
   const [draft, setDraft] = useState<Draft | null>(null)
   const [sample, setSample] = useState("")
+  // When the rule also has a sender set, "both must match" (per the dialog's own copy) — so the "Try
+  // it" box needs a sender to test against too, or it was just quietly ignoring that half of the rule.
+  const [sampleSender, setSampleSender] = useState("")
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState<RuleRow | null>(null)
   // How many tasks the rule being deleted has opened, fetched fresh each time the dialog opens so the
@@ -239,9 +276,10 @@ export function RulesPanel({
     }
   }
 
-  const openNew = () => { setSample(""); setDraft(emptyDraft(nextOrder)) }
+  const openNew = () => { setSample(""); setSampleSender(""); setDraft(emptyDraft(nextOrder)) }
   const openEdit = (r: RuleRow) => {
     setSample("")
+    setSampleSender("")
     setDraft({
       id: r.id, is_ignore: r.is_ignore, hard_ignore: r.hard_ignore, is_notify: r.is_notify, notify_priority: r.notify_priority ?? "urgent", match_type: r.match_type,
       // Lowercased on the way in too — a rule saved before this field forced lowercase (or with mixed
@@ -340,7 +378,10 @@ export function RulesPanel({
   }
 
   const wordingCount = draft ? splitWordings(draft.wordings).length : 0
-  const test = draft ? testWordings(draft.match_type, splitWordings(draft.wordings), sample) : { state: "empty" as const, matched: undefined }
+  const senderCount = draft ? splitWordings(draft.sender_patterns).length : 0
+  const test: DraftTestResult = draft
+    ? testDraft(draft.match_type, splitWordings(draft.wordings), draft.sender_match_type, splitWordings(draft.sender_patterns), sample, sampleSender)
+    : { state: "empty" }
   const result = test.state
 
   return (
@@ -367,6 +408,15 @@ export function RulesPanel({
             </Button>
           )}
           <ColumnVisibilityButton columns={TOGGLEABLE_COLUMNS} visible={visibleCols} onToggle={toggleColumn} onShowAll={showAll} />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setTesterOpen(true)}
+            className="h-9 px-3.5 gap-1.5 rounded-full border-slate-200 text-base font-medium"
+            title="Paste a subject and see which rule (of all of them) would catch it"
+          >
+            <FlaskConical className="w-5 h-5" /> Test a subject
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -638,6 +688,8 @@ export function RulesPanel({
         </DialogContent>
       </Dialog>
 
+      <RuleTesterDialog open={testerOpen} onOpenChange={setTesterOpen} rules={rules} categories={categories} />
+
       {/* Add / edit */}
       <Dialog open={!!draft} onOpenChange={(o) => !o && !saving && setDraft(null)}>
         <DialogContent className="max-w-4xl w-[96vw] max-h-[94vh] p-0 gap-0 border border-slate-200 shadow-xl rounded-2xl overflow-hidden bg-white flex flex-col">
@@ -787,14 +839,45 @@ export function RulesPanel({
                 </div>
 
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-2">
-                  <Label className="text-sm font-medium text-slate-600">Try it — paste a real subject</Label>
+                  <Label className="text-sm font-medium text-slate-600">Try it — paste a real subject{senderCount > 0 ? " and sender" : ""}</Label>
                   <Input className="h-10 text-base rounded-md border-slate-200 bg-white" value={sample} onChange={(e) => setSample(e.target.value)} placeholder="e.g. Re: Pre-Assessment Notice – ABC Ltd" />
+                  {senderCount > 0 && (
+                    <Input
+                      className="h-10 text-base rounded-md border-slate-200 bg-white font-mono"
+                      value={sampleSender}
+                      onChange={(e) => setSampleSender(e.target.value)}
+                      placeholder="e.g. infomail@imbank.co.ke — this rule also requires a sender match"
+                    />
+                  )}
                   <p className={cn(
                     "text-base flex items-center gap-1.5 min-h-6",
                     result === "match" && "text-emerald-700", result === "no" && "text-slate-500", result === "invalid" && "text-red-600"
                   )}>
-                    {result === "match" && (<><CheckCircle2 className="h-5 w-5" /> This subject would match{wordingCount > 1 && test.matched ? <> — via <span className="font-mono text-sm">{test.matched}</span></> : "."}</>)}
-                    {result === "no" && (<><XCircle className="h-5 w-5" /> This subject would not match.</>)}
+                    {result === "match" && (
+                      <>
+                        <CheckCircle2 className="h-5 w-5" /> This would match
+                        {(wordingCount > 1 && test.matchedSubject) || (senderCount > 1 && test.matchedSender) ? (
+                          <>
+                            {" "}— via{" "}
+                            {test.matchedSubject && <span className="font-mono text-sm">{test.matchedSubject}</span>}
+                            {test.matchedSubject && test.matchedSender ? " + " : ""}
+                            {test.matchedSender && <span className="font-mono text-sm">{test.matchedSender}</span>}
+                          </>
+                        ) : "."}
+                      </>
+                    )}
+                    {result === "no" && (
+                      <>
+                        <XCircle className="h-5 w-5" />
+                        {test.subjectFailed && test.senderFailed
+                          ? " Neither the subject nor the sender would match."
+                          : test.subjectFailed
+                            ? " The subject wouldn't match (the sender is fine, but this rule needs both)."
+                            : test.senderFailed
+                              ? " The sender wouldn't match (the subject is fine, but this rule needs both)."
+                              : " This wouldn't match."}
+                      </>
+                    )}
                     {result === "invalid" && (<><XCircle className="h-5 w-5" /> One of the lines isn't a valid regular expression.</>)}
                   </p>
                 </div>

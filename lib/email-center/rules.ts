@@ -113,7 +113,7 @@ export function subjectWordings(rule: Pick<SubjectRule, "pattern" | "extra_patte
 
 // Whether an email's SUBJECT matches a rule: any one of its wordings is enough. A rule with no subject
 // wording at all matches any subject (a sender-only ignore/notify rule).
-function matchesSubject(rule: SubjectRule, cleanSubject: string): boolean {
+export function matchesSubject(rule: SubjectRule, cleanSubject: string): boolean {
   const wordings = subjectWordings(rule)
   if (!wordings.length) return true
   return wordings.some((pattern) => !!compileRule({ match_type: rule.match_type, pattern })?.test(cleanSubject))
@@ -127,7 +127,7 @@ export function senderPatterns(rule: Pick<SubjectRule, "sender_pattern" | "extra
 
 // Whether an email's SENDER matches a rule's optional sender filter: any one of its senders is enough.
 // A rule with no sender filter at all matches any sender.
-function matchesSender(rule: SubjectRule, senderEmail: string): boolean {
+export function matchesSender(rule: SubjectRule, senderEmail: string): boolean {
   const senders = senderPatterns(rule)
   if (!senders.length) return true
   const sender = senderEmail.trim()
@@ -197,6 +197,12 @@ export function detectApproval(body: string): "approved" | "rejected" | null {
   return null
 }
 
+// "Re: Fwd: Re: Payment Defaulter" -> "Payment Defaulter" — the same normalization every subject goes
+// through before rule matching, exported so a rule tester can reproduce exactly what classification sees.
+export function stripReplyPrefix(subject: string): string {
+  return subject.replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, "").trim()
+}
+
 export function classifyByRules(input: {
   subject: string
   body: string
@@ -206,7 +212,7 @@ export function classifyByRules(input: {
 }): RuleResult | null {
   const { subject, body, senderEmail, threadHasCase, rules = DEFAULT_SUBJECT_RULES } = input
 
-  const cleanSubject = subject.replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, "").trim()
+  const cleanSubject = stripReplyPrefix(subject)
 
   // Ignore rules apply to every sender — they exist to keep noise (newsletters, automated mail,
   // non-KRA senders that would otherwise sit in Needs Review) out of the app. They win over

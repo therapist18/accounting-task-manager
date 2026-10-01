@@ -738,6 +738,7 @@ export default function EmailCenterPage() {
         embedded={embedded}
         showStats={showStats}
         visibleColumns={emailColumns.visible}
+        rules={rules}
       />
     )
   }
@@ -1104,13 +1105,23 @@ export default function EmailCenterPage() {
                   <Label className="text-xs text-slate-500">To</Label>
                   <DateInput value={reclassifyUntil} onChange={setReclassifyUntil} className="h-9 text-sm rounded-md border-slate-200 bg-white" />
                 </div>
-                {(reclassifySince || reclassifyUntil) && (
-                  <Button type="button" variant="ghost" size="sm" onClick={() => { setReclassifySince(""); setReclassifyUntil("") }} className="h-9 px-2.5 text-sm text-slate-600">
-                    Clear — whole backlog
-                  </Button>
-                )}
               </div>
               <div className="flex flex-wrap gap-1.5">
+                {/* "All mail" is just as much a choice as a period — a first-class button here instead
+                    of only reachable by clearing both date fields by hand. */}
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => { setReclassifySince(""); setReclassifyUntil("") }}
+                  className={cn(
+                    "h-7 px-2.5 rounded-md text-xs font-semibold",
+                    !reclassifySince && !reclassifyUntil
+                      ? "bg-custom-blue text-white hover:bg-custom-blue/90"
+                      : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-medium"
+                  )}
+                >
+                  All mail
+                </Button>
                 {[
                   { label: "Last 7 days", days: -7 },
                   { label: "Last 30 days", days: -30 },

@@ -1,15 +1,16 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Paperclip, Inbox, CornerUpLeft } from "lucide-react"
+import { Paperclip, Inbox, CornerUpLeft, FlaskConical } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { Pagination } from "./Pagination"
+import { RuleTesterDialog } from "./RuleTesterDialog"
 import {
   StatsRows, TableLoading, SortTh, TD_CLASS,
   useColumnFilters, useTableSort, zebraRow,
 } from "./table"
-import { DISPOSITION_BADGE, DISPOSITION_LABEL, fmtDateTime, type CategoryOption, type Disposition, type EmailRow } from "./shared"
+import { DISPOSITION_BADGE, DISPOSITION_LABEL, fmtDateTime, type CategoryOption, type Disposition, type EmailRow, type RuleRow } from "./shared"
 
 // The email tabs (Needs Review / Update / Ignored): one sortable, filterable, bordered, zebra-striped
 // table with pagination — the same table language as the cases table and the Individual Document
@@ -54,6 +55,7 @@ export function EmailsTable({
   onAllocate,
   showStats = false,
   visibleColumns: visibility,
+  rules,
 }: {
   emails: EmailRow[]
   categories: CategoryOption[]
@@ -76,9 +78,15 @@ export function EmailsTable({
   // list tab's table keeps those controls in one place instead of each growing its own.
   showStats?: boolean
   visibleColumns?: Record<string, boolean>
+  // When given, a Needs Review row's Actions cell gets a "Test" button that opens the rule tester
+  // seeded with that email's own subject/sender — same tool as the Rules tab's toolbar button, just
+  // starting from a real mail instead of a blank form. Omitted elsewhere (Notifications/Update), where
+  // testing against rules is less relevant.
+  rules?: RuleRow[]
 }) {
   const [itemsPerPage, setItemsPerPage] = useState(50)
   const [page, setPage] = useState(0)
+  const [testerSeed, setTesterSeed] = useState<{ subject: string; sender: string } | null>(null)
   const isVisible = (id: string) => visibility?.[id] !== false
 
   const byKey = new Map(categories.map((c) => [c.key, c]))
@@ -305,6 +313,17 @@ export function EmailsTable({
                           <Button size="sm" variant="outline" className="h-8 px-2.5 rounded-md text-base font-medium border-slate-200 bg-white hover:bg-slate-100" onClick={() => onQuickClassify(e, "action_required")}>Action</Button>
                           <Button size="sm" variant="outline" className="h-8 px-2.5 rounded-md text-base font-medium border-slate-200 bg-white hover:bg-slate-100" onClick={() => onQuickClassify(e, "update_only")}>Update</Button>
                           <Button size="sm" variant="ghost" className="h-8 px-2.5 rounded-md text-base font-medium text-slate-500 hover:text-slate-800" onClick={() => onQuickClassify(e, "ignore")}>Ignore</Button>
+                          {rules && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0 rounded-md text-slate-400 hover:text-custom-blue hover:bg-slate-100"
+                              onClick={() => setTesterSeed({ subject: e.subject, sender: e.sender_email })}
+                              title="Test this mail's subject/sender against every rule"
+                            >
+                              <FlaskConical className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
                       ) : <span className="text-slate-300">—</span>}
                     </td>
@@ -324,6 +343,16 @@ export function EmailsTable({
         sticky={false}
         className="shrink-0"
       />
+      {rules && (
+        <RuleTesterDialog
+          open={!!testerSeed}
+          onOpenChange={(o) => !o && setTesterSeed(null)}
+          rules={rules}
+          categories={categories}
+          initialSubject={testerSeed?.subject}
+          initialSender={testerSeed?.sender}
+        />
+      )}
     </div>
   )
 }
