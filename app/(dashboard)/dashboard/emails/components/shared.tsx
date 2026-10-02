@@ -86,7 +86,7 @@ export interface EmailRow {
   handled_by_name?: string | null
   handled_at?: string | null
   // Who (a person, on a manual reclassification) and when — null classified_by_id means the system
-  // classified it automatically (a rule or AI, see classification_source), not that it's unknown.
+  // classified it automatically (a rule, see classification_source), not that it's unknown.
   classified_by_id?: string | null
   classified_by_name?: string | null
   classified_at?: string | null

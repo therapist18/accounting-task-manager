@@ -11,7 +11,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { gmail_v1 } from "googleapis"
 import { getGmailClient, parseEmailHeaders } from "@/lib/gmail/client"
-import { extractWithAi } from "./ai"
 import { CATEGORY_BY_KEY, KRA_JOB_LEVEL, type CategoryDef } from "./categories"
 import { classifyByRules, detectApproval, extractPin, isAutomatedSender, isKraSender } from "./rules"
 import { loadSubjectRules } from "./rule-store"
@@ -19,7 +18,6 @@ import { withRetry, withSupabaseRetry } from "./retry"
 import {
   AUTO_CONFIDENCE_THRESHOLD as THRESHOLD,
   type Actor,
-  type AiExtraction,
   type Disposition,
 } from "./types"
 
@@ -33,8 +31,8 @@ const LOCK_MS = 90_000
 const MAX_PASSES = 3
 const BUCKET = "email-attachments"
 // How many messages ingestMessage() runs at once, within ONE mailbox. Each KRA email can mean 2+
-// Gmail calls (metadata, then a full fetch), one more per attachment, an AI call for a confident
-// notice, and several DB round trips — running them one at a time was the actual bottleneck, not
+// Gmail calls (metadata, then a full fetch), one more per attachment,
+// and several DB round trips — running them one at a time was the actual bottleneck, not
 // Gmail's quota (250 units/user/second; a handful of concurrent full-fetches + attachment downloads
 // sits nowhere close to that). Kept well under the quota rather than tuned to the exact ceiling.
 const INGEST_CONCURRENCY = 6
@@ -55,7 +53,7 @@ interface Ctx {
   gmail: gmail_v1.Gmail
   account: AccountRow
   // Set only by a "Sync from date" run started with "Pause auto-classification" checked: every inbound
-  // email is stored straight into Needs Review, skipping every ignore/notify/classify rule (and AI)
+  // email is stored straight into Needs Review, skipping every ignore/notify/classify rule
   // entirely — for recovering mail while the rules themselves are still being tuned, without letting
   // not-yet-correct rules re-drop or re-misclassify it the moment it's re-fetched.
   skipClassification?: boolean
@@ -179,10 +177,9 @@ export interface CaseFacts {
   cc_addresses: string | null
   received_at: string
   kra_pin: string | null
-  extracted: Partial<AiExtraction> | null
   snippet: string
   attachment_names: string[]
-  // The classify rule that decided this email's category, when a rule (rather than AI or a person)
+  // The classify rule that decided this email's category, when a rule (rather than a person)
   // is what actually opened the case. Absent/null for the manual "mark as action required" path.
   created_by_rule_id?: string | null
 }
@@ -196,25 +193,24 @@ export async function openCaseFromEmail(
   const existing = await findCaseByThread(sb, facts.gmail_thread_id)
   if (existing) return { caseRow: existing, created: false }
 
-  const ex = facts.extracted ?? {}
   const now = new Date().toISOString()
   const row = {
     company_id: facts.company_id,
     gmail_thread_id: facts.gmail_thread_id,
     opened_gmail_message_id: facts.gmail_message_id,
     category_key: category.key,
-    notice_type: ex.notice_type || category.name,
+    notice_type: category.name,
     subject: facts.subject,
-    kra_pin: facts.kra_pin ?? ex.kra_pin ?? null,
+    kra_pin: facts.kra_pin,
     job_level: KRA_JOB_LEVEL,
     kra_email_from: facts.sender_email,
     kra_email_cc: facts.cc_addresses,
     email_date: toNairobiYmd(facts.received_at),
-    deadline_date: ex.deadline_date ?? null,
-    contents: ex.contents ?? facts.snippet.slice(0, 500),
+    deadline_date: null,
+    contents: facts.snippet.slice(0, 500),
     attachments_summary: facts.attachment_names.length ? facts.attachment_names.join(", ") : null,
-    signing_officer_name: ex.signing_officer_name ?? null,
-    signing_officer_position: ex.signing_officer_position ?? null,
+    signing_officer_name: null,
+    signing_officer_position: null,
     created_by_rule_id: facts.created_by_rule_id ?? null,
     created_by_id: actor.id, // NULL when opened automatically from an incoming email
     updated_by_id: actor.id,
@@ -288,7 +284,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   if (!paused && direction === "inbound" && !kra && !threadCase && isAutomatedSender(senderEmail)) return "skipped"
 
   // Set when a confident ignore rule matches: the mail is stored as ignored (headers only — no body,
-  // no attachments, no AI), tagged with the rule, so the Ignored tab can show what each rule caught.
+  // no attachments), tagged with the rule, so the Ignored tab can show what each rule caught.
   let ruleIgnore: { ruleId: string; confidence: number } | null = null
 
   // While paused this whole cheap pass is skipped too: it's what would otherwise drop hard-ignore
@@ -325,11 +321,10 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
 
   // ── attachments: download + store what we need (KRA mail + our replies) ──
   const attachmentMeta = collectAttachments(payload)
-  const pdfs: Array<{ filename: string; data: Buffer }> = []
   const attachmentRows: any[] = []
   for (const att of attachmentMeta) {
     let storagePath: string | null = null
-    let status: "pending" | "skipped" | "failed" = "skipped"
+    let status: "skipped" | "failed" = "skipped"
     if (att.size <= MAX_ATTACHMENT_BYTES) {
       try {
         const res = await withRetry(() => gmail.users.messages.attachments.get({ userId: "me", messageId, id: att.attachmentId }))
@@ -341,10 +336,6 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
           sb.storage.from(BUCKET).upload(storagePath!, buf, { contentType: att.mimeType, upsert: true })
         )
         if (error) throw error
-        if (att.mimeType === "application/pdf" || /\.pdf$/i.test(att.filename)) {
-          pdfs.push({ filename: att.filename, data: buf })
-          status = "pending"
-        }
       } catch (err) {
         console.error("[email-center] attachment failed", att.filename, err)
         storagePath = null
@@ -364,8 +355,6 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   // ── classify + act ──
   let categoryKey = "other_kra"
   let confidence = 0.3
-  let source: "rule" | "ai" | "rule+ai" = "rule"
-  let ai: AiExtraction | null = null
   let disposition: Disposition
   let reviewReason: string | null = null
   let caseId: string | null = null
@@ -382,19 +371,11 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     categoryKey = "bcl_response"
     confidence = 1
     disposition = "update_only"
-    ai = await extractWithAi({
-      mode: "bcl_reply",
-      subject,
-      body: stripQuotedForAi(body || snippet),
-      senderEmail,
-      categoryKeys: [],
-    })
     const patch: Record<string, unknown> = {}
     if (!threadCase!.respond_date) {
       patch.respond_date = toNairobiYmd(receivedAt)
-      patch.respond_contents = ai?.contents ?? snippet.slice(0, 500)
+      patch.respond_contents = snippet.slice(0, 500)
     }
-    if (!threadCase!.promised_date && ai?.promised_date) patch.promised_date = ai.promised_date
     if (threadCase!.approval_status === "not_responded") patch.approval_status = "pending"
     if (Object.keys(patch).length) {
       await sb.from("email_case").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", threadCase!.id)
@@ -403,46 +384,26 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   } else if (ruleIgnore) {
     categoryKey = "system_noise"
     confidence = ruleIgnore.confidence
-    source = "rule"
     disposition = "ignore"
     matchedRuleId = ruleIgnore.ruleId
   } else if (paused) {
-    // Recovery mode: skip rules and AI entirely, store as-is straight into Needs Review so a human (or
+    // Recovery mode: skip the rules entirely, store as-is straight into Needs Review so a human (or
     // a later Reclassify run, once the rules are finished) decides what happens to it.
     categoryKey = "other_kra"
     confidence = 0
-    source = "rule"
     disposition = "needs_review"
     reviewReason = "Classification paused — recovering synced mail."
   } else {
     const rule = classifyByRules({ subject, body: text, senderEmail, threadHasCase: !!threadCase, rules })
     // "Ignore and delete" reached only via the full body/subject (the cheap, snippet-only pass above
-    // missed it): drop it now, before spending an AI call on a category it'll never keep.
+    // missed it): drop it now, before going any further.
     if (rule?.action === "ignore" && rule.confidence >= THRESHOLD && rule.hardIgnore) return "skipped"
     const ruleCat = rule && rule.categoryKey ? CATEGORY_BY_KEY.get(rule.categoryKey) : null
-    // AI only runs to extract PDF details (deadline, PIN, signing officer) for a category the rules
-    // are already confident about — never to guess an uncertain category. An email the rules can't
-    // confidently place always ends up in Needs Review regardless of what AI would say, so calling AI
-    // there just to have it also land in Needs Review was spending money without saving a person any
-    // work — those go straight to manual review instead.
-    const needsAi = kra && !!rule && rule.confidence >= THRESHOLD && ruleCat?.disposition === "action_required"
-    if (needsAi) {
-      ai = await extractWithAi({
-        mode: "kra_notice",
-        subject,
-        body,
-        senderEmail,
-        categoryKeys: [...CATEGORY_BY_KEY.keys()],
-        pdfs,
-      })
-    }
-
     if (rule && rule.action === "ignore") {
       // An ignore rule matched. At/above the confidence threshold the mail is dropped (the cheap
       // path already handles fresh inbox mail); below it the subject goes to Needs Review instead.
       categoryKey = rule.confidence >= THRESHOLD ? "system_noise" : "other_kra"
       confidence = rule.confidence
-      source = "rule"
       if (rule.confidence >= THRESHOLD) matchedRuleId = rule.ruleId ?? null
     } else if (rule && rule.action === "notify") {
       // An important-notification rule matched: store it under the "notification" category (which
@@ -450,21 +411,14 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
       // there is no review questionnaire — it just needs attention.
       categoryKey = "notification"
       confidence = rule.confidence
-      source = "rule"
       matchedRuleId = rule.ruleId ?? null
     } else if (rule && rule.categoryKey && rule.confidence >= THRESHOLD) {
       categoryKey = rule.categoryKey
       confidence = rule.confidence
-      source = ai ? "rule+ai" : "rule"
       matchedRuleId = rule.ruleId ?? null
-    } else if (ai?.category_key && ai.confidence >= THRESHOLD) {
-      categoryKey = ai.category_key
-      confidence = ai.confidence
-      source = "ai"
     } else {
       categoryKey = rule?.categoryKey ?? "other_kra"
-      confidence = Math.max(rule?.confidence ?? 0, ai?.confidence ?? 0, 0.3)
-      source = ai ? "ai" : "rule"
+      confidence = Math.max(rule?.confidence ?? 0, 0.3)
     }
 
     const category = CATEGORY_BY_KEY.get(categoryKey) ?? CATEGORY_BY_KEY.get("other_kra")!
@@ -489,7 +443,6 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     if (!notifyFlag && !kra && !threadCase && categoryKey !== "system_noise") {
       categoryKey = "system_noise"
       confidence = 0.5 // heuristic, not a specific rule match — cosmetic only, disposition is set directly
-      source = "rule"
       disposition = "ignore"
       reviewReason = null
     } else if (confidence < THRESHOLD && !notifyFlag) {
@@ -501,7 +454,6 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
       if (threadCase) {
         caseId = threadCase.id
         const patch: Record<string, unknown> = {}
-        if (!threadCase.deadline_date && ai?.deadline_date) patch.deadline_date = ai.deadline_date
         // A new KRA follow-up on a case we had already completed puts it back to work.
         if (threadCase.status === "closed") {
           patch.status = "open"
@@ -523,7 +475,6 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
             cc_addresses: ccAddresses || null,
             received_at: receivedAt,
             kra_pin: pin,
-            extracted: ai,
             snippet,
             attachment_names: attachmentNames,
             created_by_rule_id: matchedRuleId,
@@ -539,7 +490,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
       if (target) caseId = target.id
 
       if (APPROVAL_DECISION_CATEGORIES.has(categoryKey)) {
-        const approval = ai?.approval ?? detectApproval(body)
+        const approval = detectApproval(body)
         if (!target) {
           disposition = "needs_review"
           reviewReason = "No related case found for this KRA response."
@@ -566,11 +517,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   // 4. Matter emails, auto-ignored no-reply mail and emails awaiting review are kept; everything else is dropped here.
   if (!caseId && disposition !== "needs_review" && disposition !== "ignore") return "skipped"
 
-  for (const r of attachmentRows) {
-    if (r.extraction_status === "pending") r.extraction_status = ai ? "done" : "skipped"
-  }
-
-  const deadline = ai?.deadline_date ?? threadCase?.deadline_date ?? null
+  const deadline = threadCase?.deadline_date ?? null
   const daysToDeadline = deadline
     ? Math.round((Date.parse(deadline) - Date.parse(toNairobiYmd(new Date()))) / 86_400_000)
     : null
@@ -601,16 +548,15 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
       attachments: attachmentRows,
       category_key: categoryKey,
       category_confidence: confidence,
-      ai_summary: ai?.contents ?? snippet,
+      ai_summary: snippet,
       priority,
       labels,
       is_read: !labels.includes("UNREAD"),
       received_at: receivedAt,
       disposition,
-      classification_source: source,
+      classification_source: "rule",
       review_reason: reviewReason,
-      kra_pin: pin ?? ai?.kra_pin ?? null,
-      extracted: ai,
+      kra_pin: pin,
       case_id: caseId,
       classified_at: new Date().toISOString(),
       processed_at: new Date().toISOString(),
@@ -628,12 +574,6 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   if (upsertErr) throw new Error(`Could not save email ${messageId}: ${upsertErr.message}`)
 
   return "ingested"
-}
-
-function stripQuotedForAi(body: string) {
-  // Only our own new text matters for the reply summary; drop quoted KRA history.
-  const cut = body.search(/\n\s*On .{5,120}wrote:\s*\n|\n\s*>/)
-  return cut > 0 ? body.slice(0, cut) : body
 }
 
 // ─── account sync ───────────────────────────────────────────────────────────

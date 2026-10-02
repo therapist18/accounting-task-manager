@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle, useCollapsiblePanel, PanelCollapseButton, CollapsedRail } from "@/components/ui/resizable"
 import { cn } from "@/lib/utils"
 import ClientCategoryFilter from "@/app/generic-components/ClientCategoryFilter"
 import {
@@ -53,10 +53,13 @@ export function CompanyPanels({
     return { counts: byCompany, unassignedCount: unassigned }
   }, [companyIds])
 
+  const sidebar = useCollapsiblePanel()
+
   return (
-    <div className="flex-1 min-h-0 flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <ResizablePanelGroup direction="horizontal" autoSaveId="email-center-company-layout" className="flex-1 min-h-0 h-full w-full">
-        <ResizablePanel id="companies" order={1} defaultSize={20} minSize={14} maxSize={36} className="flex flex-col overflow-hidden bg-slate-50/40 border-r border-slate-200/80">
+    <div className="flex-1 min-h-0 flex rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      {sidebar.collapsed && <CollapsedRail onExpand={sidebar.expand} label="Companies" />}
+      <ResizablePanelGroup direction="horizontal" autoSaveId="email-center-company-layout" className="flex-1 min-h-0 h-full min-w-0">
+        <ResizablePanel id="companies" order={1} defaultSize={20} minSize={14} maxSize={36} {...sidebar.panelProps} className="flex flex-col overflow-hidden bg-slate-50/40 border-r border-slate-200/80">
           <CompaniesSidebar
             companies={companies}
             selectedCompanyId={selected}
@@ -64,6 +67,7 @@ export function CompanyPanels({
             counts={counts}
             unassignedCount={unassignedCount}
             totalCount={companyIds.length}
+            onCollapse={sidebar.collapse}
           />
         </ResizablePanel>
 
@@ -84,6 +88,7 @@ function CompaniesSidebar({
   counts,
   unassignedCount,
   totalCount,
+  onCollapse,
 }: {
   companies: Company[]
   selectedCompanyId: string
@@ -91,6 +96,7 @@ function CompaniesSidebar({
   counts: Record<string, number>
   unassignedCount: number
   totalCount: number
+  onCollapse: () => void
 }) {
   const [searchQuery, setSearchQuery] = useState("")
   const [categoryFilters, setCategoryFilters] = useState<FilterState | null>(DEFAULT_CATEGORY_FILTERS)
@@ -112,15 +118,18 @@ function CompaniesSidebar({
             <Building2 className="w-5 h-5 text-custom-blue" />
             Companies
           </h2>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-md"
-            onClick={() => setCategoryFilterOpen(true)}
-            title="Filter by client category"
-          >
-            <Filter className="h-5 w-5" />
-          </Button>
+          <div className="flex items-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-md"
+              onClick={() => setCategoryFilterOpen(true)}
+              title="Filter by client category"
+            >
+              <Filter className="h-5 w-5" />
+            </Button>
+            <PanelCollapseButton onClick={onCollapse} />
+          </div>
           <ClientCategoryFilter
             open={categoryFilterOpen}
             onOpenChange={setCategoryFilterOpen}

@@ -2,7 +2,7 @@ import { after, NextRequest, NextResponse } from 'next/server'
 import { getServiceClient } from '@/lib/email-center/service'
 import { renewExpiringWatches, syncAccount } from '@/lib/email-center/ingest'
 
-// Sync work (Gmail fetch + AI + PDF) can outlast Pub/Sub's ack deadline. Keep this within your Vercel
+// Sync work (Gmail fetch + attachments) can outlast Pub/Sub's ack deadline. Keep this within your Vercel
 // plan's function limit.
 export const maxDuration = 60
 

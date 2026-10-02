@@ -111,7 +111,6 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
           cc_addresses: email.cc_addresses,
           received_at: email.received_at,
           kra_pin: email.kra_pin,
-          extracted: email.extracted,
           snippet: email.snippet ?? "",
           attachment_names: (Array.isArray(email.attachments) ? email.attachments : []).map((a: any) => a.filename),
         },

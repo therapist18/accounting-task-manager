@@ -178,8 +178,20 @@ export function CasesTable({
   // that sticks beside it has to move over by the same amount (mirrors EmailsTable's numWidth pattern).
   const numWidth = selection ? "w-24 min-w-[6rem] max-w-[6rem]" : "w-16"
   const clientLeft = selection ? "left-24" : "left-16"
-  const allSelected = !!selection && cases.length > 0 && cases.every((c) => selection.selected.has(c.id))
-  const someSelected = !!selection && !allSelected && cases.some((c) => selection.selected.has(c.id))
+  // A selection never includes rows the column filters are hiding: narrowing the filters deselects
+  // whatever just dropped out, so "N selected" and bulk actions only ever cover what's on screen.
+  useEffect(() => {
+    if (!selection) return
+    const visible = new Set(filtered.map((c) => c.id))
+    const hidden = cases.filter((c) => selection.selected.has(c.id) && !visible.has(c.id)).map((c) => c.id)
+    if (hidden.length) selection.onToggleAll(hidden, false)
+    // only when the filtered set changes; selection's identity changes on every toggle
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered])
+
+  // Select-all acts on the rows the column filters leave visible, not on every case behind them.
+  const allSelected = !!selection && filtered.length > 0 && filtered.every((c) => selection.selected.has(c.id))
+  const someSelected = !!selection && !allSelected && filtered.some((c) => selection.selected.has(c.id))
 
   const statsRowColumns = useMemo(() => {
     const cols: { id: string; getValue?: (r: Row) => string; className?: string }[] = [
@@ -212,8 +224,8 @@ export function CasesTable({
                     checked={allSelected}
                     ref={(el) => { if (el) el.indeterminate = someSelected }}
                     onClick={(ev) => ev.stopPropagation()}
-                    onChange={(ev) => selection.onToggleAll(cases.map((c) => c.id), ev.target.checked)}
-                    title={allSelected ? "Clear selection" : `Select all ${cases.length}`}
+                    onChange={(ev) => selection.onToggleAll(filtered.map((c) => c.id), ev.target.checked)}
+                    title={allSelected ? "Clear selection" : `Select all ${filtered.length}`}
                     className="h-4 w-4 align-middle accent-white cursor-pointer"
                   />
                 ) : "#"}

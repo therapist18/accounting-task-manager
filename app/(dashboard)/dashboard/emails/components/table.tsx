@@ -80,16 +80,57 @@ export function useTableSort<T>(
 // A single column's header filter: normally a funnel icon that opens a searchable checklist of the
 // column's distinct values (computed by the caller — usually from every row, not just what other
 // filters have already narrowed down, so the option list doesn't shrink out from under you as you
-// filter). A date/timestamp column instead gets a free-text box: typing "2025", "14/03" or "10:30"
-// matches anywhere in the column's displayed value, so a year, a specific date or a specific time all
-// work without having to hunt for (and tick) every exact timestamp that falls in it.
+// filter). A date/timestamp column instead gets a From / To range: each end can be just a year
+// ("2021"), a month ("03/2021") or a full date ("14/03/2021"), so "2021 to 2026" works without having
+// to hunt for (and tick) every exact timestamp that falls in it. Either end can be left blank.
+export interface DateRange { from: string; to: string }
 export type ColumnFilterConfig =
   | { kind: "checklist"; options: string[]; selected: Set<string>; onToggle: (value: string) => void; onClear: () => void }
-  | { kind: "text"; value: string; onChange: (value: string) => void; onClear: () => void }
+  | { kind: "daterange"; value: DateRange; onChange: (value: DateRange) => void; onClear: () => void }
+
+// "2021" | "03/2021" | "14/03/2021" (also accepts - and . as separators) -> the first or last day it
+// covers as YYYY-MM-DD, or null when it isn't a date. `end` picks the last day instead of the first, so
+// a "To" of "2026" includes all of 2026 and a "From" of "2021" starts on 1 January 2021.
+export function parseDateBound(raw: string, end: boolean): string | null {
+  const t = raw.trim()
+  if (!t) return null
+  const parts = t.split(/[/.-]/).map((x) => x.trim())
+  if (parts.some((x) => !/^\d+$/.test(x))) return null
+  const pad = (n: number) => String(n).padStart(2, "0")
+  let y: number
+  let m: number | null = null
+  let d: number | null = null
+  if (parts.length === 1 && parts[0].length === 4) y = Number(parts[0])
+  else if (parts.length === 2 && parts[1].length === 4) { m = Number(parts[0]); y = Number(parts[1]) }
+  else if (parts.length === 3 && parts[2].length === 4) { d = Number(parts[0]); m = Number(parts[1]); y = Number(parts[2]) }
+  else return null
+  if (m !== null && (m < 1 || m > 12)) return null
+  if (d !== null && (d < 1 || d > new Date(y, m!, 0).getDate())) return null
+  if (m === null) return `${y}-${end ? "12-31" : "01-01"}`
+  if (d === null) return `${y}-${pad(m)}-${end ? pad(new Date(y, m, 0).getDate()) : "01"}`
+  return `${y}-${pad(m)}-${pad(d)}`
+}
+
+// A column's displayed value is "DD/MM/YYYY" optionally followed by a time — pull the date out of it.
+function displayedDateToYmd(v: string): string | null {
+  const m = /(\d{2})\/(\d{2})\/(\d{4})/.exec(v)
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : null
+}
+
+function inDateRange(displayed: string, range: DateRange): boolean {
+  const from = parseDateBound(range.from, false)
+  const to = parseDateBound(range.to, true)
+  if (!from && !to) return true
+  const ymd = displayedDateToYmd(displayed)
+  if (!ymd) return false
+  return (!from || ymd >= from) && (!to || ymd <= to)
+}
+
+const rangeActive = (r: DateRange | undefined) => !!r && (r.from.trim() !== "" || r.to.trim() !== "")
 
 function ColumnFilterButton({ filter, tone }: { filter: ColumnFilterConfig; tone: "neutral" | "blue" }) {
   const [q, setQ] = useState("")
-  const active = filter.kind === "text" ? filter.value.trim() !== "" : filter.selected.size > 0
+  const active = filter.kind === "daterange" ? rangeActive(filter.value) : filter.selected.size > 0
   const shown = filter.kind === "checklist" && q ? filter.options.filter((o) => o.toLowerCase().includes(q.toLowerCase())) : filter.kind === "checklist" ? filter.options : []
   return (
     <Popover>
@@ -109,16 +150,26 @@ function ColumnFilterButton({ filter, tone }: { filter: ColumnFilterConfig; tone
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-64 p-0" align="start" onClick={(e) => e.stopPropagation()}>
-        {filter.kind === "text" ? (
-          <div className="p-2.5 space-y-1.5">
-            <Input
-              value={filter.value}
-              onChange={(e) => filter.onChange(e.target.value)}
-              placeholder="Type a year, date, or time…"
-              className="h-8 text-sm"
-              autoFocus
-            />
-            <p className="text-xs text-slate-400 px-0.5">Matches anywhere in the date, e.g. “2025”, “14/03”, or “10:30”.</p>
+        {filter.kind === "daterange" ? (
+          <div className="p-2.5 space-y-2">
+            {([["from", "From"], ["to", "To"]] as const).map(([k, label], i) => {
+              const bad = filter.value[k].trim() !== "" && parseDateBound(filter.value[k], k === "to") === null
+              return (
+                <div key={k} className="flex items-center gap-2">
+                  <span className="w-10 text-sm text-slate-500 shrink-0">{label}</span>
+                  <Input
+                    value={filter.value[k]}
+                    onChange={(e) => filter.onChange({ ...filter.value, [k]: e.target.value })}
+                    placeholder={k === "from" ? "e.g. 2021" : "e.g. 2026"}
+                    className={cn("h-8 text-sm", bad && "border-red-400 focus-visible:ring-red-400")}
+                    autoFocus={i === 0}
+                  />
+                </div>
+              )
+            })}
+            <p className="text-xs text-slate-400 px-0.5">
+              Each end can be a year (2021), a month (03/2021) or a full date (14/03/2021). Leave one blank for “from then on” / “up to then”.
+            </p>
           </div>
         ) : (
           <>
@@ -151,24 +202,24 @@ function ColumnFilterButton({ filter, tone }: { filter: ColumnFilterConfig; tone
 // Per-column filters over a row set: each key in `getValue` is a column id, the accessor its
 // filterable text. Options for a checklist column are drawn from `rows` as given (not re-narrowed by
 // other active filters), so opening one column's filter never hides values another filter would still
-// allow. `textColumns` marks columns (normally dates/timestamps) that get the free-text substring
-// filter instead of a checklist.
+// allow. `textColumns` marks the date/timestamp columns, which get a From / To date range instead of a
+// checklist (their displayed "DD/MM/YYYY[ HH:mm]" value is what gets compared).
 export function useColumnFilters<T>(rows: T[], getValue: Record<string, (row: T) => string>, textColumns: string[] = []) {
   const [checklist, setChecklist] = useState<Record<string, Set<string>>>({})
-  const [text, setText] = useState<Record<string, string>>({})
-  const isText = (key: string) => textColumns.includes(key)
+  const [range, setRange] = useState<Record<string, DateRange>>({})
+  const isDate = (key: string) => textColumns.includes(key)
 
   const filtered = useMemo(() => {
     const checklistKeys = Object.keys(checklist).filter((k) => checklist[k]?.size)
-    const textKeys = Object.keys(text).filter((k) => text[k]?.trim())
-    if (!checklistKeys.length && !textKeys.length) return rows
+    const rangeKeys = Object.keys(range).filter((k) => rangeActive(range[k]))
+    if (!checklistKeys.length && !rangeKeys.length) return rows
     return rows.filter(
       (r) =>
         checklistKeys.every((k) => checklist[k].has(getValue[k]?.(r) ?? "")) &&
-        textKeys.every((k) => (getValue[k]?.(r) ?? "").toLowerCase().includes(text[k].trim().toLowerCase()))
+        rangeKeys.every((k) => inDateRange(getValue[k]?.(r) ?? "", range[k]))
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, checklist, text])
+  }, [rows, checklist, range])
 
   const optionsFor = (key: string) =>
     Array.from(new Set(rows.map((r) => getValue[key]?.(r) ?? "").filter((v) => v !== ""))).sort((a, b) =>
@@ -184,15 +235,15 @@ export function useColumnFilters<T>(rows: T[], getValue: Record<string, (row: T)
 
   const clear = (key: string) => {
     setChecklist((f) => { const next = { ...f }; delete next[key]; return next })
-    setText((t) => { const next = { ...t }; delete next[key]; return next })
+    setRange((t) => { const next = { ...t }; delete next[key]; return next })
   }
-  const clearAll = () => { setChecklist({}); setText({}) }
+  const clearAll = () => { setChecklist({}); setRange({}) }
   const activeCount =
-    Object.values(checklist).filter((s) => s?.size).length + Object.values(text).filter((v) => v?.trim()).length
+    Object.values(checklist).filter((s) => s?.size).length + Object.values(range).filter(rangeActive).length
 
   const configFor = (key: string): ColumnFilterConfig =>
-    isText(key)
-      ? { kind: "text", value: text[key] ?? "", onChange: (value) => setText((t) => ({ ...t, [key]: value })), onClear: () => clear(key) }
+    isDate(key)
+      ? { kind: "daterange", value: range[key] ?? { from: "", to: "" }, onChange: (value) => setRange((t) => ({ ...t, [key]: value })), onClear: () => clear(key) }
       : { kind: "checklist", options: optionsFor(key), selected: checklist[key] ?? new Set(), onToggle: (value) => toggle(key, value), onClear: () => clear(key) }
 
   return { filtered, configFor, clearAll, activeCount }

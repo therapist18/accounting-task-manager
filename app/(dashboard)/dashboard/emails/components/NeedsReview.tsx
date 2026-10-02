@@ -121,8 +121,20 @@ export function EmailsTable({
   // that sticks beside it has to move over by the same amount.
   const numWidth = selection ? "w-24 min-w-[6rem] max-w-[6rem]" : "w-16"
   const companyLeft = selection ? "left-24" : "left-16"
-  const allSelected = !!selection && emails.length > 0 && emails.every((e) => selection.selected.has(e.id))
-  const someSelected = !!selection && !allSelected && emails.some((e) => selection.selected.has(e.id))
+  // A selection never includes rows the column filters are hiding: narrowing the filters deselects
+  // whatever just dropped out, so "N selected" and bulk actions only ever cover what's on screen.
+  useEffect(() => {
+    if (!selection) return
+    const visible = new Set(filtered.map((e) => e.id))
+    const hidden = emails.filter((e) => selection.selected.has(e.id) && !visible.has(e.id)).map((e) => e.id)
+    if (hidden.length) selection.onToggleAll(hidden, false)
+    // only when the filtered set changes; selection's identity changes on every toggle
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered])
+
+  // Select-all acts on the rows the column filters leave visible, not on every email behind them.
+  const allSelected = !!selection && filtered.length > 0 && filtered.every((e) => selection.selected.has(e.id))
+  const someSelected = !!selection && !allSelected && filtered.some((e) => selection.selected.has(e.id))
 
   const statsRowColumns = useMemo(() => {
     const cols: { id: string; getValue?: (e: EmailRow) => string; className?: string }[] = [
@@ -165,8 +177,8 @@ export function EmailsTable({
                     checked={allSelected}
                     ref={(el) => { if (el) el.indeterminate = someSelected }}
                     onClick={(ev) => ev.stopPropagation()}
-                    onChange={(ev) => selection.onToggleAll(emails.map((e) => e.id), ev.target.checked)}
-                    title={allSelected ? "Clear selection" : `Select all ${emails.length}`}
+                    onChange={(ev) => selection.onToggleAll(filtered.map((e) => e.id), ev.target.checked)}
+                    title={allSelected ? "Clear selection" : `Select all ${filtered.length}`}
                     className="h-4 w-4 align-middle accent-white cursor-pointer"
                   />
                 ) : "#"}

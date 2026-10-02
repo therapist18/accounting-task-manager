@@ -74,7 +74,7 @@ export function SyncDialog({
   const [scope, setScope] = useState<"all" | "selected">("all")
   const [selected, setSelected] = useState<Set<string>>(new Set())
   // For recovering mail while the classification rules are still being tuned: every inbound email in
-  // the period is stored straight into Needs Review, skipping ignore/notify/classify rules and AI
+  // the period is stored straight into Needs Review, skipping ignore/notify/classify rules
   // entirely, so a not-yet-correct rule can't re-drop or re-misclassify it the moment it comes back in.
   const [pauseClassification, setPauseClassification] = useState(false)
   const [search, setSearch] = useState("")

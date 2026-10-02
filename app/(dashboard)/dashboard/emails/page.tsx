@@ -714,7 +714,7 @@ export default function EmailCenterPage() {
           showTime={showTime}
           loading={loading}
           sidebarTitle={tab === "notifications" ? "Notify rules" : "Classification rules"}
-          otherLabel={tab === "notifications" ? "Not matched by a rule" : "Not matched by a rule (AI or manual)"}
+          otherLabel={tab === "notifications" ? "Not matched by a rule" : "Not matched by a rule (manual)"}
           otherHint="Classified without a specific rule matching it"
           emptyMessage={emptyMessage}
           notificationsMode={tab === "notifications"}

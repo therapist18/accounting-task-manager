@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle, useCollapsiblePanel, PanelCollapseButton, CollapsedRail } from "@/components/ui/resizable"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -222,16 +222,22 @@ export function RuleMatchedEmailsPanel({
           return `${d.sender} — ${d.subjects}`
         })()
 
+  const sidebar = useCollapsiblePanel()
+
   return (
-    <div className="flex-1 min-h-0 flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <ResizablePanelGroup direction="horizontal" autoSaveId="email-center-rule-matched-layout" className="flex-1 min-h-0 h-full w-full">
-        <ResizablePanel id="rule-matched-rules" order={1} defaultSize={26} minSize={18} maxSize={42} className="flex flex-col overflow-hidden bg-slate-50/40 border-r border-slate-200/80">
+    <div className="flex-1 min-h-0 flex rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      {sidebar.collapsed && <CollapsedRail onExpand={sidebar.expand} label="Rules" />}
+      <ResizablePanelGroup direction="horizontal" autoSaveId="email-center-rule-matched-layout" className="flex-1 min-h-0 h-full min-w-0">
+        <ResizablePanel id="rule-matched-rules" order={1} defaultSize={26} minSize={18} maxSize={42} {...sidebar.panelProps} className="flex flex-col overflow-hidden bg-slate-50/40 border-r border-slate-200/80">
           <div className="flex flex-col h-full bg-slate-50/40">
             <div className="p-3 border-b border-slate-200/80 shrink-0 bg-white space-y-2.5">
-              <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2">
-                <ListFilter className="w-5 h-5 text-custom-blue" />
-                {sidebarTitle}
-              </h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+                  <ListFilter className="w-5 h-5 text-custom-blue" />
+                  {sidebarTitle}
+                </h2>
+                <PanelCollapseButton onClick={sidebar.collapse} />
+              </div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
                 <Input

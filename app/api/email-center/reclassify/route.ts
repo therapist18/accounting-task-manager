@@ -29,8 +29,8 @@ import { withSupabaseRetry } from "@/lib/supabaseRetry"
 // uses, approval detected on an extension/objection response, deleted outright for a confident
 // hard-ignore match — it would never have been stored in the first place — soft-ignored for a plain
 // ignore match, or flagged urgent as an important notification); everything a rule still doesn't match
-// stays as it is. The one gap: reclassify works from the stored snippet only (no Gmail re-fetch, no
-// AI), so AI-extracted fields and full-body approval detection aren't reproduced here.
+// stays as it is. The one gap: reclassify works from the stored snippet only (no Gmail re-fetch), so
+// full-body approval detection isn't reproduced here.
 
 // Same reasoning as the emails list route's own cap: this used to silently ignore any Needs Review
 // backlog beyond the oldest 1,000, which — at the volumes a first-time full-mailbox backfill leaves
@@ -236,7 +236,6 @@ async function reclassifyEmails(
               cc_addresses: e.cc_addresses,
               received_at: e.received_at,
               kra_pin: e.kra_pin,
-              extracted: e.extracted,
               snippet: e.snippet ?? "",
               attachment_names: (Array.isArray(e.attachments) ? e.attachments : []).map((a: any) => a.filename),
             },
@@ -252,8 +251,7 @@ async function reclassifyEmails(
         if (target) caseId = target.id
 
         if (APPROVAL_DECISION_CATEGORIES.has(cat.key)) {
-          // Reclassify only ever has the stored snippet to work with (no Gmail re-fetch, no AI budget
-          // for this operation), so approval detection here is a best effort compared to ingestion's.
+          // Reclassify only ever has the stored snippet to work with (no Gmail re-fetch), so approval detection here is a best effort compared to ingestion's.
           const approval = detectApproval(e.snippet ?? "")
           if (!caseId) {
             disposition = "needs_review"

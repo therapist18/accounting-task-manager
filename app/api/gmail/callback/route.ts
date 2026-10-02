@@ -6,7 +6,7 @@ import { renewWatch, syncAccount, type AccountRow } from '@/lib/email-center/ing
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 
-// A first sync can involve a real backfill (Gmail calls + PDF downloads + AI classification for
+// A first sync can involve a real backfill (Gmail calls + attachment downloads + classification for
 // several messages) — give it real room instead of the platform's short default.
 export const maxDuration = 60
 
