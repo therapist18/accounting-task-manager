@@ -19,10 +19,45 @@
       "Bash(echo \"E1:$?\")",
       "Bash(echo \"E2:$?\")",
       "Bash(echo \"E3:$?\")",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(python3 -)",
+      "Bash(grep -n \"^// --- Move this\\\\|^  \\);\\\\|^};\\\\|<TableSection\\\\|/>$\\\\|bg-white overflow-hidden\" quickbooks-credentials.tsx)",
+      "Bash(grep -n \"isTransposed, setIsTransposed\\\\|const headers\\\\|^  return \\(\\\\|^  \\)$\\\\|^}$\\\\|Fragment\\\\|import { Table\\\\|const tableRef\" branches.tsx)",
+      "Bash(grep -n \"isTransposed\\\\|<Table\\\\b\\\\|^  return \\(\\\\|^}$\\\\|expand\\\\|Expanded\\\\|ReusableSchema\\\\|InformationTable\" individuals-data-table.tsx)",
+      "Bash(echo \"exit $?\")",
+      "mcp__claude_ai_Supabase__list_tables",
+      "Bash(npm -v)",
+      "Bash(npx --yes create-next-app@latest marketplace-platform --ts --tailwind --eslint --app --no-src-dir --import-alias \"@/*\" --use-npm --yes)",
+      "Bash(npm i *)",
+      "Bash(sed -i 's#import html2canvas from \"html2canvas\";#import html2canvas from \"html2canvas-pro\";#' components/schema-table-export.ts)",
+      "Bash(sed -i \"s#import html2canvas from 'html2canvas';#import html2canvas from 'html2canvas-pro';#\" \"app/companies/[id]/page.tsx\")",
+      "PowerShell(Get-Process node,npm -ErrorAction SilentlyContinue)",
+      "Bash(tasklist)",
+      "Bash(timeout 480 npm i @supabase/supabase-js firebase firebase-admin server-only lucide-react zod)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -match 'npm' } | Select ProcessId, CreationDate, @{n='cmd';e={$_.CommandLine.Substring\\(0,[Math]::Min\\(150,$_.CommandLine.Length\\)\\)}} | Format-List; npm config get registry; Get-ChildItem E:\\\\GitHub\\\\marketplace-platform\\\\node_modules | Measure-Object | Select -Expand Count)",
+      "Bash(timeout 25 npm view docx-preview version)",
+      "Bash(git log *)",
+      "Bash(timeout 100 bash -c 'until [ ! -d node_modules ]; do sleep 3; done')",
+      "Bash(sed -i 's/r as Row/r as unknown as Row/g; s/normalise\\(data as Row, vertical\\)/normalise\\(data as unknown as Row, vertical\\)/' lib/data.ts)",
+      "Bash(sed -i '/import { getServerSession } from \"@\\\\/lib\\\\/auth\\\\/session\";/d' app/api/enquiries/route.ts)",
+      "Bash(cmd //c \"rmdir /s /q node_modules\")",
+      "Bash(sed -i '149s#.*#const UNSUPPORTED_COLOR = /\\(oklch|oklab|lab|lch|color-mix|color\\)\\\\\\\\\\(/i;#' components/schema-table-export.ts)",
+      "Bash(grep -n 'rgba\\(\\\\${' components/schema-table-export.ts)",
+      "Bash(grep -n '\\\\${' components/schema-table-export.ts)"
     ],
     "additionalDirectories": [
-      "\\tmp"
+      "\\tmp",
+      "C:\\Users\\user\\AppData\\Local\\Temp",
+      "E:\\GitHub\\marketplace-platform\\supabase\\migrations",
+      "E:\\GitHub\\marketplace-platform\\lib\\supabase",
+      "E:\\GitHub\\marketplace-platform\\lib\\firebase",
+      "E:\\GitHub\\marketplace-platform\\lib\\auth",
+      "E:\\GitHub\\marketplace-platform\\app\\api\\auth\\session",
+      "E:\\GitHub\\marketplace-platform\\app\\api\\auth\\logout",
+      "E:\\GitHub\\marketplace-platform",
+      "E:\\GitHub\\marketplace-platform\\app",
+      "E:\\GitHub\\marketplace-platform\\lib",
+      "E:\\GitHub\\marketplace-platform\\components"
     ]
   }
 }

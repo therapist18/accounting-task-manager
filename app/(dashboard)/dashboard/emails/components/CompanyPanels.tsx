@@ -23,10 +23,11 @@ import type { Company } from "../../companies/database"
 
 export const UNASSIGNED = "__unassigned__"
 
-export function matchesCompanySelection(companyId: string | null, selected: string): boolean {
-  if (!selected) return true
-  if (selected === UNASSIGNED) return !companyId
-  return companyId === selected
+// An empty selection means every company; otherwise a row matches when its company (or "no company",
+// via UNASSIGNED) is one of the selected entries.
+export function matchesCompanySelection(companyId: string | null, selected: string[]): boolean {
+  if (selected.length === 0) return true
+  return companyId ? selected.includes(companyId) : selected.includes(UNASSIGNED)
 }
 
 export function CompanyPanels({
@@ -39,8 +40,8 @@ export function CompanyPanels({
   companies: Company[]
   // company_id of every row in the active tab BEFORE any company narrowing — drives the counts.
   companyIds: (string | null)[]
-  selected: string // "" = all, UNASSIGNED = no company, else a company id
-  onSelect: (id: string) => void
+  selected: string[] // [] = all; entries are company ids and/or UNASSIGNED
+  onSelect: (ids: string[]) => void
   children: React.ReactNode
 }) {
   const { counts, unassignedCount } = useMemo(() => {
@@ -62,8 +63,8 @@ export function CompanyPanels({
         <ResizablePanel id="companies" order={1} defaultSize={20} minSize={14} maxSize={36} {...sidebar.panelProps} className="flex flex-col overflow-hidden bg-slate-50/40 border-r border-slate-200/80">
           <CompaniesSidebar
             companies={companies}
-            selectedCompanyId={selected}
-            onSelectCompany={onSelect}
+            selectedIds={selected}
+            onChange={onSelect}
             counts={counts}
             unassignedCount={unassignedCount}
             totalCount={companyIds.length}
@@ -83,16 +84,16 @@ export function CompanyPanels({
 
 function CompaniesSidebar({
   companies,
-  selectedCompanyId,
-  onSelectCompany,
+  selectedIds,
+  onChange,
   counts,
   unassignedCount,
   totalCount,
   onCollapse,
 }: {
   companies: Company[]
-  selectedCompanyId: string
-  onSelectCompany: (id: string) => void
+  selectedIds: string[]
+  onChange: (ids: string[]) => void
   counts: Record<string, number>
   unassignedCount: number
   totalCount: number
@@ -109,6 +110,16 @@ function CompaniesSidebar({
         .filter((c) => companyMatchesCategoryFilters(c, categoryFilters)),
     [companies, searchQuery, categoryFilters]
   )
+
+  const selected = useMemo(() => new Set(selectedIds), [selectedIds])
+  const shownIds = filteredCompanies.map((c) => String(c.id))
+  const allShownSelected = shownIds.length > 0 && shownIds.every((id) => selected.has(id))
+  // A plain click picks just that entry (the old behaviour); the checkbox adds/removes it from a multi-selection.
+  const only = (id: string) => onChange([id])
+  const toggle = (id: string) => onChange(selected.has(id) ? selectedIds.filter((v) => v !== id) : [...selectedIds, id])
+  // "Select all" ticks everything the search/category filter currently shows; again unticks just those.
+  const toggleAllShown = () =>
+    onChange(allShownSelected ? selectedIds.filter((id) => !shownIds.includes(id)) : [...new Set([...selectedIds, ...shownIds])])
 
   return (
     <div className="flex flex-col h-full bg-slate-50/40">
@@ -153,12 +164,30 @@ function CompaniesSidebar({
 
       <ScrollArea className="flex-1 min-h-0">
         <div className="p-2 space-y-0.5">
-          <Row icon={<Inbox className="w-5 h-5" />} label="All companies" count={totalCount} active={!selectedCompanyId} onClick={() => onSelectCompany("")} />
+          <Row icon={<Inbox className="w-5 h-5" />} label="All companies" count={totalCount} active={selectedIds.length === 0} onClick={() => onChange([])} />
           {unassignedCount > 0 && (
-            <Row icon={<UserX className="w-5 h-5" />} label="Unassigned" count={unassignedCount} active={selectedCompanyId === UNASSIGNED} onClick={() => onSelectCompany(UNASSIGNED)} />
+            <Row
+              icon={<UserX className="w-5 h-5" />}
+              label="Unassigned"
+              count={unassignedCount}
+              active={selected.has(UNASSIGNED)}
+              onClick={() => only(UNASSIGNED)}
+              onToggle={() => toggle(UNASSIGNED)}
+            />
           )}
 
           <div className="my-1 border-t border-slate-200/60" />
+
+          {filteredCompanies.length > 0 && (
+            <div className="flex items-center justify-between px-3 py-1 text-sm">
+              <button type="button" onClick={toggleAllShown} className="font-medium text-custom-blue hover:underline">
+                {allShownSelected ? "Deselect all" : searchQuery ? "Select all shown" : "Select all"}
+              </button>
+              {selectedIds.length > 0 && (
+                <span className="text-slate-500">{selectedIds.length} selected</span>
+              )}
+            </div>
+          )}
 
           {filteredCompanies.map((company) => {
             const compId = String(company.id)
@@ -168,8 +197,9 @@ function CompaniesSidebar({
                 icon={<Building2 className="w-5 h-5" />}
                 label={company.company_name}
                 count={counts[compId] ?? 0}
-                active={selectedCompanyId === compId}
-                onClick={() => onSelectCompany(compId)}
+                active={selected.has(compId)}
+                onClick={() => only(compId)}
+                onToggle={() => toggle(compId)}
               />
             )
           })}
@@ -183,22 +213,39 @@ function CompaniesSidebar({
 }
 
 function Row({
-  icon, label, count, active, onClick,
+  icon, label, count, active, onClick, onToggle,
 }: {
   icon: React.ReactNode
   label: string
   count: number
   active: boolean
   onClick: () => void
+  // When given, the row shows a checkbox that adds/removes it from a multi-selection.
+  onToggle?: () => void
 }) {
   return (
-    <button
+    // A div (not a button) because it can contain the selection checkbox, and an input nested in a
+    // button doesn't reliably receive clicks.
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); onClick() } }}
       className={cn(
-        "flex items-center w-full px-3 py-2 text-base rounded-md transition-colors text-left font-medium",
+        "flex items-center w-full px-3 py-2 text-base rounded-md transition-colors text-left font-medium cursor-pointer",
         active ? "bg-custom-blue text-white shadow-xs" : "text-slate-700 hover:bg-slate-200/60"
       )}
     >
+      {onToggle && (
+        <input
+          type="checkbox"
+          checked={active}
+          onClick={(ev) => ev.stopPropagation()}
+          onChange={onToggle}
+          title="Add to / remove from selection"
+          className="mr-2 h-4 w-4 shrink-0 cursor-pointer accent-custom-blue"
+        />
+      )}
       <span className={cn("mr-2 shrink-0", active ? "text-white" : "text-slate-400")}>{icon}</span>
       <span className="truncate flex-1">{label}</span>
       {count > 0 && (
@@ -212,6 +259,6 @@ function Row({
           {count}
         </Badge>
       )}
-    </button>
+    </div>
   )
 }

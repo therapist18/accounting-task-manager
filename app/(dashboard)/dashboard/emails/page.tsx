@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, Clock, Columns3, Download, History, Loader2, Plus, RefreshCw, RotateCcw, Search, Sparkles, Wifi, WifiOff } from "lucide-react"
+import { AlertTriangle, Clock, Columns3, Download, History, ListFilter, Loader2, Plus, RefreshCw, RotateCcw, Search, Sparkles, Wifi, WifiOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DateInput } from "@/components/ui/date-input"
 import { Input } from "@/components/ui/input"
@@ -23,7 +23,8 @@ import { IgnoredPanel } from "./components/IgnoredPanel"
 import { RuleMatchedEmailsPanel } from "./components/RuleMatchedEmailsPanel"
 import { RulesPanel } from "./components/RulesPanel"
 import { SyncDialog } from "./components/SyncDialog"
-import { CompanyPanels, matchesCompanySelection } from "./components/CompanyPanels"
+import { CompanyPanels, matchesCompanySelection, UNASSIGNED } from "./components/CompanyPanels"
+import { CompanyMultiSelect } from "./components/CompanyMultiSelect"
 import { EmailsTable, TOGGLEABLE_COLUMNS as EMAIL_COLUMNS } from "./components/NeedsReview"
 import { ColumnVisibilityButton, useColumnVisibility } from "./components/table"
 import { exportCasesToExcel } from "./components/exportCases"
@@ -94,14 +95,15 @@ function meetsEmailFilters(e: EmailRow, q: string): boolean {
 
 export default function EmailCenterPage() {
   const [tab, setTab] = useState<Tab>("inprogress")
-  const [company, setCompany] = useState("")
+  // Company narrowing: [] = every company, otherwise the ticked ones (toolbar dropdown / sidebar).
+  const [company, setCompany] = useState<string[]>([])
   const [assignee, setAssignee] = useState("")
   const [search, setSearch] = useState("")
 
   // "By company" swaps the toolbar's company dropdown for a resizable company sidebar on every list
   // tab; its selection is separate from the dropdown's, so switching modes never loses either one.
   const [byCompany, setByCompany] = useState(false)
-  const [sidebarCompany, setSidebarCompany] = useState("")
+  const [sidebarCompany, setSidebarCompany] = useState<string[]>([])
   // Which chip the Mailboxes tab is on. Lives here so the toolbar's failed-mailboxes indicator can jump
   // straight to the "Needs reconnect" view; the nonce tells the panel a jump was requested.
   const [mailboxView, setMailboxView] = useState<MailboxView>("all")
@@ -408,6 +410,22 @@ export default function EmailCenterPage() {
     }
   }
 
+  // Fills in "which rule" on tasks/emails classified before it was being recorded, so the rule
+  // sidebars (Opened by rule / Ignored) stop showing them all under "by hand".
+  const [linkingRules, setLinkingRules] = useState(false)
+  const linkRules = async () => {
+    setLinkingRules(true)
+    try {
+      const res = await api<{ cases: number; emails: number }>("/api/email-center/backfill-rules", { method: "POST" })
+      toast.success(`${res.cases} task(s) and ${res.emails} email(s) linked to their rule.`)
+      await loadAll()
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setLinkingRules(false)
+    }
+  }
+
   const resetToReview = async () => {
     setResetting(true)
     try {
@@ -558,7 +576,7 @@ export default function EmailCenterPage() {
   const baseIgnoredEmails = useMemo(() => emails.filter((e) => e.disposition === "ignore" && meetsEmailFilters(e, q)), [emails, q])
 
   const passesCompany = useCallback(
-    (companyId: string | null) => (byCompany ? matchesCompanySelection(companyId, sidebarCompany) : !company || companyId === company),
+    (companyId: string | null) => matchesCompanySelection(companyId, byCompany ? sidebarCompany : company),
     [byCompany, sidebarCompany, company]
   )
 
@@ -627,7 +645,13 @@ export default function EmailCenterPage() {
   const [exporting, setExporting] = useState(false)
   const scopeLabel = useMemo(() => {
     const parts: string[] = []
-    parts.push(byCompany ? (sidebarCompany ? fullCompanies.find((c) => String(c.id) === sidebarCompany)?.company_name ?? "One company" : "All companies") : (company ? companies.find((c) => c.id === company)?.company_name ?? "One company" : "All companies"))
+    const picked = byCompany ? sidebarCompany : company
+    parts.push(
+      picked.length === 0 ? "All companies"
+        : picked.length === 1
+          ? (picked[0] === UNASSIGNED ? "Unassigned" : (byCompany ? fullCompanies.find((c) => String(c.id) === picked[0])?.company_name : companies.find((c) => c.id === picked[0])?.company_name) ?? "One company")
+          : `${picked.length} companies`
+    )
     if (isCaseTab) parts.push(assignee === "none" ? "Unassigned" : assignee ? staff.find((s) => s.id === assignee)?.name ?? "One assignee" : "Anyone")
     if (search.trim()) parts.push(`search "${search.trim()}"`)
     return parts.join(" · ")
@@ -836,6 +860,17 @@ export default function EmailCenterPage() {
           <Button
             variant="outline"
             size="sm"
+            onClick={linkRules}
+            disabled={loading || linkingRules}
+            title="Match existing tasks and ignored emails against the current rules and record which rule caught each (for ones classified before this was tracked)"
+            className={cn(PILL_BUTTON_CLASS, "h-10 gap-2")}
+          >
+            {linkingRules ? <Loader2 className="h-5 w-5 animate-spin" /> : <ListFilter className="h-5 w-5" />}
+            Link rules
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setResetPromptOpen(true)}
             disabled={loading}
             title="While the rules are still being tuned: delete every task and clear every email's classification back to Needs Review"
@@ -932,12 +967,11 @@ export default function EmailCenterPage() {
           </div>
 
           {isListTab && !byCompany && (
-            <SearchSelect
+            <CompanyMultiSelect
               className="w-52"
               value={company}
               onChange={setCompany}
-              placeholder="All companies"
-              options={[{ value: "", label: "All companies" }, ...companies.map((c) => ({ value: c.id, label: c.company_name }))]}
+              options={companies.map((c) => ({ value: c.id, label: c.company_name }))}
             />
           )}
 

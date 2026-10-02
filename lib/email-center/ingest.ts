@@ -80,6 +80,10 @@ function stripHtml(html: string) {
     .replace(/<br\s*\/?>|<\/p>|<\/div>|<\/tr>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
     .replace(/&amp;/g, "&")
     .replace(/[ \t]+/g, " ")
     .replace(/\n\s*\n+/g, "\n")
@@ -98,7 +102,14 @@ export function extractBody(payload: gmail_v1.Schema$MessagePart | undefined): s
     part.parts?.forEach(walk)
   }
   walk(payload)
-  return found.plain ?? (found.html ? stripHtml(found.html) : "")
+  const plain = found.plain?.trim() ?? ""
+  const html = found.html ? stripHtml(found.html) : ""
+  if (!plain) return html
+  // Some senders (accounting systems, mailers) ship a one-line text/plain stub such as "This mail needs
+  // an HTML reader" next to the real text/html body — prefer the HTML when the plain part is a tiny
+  // stub that the HTML dwarfs.
+  const isStub = plain.length < 200 && html.length > plain.length * 3
+  return isStub ? html : found.plain!
 }
 
 interface AttachmentMeta {
