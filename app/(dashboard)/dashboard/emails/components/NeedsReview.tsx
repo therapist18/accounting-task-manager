@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Paperclip, Inbox, CornerUpLeft, FlaskConical } from "lucide-react"
+import { Paperclip, Inbox, CornerUpLeft, FlaskConical, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { Pagination } from "./Pagination"
@@ -53,6 +53,8 @@ export function EmailsTable({
   onMarkHandled,
   selection,
   onAllocate,
+  allocateTargets,
+  onDeleteRow,
   showStats = false,
   visibleColumns: visibility,
   rules,
@@ -74,6 +76,10 @@ export function EmailsTable({
   selection?: { selected: Set<string>; onToggle: (id: string) => void; onToggleAll: (ids: string[], on: boolean) => void }
   // Adds an Action dropdown (— / Action required / Update only / Ignored / Needs review) to each row.
   onAllocate?: (e: EmailRow, d: Disposition) => void
+  // Limits the Action dropdown to these tabs (default: all). The Ignored tab leaves out "Ignored".
+  allocateTargets?: Disposition[]
+  // Adds a trash button to each row's Actions cell; the caller confirms and deletes.
+  onDeleteRow?: (e: EmailRow) => void
   // Both owned by the page's shared toolbar (Stats / Columns buttons), not this component — so every
   // list tab's table keeps those controls in one place instead of each growing its own.
   showStats?: boolean
@@ -302,17 +308,32 @@ export function EmailsTable({
                   {showActions && (
                     <td className={TD_CLASS} onClick={(ev) => ev.stopPropagation()}>
                       {onAllocate ? (
-                        <select
-                          value=""
-                          onChange={(ev) => { if (ev.target.value) onAllocate(e, ev.target.value as Disposition) }}
-                          className="h-8 rounded-md border border-slate-200 bg-white px-2 text-base font-medium text-slate-700 hover:bg-slate-50 cursor-pointer focus:outline-none focus:ring-1 focus:ring-custom-blue"
-                          title="Move this email to another tab"
-                        >
-                          <option value="">—</option>
-                          {(Object.keys(DISPOSITION_LABEL) as Disposition[]).map((d) => (
-                            <option key={d} value={d}>{DISPOSITION_LABEL[d]}</option>
-                          ))}
-                        </select>
+                        <div className="flex items-center gap-1.5">
+                          <select
+                            value=""
+                            onChange={(ev) => { if (ev.target.value) onAllocate(e, ev.target.value as Disposition) }}
+                            className="h-8 rounded-md border border-slate-200 bg-white px-2 text-base font-medium text-slate-700 hover:bg-slate-50 cursor-pointer focus:outline-none focus:ring-1 focus:ring-custom-blue"
+                            title="Move this email to another tab"
+                          >
+                            <option value="">Move to…</option>
+                            {(allocateTargets ?? (Object.keys(DISPOSITION_LABEL) as Disposition[]))
+                              .filter((d) => d !== e.disposition)
+                              .map((d) => (
+                                <option key={d} value={d}>{DISPOSITION_LABEL[d]}</option>
+                              ))}
+                          </select>
+                          {onDeleteRow && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0 rounded-md text-red-600 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => onDeleteRow(e)}
+                              title="Delete this email from the app (it stays in Gmail)"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
                       ) : e.handled_at ? (
                         <span className="text-sm text-slate-300">—</span>
                       ) : e.disposition === "needs_review" ? (
