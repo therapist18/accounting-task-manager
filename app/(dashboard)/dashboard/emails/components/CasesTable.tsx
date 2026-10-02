@@ -4,6 +4,11 @@ import { ReactNode, useEffect, useMemo, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Loader2, Trash2 } from "lucide-react"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Pagination } from "./Pagination"
 import {
   StatsRows, TableLoading, SortTh, TD_CLASS,
@@ -116,10 +121,13 @@ const COLUMNS: ColDef[] = [
 export const TOGGLEABLE_COLUMNS = COLUMNS.map((c) => ({ id: c.id, label: c.label }))
 
 export function CasesTable({
-  cases, onOpen, showTime, embedded = false, loading = false, showStats = false, visibleColumns: visibility, selection,
+  cases, onOpen, onDelete, showTime, embedded = false, loading = false, showStats = false, visibleColumns: visibility, selection,
 }: {
   cases: CaseRow[]
   onOpen: (c: CaseRow) => void
+  // When given, each row gets an Actions cell with a delete button (confirmed first). The case's
+  // emails aren't deleted — they go back to Needs Review.
+  onDelete?: (cases: CaseRow[]) => Promise<void>
   showTime: boolean
   embedded?: boolean
   loading?: boolean
@@ -134,6 +142,8 @@ export function CasesTable({
   const today = todayYmd()
   const [itemsPerPage, setItemsPerPage] = useState(50)
   const [page, setPage] = useState(0)
+  const [confirmDelete, setConfirmDelete] = useState<CaseRow | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const isVisible = (id: string) => visibility?.[id] !== false
 
   const rows: Row[] = useMemo(
@@ -173,7 +183,17 @@ export function CasesTable({
     respond: visibleColumns.filter((c) => c.band === "respond"),
     tracking: visibleColumns.filter((c) => c.band === "tracking"),
   }
-  const colCount = 2 + visibleColumns.length
+  const colCount = 2 + visibleColumns.length + (onDelete ? 1 : 0)
+  const runDelete = async () => {
+    if (!confirmDelete || !onDelete) return
+    setDeleting(true)
+    try {
+      await onDelete([confirmDelete])
+    } finally {
+      setDeleting(false)
+      setConfirmDelete(null)
+    }
+  }
   // The row checkbox lives in the sticky "#" column, which widens to make room — so the Client column
   // that sticks beside it has to move over by the same amount (mirrors EmailsTable's numWidth pattern).
   const numWidth = selection ? "w-24 min-w-[6rem] max-w-[6rem]" : "w-16"
@@ -240,6 +260,11 @@ export function CasesTable({
                   </th>
                 )
               )}
+              {onDelete && (
+                <th rowSpan={2} className="py-2 px-3 w-20 min-w-[5rem] text-center font-semibold text-base border-b border-white/20 bg-slate-600 text-white">
+                  Actions
+                </th>
+              )}
             </tr>
             <tr>
               {visibleColumns.map((c) => (
@@ -290,6 +315,20 @@ export function CasesTable({
                   {visibleColumns.map((col) => (
                     <td key={col.id} className={cn(td, col.tdClassName)}>{col.renderCell(c, m, showTime)}</td>
                   ))}
+                  {onDelete && (
+                    <td className={cn(td, "text-center")} onClick={(ev) => ev.stopPropagation()}>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        title="Delete task"
+                        aria-label={`Delete task ${c.case_ref}`}
+                        onClick={() => setConfirmDelete(c)}
+                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </td>
+                  )}
                 </tr>
               )
             })}
@@ -305,6 +344,24 @@ export function CasesTable({
         sticky={false}
         className="shrink-0"
       />
+
+      <AlertDialog open={!!confirmDelete} onOpenChange={(o) => !o && !deleting && setConfirmDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this task?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmDelete?.case_ref ? `${confirmDelete.case_ref} will be removed. ` : ""}Its emails aren't deleted — they go back to Needs Review. This can't be undone (the tracked dates, approval status and assignment are gone).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); runDelete() }} disabled={deleting} className="bg-red-600 hover:bg-red-700">
+              {deleting && <Loader2 className="w-4 h-4 animate-spin mr-1.5" />}
+              {deleting ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -294,6 +294,7 @@ export function CasesRulePanel({
           <CasesTable
             cases={visible}
             onOpen={onOpen}
+            onDelete={onDelete}
             showTime={showTime}
             loading={loading}
             embedded

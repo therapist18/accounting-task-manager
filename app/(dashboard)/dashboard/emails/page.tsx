@@ -680,6 +680,7 @@ export default function EmailCenterPage() {
         <CasesTable
           cases={closedCases}
           onOpen={(c) => setOpenCaseId(c.id)}
+          onDelete={deleteCases}
           showTime={showTime}
           embedded={embedded}
           loading={loading}
