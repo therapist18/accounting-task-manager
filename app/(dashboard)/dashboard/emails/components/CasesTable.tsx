@@ -206,7 +206,7 @@ export function CasesTable({
   // whatever just dropped out, so "N selected" and bulk actions only ever cover what's on screen.
   useEffect(() => {
     if (!selection) return
-    const visible = new Set(filtered.map((c) => c.id))
+    const visible = new Set(filtered.map((r) => r.case.id))
     const hidden = cases.filter((c) => selection.selected.has(c.id) && !visible.has(c.id)).map((c) => c.id)
     if (hidden.length) selection.onToggleAll(hidden, false)
     // only when the filtered set changes; selection's identity changes on every toggle
@@ -214,8 +214,8 @@ export function CasesTable({
   }, [filtered])
 
   // Select-all acts on the rows the column filters leave visible, not on every case behind them.
-  const allSelected = !!selection && filtered.length > 0 && filtered.every((c) => selection.selected.has(c.id))
-  const someSelected = !!selection && !allSelected && filtered.some((c) => selection.selected.has(c.id))
+  const allSelected = !!selection && filtered.length > 0 && filtered.every((r) => selection.selected.has(r.case.id))
+  const someSelected = !!selection && !allSelected && filtered.some((r) => selection.selected.has(r.case.id))
 
   const statsRowColumns = useMemo(() => {
     const cols: { id: string; getValue?: (r: Row) => string; className?: string }[] = [
@@ -248,7 +248,7 @@ export function CasesTable({
                     checked={allSelected}
                     ref={(el) => { if (el) el.indeterminate = someSelected }}
                     onClick={(ev) => ev.stopPropagation()}
-                    onChange={(ev) => selection.onToggleAll(filtered.map((c) => c.id), ev.target.checked)}
+                    onChange={(ev) => selection.onToggleAll(filtered.map((r) => r.case.id), ev.target.checked)}
                     title={allSelected ? "Clear selection" : `Select all ${filtered.length}`}
                     className="h-4 w-4 align-middle accent-white cursor-pointer"
                   />

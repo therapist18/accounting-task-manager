@@ -59,7 +59,17 @@
       "Bash(node \"C:/Users/user/AppData/Local/Temp/claude/e--GitHub-accounting-task-manager/b8762113-7d7d-4365-bb26-3e121b14aed8/scratchpad/scope-tester.js\")",
       "Bash(node \"C:/Users/user/AppData/Local/Temp/claude/e--GitHub-accounting-task-manager/e463db1a-0e81-4eec-91f3-63ed2951e4ab/scratchpad/edit_tracking.js\")",
       "Bash(node \"C:/Users/user/AppData/Local/Temp/claude/e--GitHub-accounting-task-manager/e463db1a-0e81-4eec-91f3-63ed2951e4ab/scratchpad/edit_policies.js\")",
-      "Bash(node \"C:/Users/user/AppData/Local/Temp/claude/e--GitHub-accounting-task-manager/e463db1a-0e81-4eec-91f3-63ed2951e4ab/scratchpad/edit_summary.js\")"
+      "Bash(node \"C:/Users/user/AppData/Local/Temp/claude/e--GitHub-accounting-task-manager/e463db1a-0e81-4eec-91f3-63ed2951e4ab/scratchpad/edit_summary.js\")",
+      "Bash(grep -n \"Toolbar\\\\|const stat = \\\\|{/\\\\* Stats \\\\*/}\\\\|<Table>\\\\|</TableHeader>\\\\|TRACK_STATUS_FILTERS\\\\|applicability\\\\b\" InsuranceTracking.tsx)",
+      "Bash(node \"C:/Users/user/AppData/Local/Temp/claude/e--GitHub-accounting-task-manager/e463db1a-0e81-4eec-91f3-63ed2951e4ab/scratchpad/edit_tracking2.js\")",
+      "Bash(grep -n \"statusFilter\\\\|const statCard\\\\|{/\\\\* Stats \\\\*/}\\\\|{/\\\\* Toolbar \\\\*/}\\\\|STATUS_FILTER_OPTIONS\\\\|const filtered\\\\|const stats\\\\|insurerOptions\\\\|<TableHeader>\\\\|</TableHeader>\\\\|Totals\" page.tsx)",
+      "Bash(node \"C:/Users/user/AppData/Local/Temp/claude/e--GitHub-accounting-task-manager/e463db1a-0e81-4eec-91f3-63ed2951e4ab/scratchpad/edit_policies2.js\")",
+      "Bash(node \"C:/Users/user/AppData/Local/Temp/claude/e--GitHub-accounting-task-manager/e463db1a-0e81-4eec-91f3-63ed2951e4ab/scratchpad/edit_summary2.js\")",
+      "Bash(sed -i 's#require\\(\"jspdf\"\\)#require\\(\"E:/GitHub/accounting-task-manager/node_modules/jspdf\"\\)#g' run.js)",
+      "Bash(NODE_PATH='C:/Users/user/AppData/Local/Temp/claude/e--GitHub-accounting-task-manager/e463db1a-0e81-4eec-91f3-63ed2951e4ab/scratchpad/smoke/node_modules;E:/GitHub/accounting-task-manager/node_modules' node run.js)",
+      "Bash(node \"C:/Users/user/AppData/Local/Temp/claude/e--GitHub-accounting-task-manager/e463db1a-0e81-4eec-91f3-63ed2951e4ab/scratchpad/edit_export_lib.js\")",
+      "Bash(node \"C:/Users/user/AppData/Local/Temp/claude/e--GitHub-accounting-task-manager/e463db1a-0e81-4eec-91f3-63ed2951e4ab/scratchpad/edit_filters_apply.js\")",
+      "Bash(node \"C:/Users/user/AppData/Local/Temp/claude/e--GitHub-accounting-task-manager/e463db1a-0e81-4eec-91f3-63ed2951e4ab/scratchpad/syntax_check.js\")"
     ],
     "additionalDirectories": [
       "\\tmp",
