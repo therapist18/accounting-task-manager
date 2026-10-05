@@ -55,6 +55,7 @@ export function EmailsTable({
   onAllocate,
   allocateTargets,
   onDeleteRow,
+  ignoreRules,
   showStats = false,
   visibleColumns: visibility,
   rules,
@@ -74,6 +75,9 @@ export function EmailsTable({
   // Row checkboxes (the Ignored tab). The header checkbox covers every row in `emails`, not just the
   // current page.
   selection?: { selected: Set<string>; onToggle: (id: string) => void; onToggleAll: (ids: string[], on: boolean) => void }
+  // The Ignored tab: ignore rules name no category (every mail they catch is filed as System / Non-KRA),
+  // so for a row ignored by one of these rules the Category column shows the rule instead.
+  ignoreRules?: RuleRow[]
   // Adds an Action dropdown (— / Action required / Update only / Ignored / Needs review) to each row.
   onAllocate?: (e: EmailRow, d: Disposition) => void
   // Limits the Action dropdown to these tabs (default: all). The Ignored tab leaves out "Ignored".
@@ -92,11 +96,21 @@ export function EmailsTable({
 }) {
   const [itemsPerPage, setItemsPerPage] = useState(50)
   const [page, setPage] = useState(0)
-  const [testerSeed, setTesterSeed] = useState<{ subject: string; sender: string } | null>(null)
+  const [testerSeed, setTesterSeed] = useState<{ subject: string; sender: string; company: { id: string; name: string } | null } | null>(null)
   const isVisible = (id: string) => visibility?.[id] !== false
 
   const byKey = new Map(categories.map((c) => [c.key, c]))
-  const categoryName = (e: EmailRow) => (e.category_key ? byKey.get(e.category_key)?.name ?? e.category_key : "")
+  const ignoreRuleById = new Map((ignoreRules ?? []).map((r) => [r.id, r]))
+  // "sender — subject" of the ignore rule that caught this mail, or "" when none did (ignored by hand,
+  // or by a rule that has since been deleted).
+  const ignoreRuleLabel = (e: EmailRow) => {
+    const r = e.disposition === "ignore" && e.matched_rule_id ? ignoreRuleById.get(e.matched_rule_id) : undefined
+    if (!r) return ""
+    const subjects = [r.pattern, ...(r.extra_patterns ?? [])].map((w) => w.trim()).filter(Boolean)
+    const senders = [r.sender_pattern, ...(r.extra_sender_patterns ?? [])].map((w) => (w ?? "").trim()).filter(Boolean)
+    return `${senders.length ? senders.join(" · ") : "Any sender"} — ${subjects.length ? subjects.join(" · ") : "Any subject"}`
+  }
+  const categoryName = (e: EmailRow) => ignoreRuleLabel(e) || (e.category_key ? byKey.get(e.category_key)?.name ?? e.category_key : "")
   const statusLabel = (e: EmailRow) =>
     e.handled_at ? "Handled"
       : e.category_key === "notification" ? (e.priority === "urgent" ? "Urgent" : "FYI")
@@ -112,7 +126,8 @@ export function EmailsTable({
   }
   const { filtered, configFor, activeCount: activeFilterCount, clearAll: clearAllFilters } = useColumnFilters(emails, FILTER_VALUE, ["received"])
 
-  const { levels, sorted, toggle } = useTableSort(filtered, SORT_VALUE, [{ key: "received", dir: "desc" }])
+  // Category sorts by its displayed name, not its internal key (the two orders differ).
+  const { levels, sorted, toggle } = useTableSort(filtered, { ...SORT_VALUE, category: (e) => categoryName(e).toLowerCase() }, [{ key: "received", dir: "desc" }])
 
   useEffect(() => setPage(0), [emails, itemsPerPage])
 
@@ -267,7 +282,14 @@ export function EmailsTable({
                   {isVisible("received") && <td className={cn(TD_CLASS, "whitespace-nowrap tabular-nums")}>{fmtDateTime(e.received_at, showTime)}</td>}
                   {isVisible("category") && (
                     <td className={TD_CLASS}>
-                      {cat ? (
+                      {ignoreRuleLabel(e) ? (
+                        <span
+                          className="inline-block max-w-[260px] truncate align-middle text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-slate-50 text-slate-700 border-slate-200"
+                          title={`Ignored by rule: ${ignoreRuleLabel(e)}`}
+                        >
+                          Rule: {ignoreRuleLabel(e)}
+                        </span>
+                      ) : cat ? (
                         <span
                           className="text-sm font-semibold px-2.5 py-0.5 rounded-full border whitespace-nowrap"
                           style={{ background: `${cat.color ?? "#6b7280"}14`, color: cat.color ?? "#6b7280", borderColor: `${cat.color ?? "#6b7280"}33` }}
@@ -351,7 +373,7 @@ export function EmailsTable({
                               size="sm"
                               variant="ghost"
                               className="h-8 w-8 p-0 rounded-md text-slate-400 hover:text-custom-blue hover:bg-slate-100"
-                              onClick={() => setTesterSeed({ subject: e.subject, sender: e.sender_email })}
+                              onClick={() => setTesterSeed({ subject: e.subject, sender: e.sender_email, company: e.company_id ? { id: String(e.company_id), name: e.company_name ?? "This email's company" } : null })}
                               title="Test this mail's subject/sender against every rule"
                             >
                               <FlaskConical className="h-4 w-4" />
@@ -384,6 +406,7 @@ export function EmailsTable({
           categories={categories}
           initialSubject={testerSeed?.subject}
           initialSender={testerSeed?.sender}
+          initialCompany={testerSeed?.company}
         />
       )}
     </div>

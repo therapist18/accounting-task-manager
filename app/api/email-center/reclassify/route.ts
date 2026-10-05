@@ -46,8 +46,27 @@ const YMD = /^\d{4}-\d{2}-\d{2}$/
 // was confidently classified before a rule was corrected. Every branch in reclassifyEmails() already
 // works from the row's data alone, not from what disposition it currently holds, so no scope-specific
 // logic is needed there beyond the ignore/notify-on-a-cased-row guard above.
-const SCOPES = ["needs_review", "update_only"] as const
+// "notification" (flagged important-notification mail, not yet handled) and "ignore" (soft-ignored mail a
+// rule put there — never mail a person ignored by hand) can be re-run too, so a corrected or deleted rule
+// takes effect on what it already caught. The four scopes are disjoint: Needs Review excludes
+// notifications even though they share its disposition.
+const SCOPES = ["needs_review", "update_only", "notification", "ignore"] as const
 type ReclassifyScope = (typeof SCOPES)[number]
+
+// The rows a scope covers, as a filter on an emails query (used by both "list" and "run" so they agree).
+function applyScope<T>(q: T, scope: ReclassifyScope): T {
+  const b = q as any
+  switch (scope) {
+    case "notification":
+      return b.eq("category_key", "notification").is("handled_at", null)
+    case "ignore":
+      return b.eq("disposition", "ignore").eq("classification_source", "rule")
+    case "needs_review":
+      return b.eq("disposition", "needs_review").or("category_key.is.null,category_key.neq.notification")
+    default:
+      return b.eq("disposition", scope)
+  }
+}
 // Rule matching itself is cheap, in-memory regex work — what actually takes time per matched row is
 // waiting on Supabase (a thread-case lookup, maybe a case open/update, then the email's own update).
 // Running several rows at once instead of one after another turns that into mostly-overlapped network
@@ -69,7 +88,8 @@ async function reclassifyEmails(
   sb: SupabaseClient,
   actor: Actor,
   rules: SubjectRule[],
-  rows: any[]
+  rows: any[],
+  scope: ReclassifyScope
 ): Promise<ReclassifyResult> {
   let changed = 0
   let deleted = 0
@@ -106,9 +126,13 @@ async function reclassifyEmails(
         body: e.snippet ?? "",
         senderEmail: e.sender_email,
         threadHasCase: !!e.case_id,
+        companyId: e.company_id,
         rules,
       })
       if (!rule || rule.confidence < THRESHOLD) {
+        // A notification no rule matches any more is left exactly as it is — silently demoting it to
+        // Ignored via the catch-all below would hide mail someone was told to look at.
+        if (scope === "notification") return
         // Same catch-all ingestion now applies: a non-KRA sender with nothing else matching, and no
         // case tracking this thread, has nothing to do sitting in Needs Review — there's no rule type
         // for "anything that isn't KRA", so this lives in code (mirrors the matching block in
@@ -329,10 +353,10 @@ export async function POST(request: NextRequest) {
       }
       const rules = await loadSubjectRules(sb)
       const { data: rows, error } = await withSupabaseRetry<any>(() =>
-        sb.from("emails").select("*").in("id", ids).eq("disposition", scope)
+        applyScope(sb.from("emails").select("*").in("id", ids), scope)
       )
       if (error) throw new Error(error.message)
-      const { processed, changed, deleted, casesOpened, failed, moved } = await reclassifyEmails(sb, actor, rules, rows ?? [])
+      const { processed, changed, deleted, casesOpened, failed, moved } = await reclassifyEmails(sb, actor, rules, rows ?? [], scope)
       return NextResponse.json({ success: true, processed, changed, deleted, cases_opened: casesOpened, failed, moved })
     }
 
@@ -351,7 +375,7 @@ export async function POST(request: NextRequest) {
       until = body.until
     }
     const list = () => {
-      let q = sb.from("emails").select("id").eq("disposition", scope).order("received_at", { ascending: true }).limit(LIST_MAX)
+      let q = applyScope(sb.from("emails").select("id"), scope).order("received_at", { ascending: true }).limit(LIST_MAX)
       if (since) q = q.gte("received_at", `${since}T00:00:00.000Z`)
       if (until) {
         const end = new Date(`${until}T00:00:00.000Z`)

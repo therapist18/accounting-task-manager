@@ -13,7 +13,8 @@ import {
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { CasesTable } from "./CasesTable"
-import type { CaseRow, RuleRow } from "./shared"
+import { RuleInfoButton, ruleCategory } from "./RuleInfo"
+import type { CaseRow, CategoryOption, RuleRow } from "./shared"
 
 // Same sidebar shell as IgnoredPanel / RuleMatchedEmailsPanel, for In Progress: grouped by which
 // classify rule opened the case (created_by_rule_id), with row selection and bulk delete. Deleting a
@@ -38,11 +39,15 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 function Row({
-  icon, label, sub, count, active, onClick, title, muted,
+  icon, label, sub, meta, info, count, active, onClick, title, muted,
 }: {
   icon: React.ReactNode
   label: string
   sub?: string
+  // A third, smaller line — the category this rule's mail shows in the table.
+  meta?: string
+  // The rule's info icon (opens its details); sits inside the row, so the row can't be a <button>.
+  info?: React.ReactNode
   count: number
   active: boolean
   onClick: () => void
@@ -50,11 +55,14 @@ function Row({
   muted?: boolean
 }) {
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); onClick() } }}
       title={title}
       className={cn(
-        "flex items-center w-full px-3 py-2 text-base rounded-md transition-colors text-left font-medium",
+        "flex items-center w-full px-3 py-2 text-base rounded-md transition-colors text-left font-medium cursor-pointer",
         active ? "bg-custom-blue text-white shadow-xs" : "text-slate-700 hover:bg-slate-200/60",
         muted && !active && "opacity-60"
       )}
@@ -63,6 +71,7 @@ function Row({
       <span className="min-w-0 flex-1">
         <span className="block truncate">{label}</span>
         {sub && <span className={cn("block truncate text-sm font-normal", active ? "text-white/80" : "text-slate-500")}>{sub}</span>}
+        {meta && <span className={cn("block truncate text-xs font-semibold", active ? "text-white/90" : "text-custom-blue")}>{meta}</span>}
       </span>
       {count > 0 && (
         <Badge
@@ -75,13 +84,16 @@ function Row({
           {count}
         </Badge>
       )}
-    </button>
+      {info}
+    </div>
   )
 }
 
 export function CasesRulePanel({
   cases,
   rules,
+  categories,
+  companyNames,
   onOpen,
   onDelete,
   showTime,
@@ -93,6 +105,10 @@ export function CasesRulePanel({
   cases: CaseRow[]
   // Classify rules that can open a case (creates_case categories) — only these appear in the sidebar.
   rules: RuleRow[]
+  // Names the category each rule's tasks show in the table.
+  categories: CategoryOption[]
+  // company id -> name, so a rule's info popover can name the companies it is limited to.
+  companyNames?: Record<string, string>
   onOpen: (c: CaseRow) => void
   // Deletes cases; their emails go back to Needs Review rather than being deleted. Resolves once done.
   onDelete: (cases: CaseRow[]) => Promise<void>
@@ -239,6 +255,8 @@ export function CasesRulePanel({
                       icon={<ListFilter className="w-5 h-5" />}
                       label={d.sender}
                       sub={d.subjects}
+                      meta={ruleCategory(rule, categories)}
+                      info={<RuleInfoButton rule={rule} categories={categories} companyNames={companyNames} active={group === key} />}
                       count={ruleCounts.get(rule.id) ?? 0}
                       active={group === key}
                       onClick={() => setGroup(key)}

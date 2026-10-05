@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils"
 import { isAutomatedSender } from "@/lib/email-center/rules"
 import { EmailsTable } from "./NeedsReview"
+import { RuleInfoButton, ruleCategory } from "./RuleInfo"
 import { DISPOSITION_LABEL, type CategoryOption, type Disposition, type EmailRow, type RuleRow } from "./shared"
 
 // The Ignored tab: a searchable sidebar on the left (the ignore rules, then the automated senders, then
@@ -40,11 +41,15 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 function Row({
-  icon, label, sub, count, active, onClick, title, muted,
+  icon, label, sub, meta, info, count, active, onClick, title, muted,
 }: {
   icon: React.ReactNode
   label: string
   sub?: string
+  // A third, smaller line — the category this rule's mail shows in the table.
+  meta?: string
+  // The rule's info icon (opens its details); sits inside the row, so the row can't be a <button>.
+  info?: React.ReactNode
   count: number
   active: boolean
   onClick: () => void
@@ -52,11 +57,14 @@ function Row({
   muted?: boolean
 }) {
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); onClick() } }}
       title={title}
       className={cn(
-        "flex items-center w-full px-3 py-2 text-base rounded-md transition-colors text-left font-medium",
+        "flex items-center w-full px-3 py-2 text-base rounded-md transition-colors text-left font-medium cursor-pointer",
         active ? "bg-custom-blue text-white shadow-xs" : "text-slate-700 hover:bg-slate-200/60",
         muted && !active && "opacity-60"
       )}
@@ -65,6 +73,7 @@ function Row({
       <span className="min-w-0 flex-1">
         <span className="block truncate">{label}</span>
         {sub && <span className={cn("block truncate text-sm font-normal", active ? "text-white/80" : "text-slate-500")}>{sub}</span>}
+        {meta && <span className={cn("block truncate text-xs font-semibold", active ? "text-white/90" : "text-custom-blue")}>{meta}</span>}
       </span>
       {count > 0 && (
         <Badge
@@ -77,7 +86,8 @@ function Row({
           {count}
         </Badge>
       )}
-    </button>
+      {info}
+    </div>
   )
 }
 
@@ -85,6 +95,7 @@ export function IgnoredPanel({
   emails,
   rules,
   categories,
+  companyNames,
   onOpen,
   onMove,
   onDelete,
@@ -95,6 +106,7 @@ export function IgnoredPanel({
   emails: EmailRow[]
   rules: RuleRow[]
   categories: CategoryOption[]
+  companyNames?: Record<string, string>
   onOpen: (e: EmailRow) => void
   // Moves emails to another tab; resolves once done. Called with one email for a row's dropdown.
   onMove: (emails: EmailRow[], disposition: Disposition) => Promise<void>
@@ -278,6 +290,8 @@ export function IgnoredPanel({
                       icon={rule.hard_ignore ? <Trash2 className="w-5 h-5" /> : <ListFilter className="w-5 h-5" />}
                       label={d.sender}
                       sub={rule.hard_ignore ? `${d.subjects} · deleted, not stored` : d.subjects}
+                      meta={rule.hard_ignore ? undefined : ruleCategory(rule, categories)}
+                      info={<RuleInfoButton rule={rule} categories={categories} companyNames={companyNames} active={group === key} />}
                       count={ruleCounts.get(rule.id) ?? 0}
                       active={group === key}
                       onClick={() => setGroup(key)}
@@ -387,6 +401,7 @@ export function IgnoredPanel({
             }
             selection={{ selected, onToggle: toggle, onToggleAll: toggleAll }}
             onAllocate={(e, d) => { if (e.disposition !== d) onMove([e], d) }}
+            ignoreRules={ignoreRules}
             allocateTargets={BULK_MOVE_TARGETS}
             onDeleteRow={(e) => setConfirmDelete([e])}
           />

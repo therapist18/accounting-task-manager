@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { authorize, fail, userNames } from "@/lib/email-center/api"
 import { DEFAULT_SUBJECT_RULES } from "@/lib/email-center/rules"
 import {
-  EXTRA_MIGRATION_MESSAGE, EXTRA_SENDER_MIGRATION_MESSAGE, NOTIFY_PRIORITY_MIGRATION_MESSAGE, RULES_TABLE,
+  COMPANY_SCOPE_MIGRATION_MESSAGE, EXTRA_MIGRATION_MESSAGE, EXTRA_SENDER_MIGRATION_MESSAGE, NOTIFY_PRIORITY_MIGRATION_MESSAGE, RULES_TABLE,
   invalidateRulesCache, normalizeRuleRow, ruleColumns, withOptionalColumnFallback, withoutDroppedColumns,
 } from "@/lib/email-center/rule-store"
 import { withSupabaseRetry } from "@/lib/supabaseRetry"
@@ -91,6 +91,9 @@ export async function POST(request: NextRequest) {
         // wordings/senders would be lost, so those refuse instead. notify_priority also has a safe
         // default ('urgent') — only an explicit "informational" choice would be silently lost, so only
         // that refuses; letting a rule save as (the already-correct) 'urgent' never needs to block.
+        // A company restriction can never be silently dropped: the rule would then apply to EVERY company
+        // (an "ignore except company 10" rule would ignore company 10 too). Only "all" is safe to lose.
+        if ((col === "company_scope" || col === "company_ids") && ((parsed.value.company_scope && parsed.value.company_scope !== "all") || parsed.value.company_ids?.length)) return COMPANY_SCOPE_MIGRATION_MESSAGE
         if (col === "extra_patterns" && parsed.value.extra_patterns?.length) return EXTRA_MIGRATION_MESSAGE
         if (col === "extra_sender_patterns" && parsed.value.extra_sender_patterns?.length) return EXTRA_SENDER_MIGRATION_MESSAGE
         if (col === "notify_priority" && parsed.value.notify_priority === "informational") return NOTIFY_PRIORITY_MIGRATION_MESSAGE

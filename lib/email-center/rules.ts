@@ -65,6 +65,21 @@ export interface SubjectRule {
   // still lands in Notifications but reads as FYI — a password-reset confirmation vs an account-locked
   // notice are both "notify", but only one of them is actually urgent.
   notify_priority?: "urgent" | "informational"
+  // Which companies' mail the rule applies to: every company (default), only the ones in company_ids, or
+  // every company except those. Compared as strings; mail with no company only matches "all"/"except".
+  company_scope?: CompanyScope
+  company_ids?: string[]
+}
+
+export type CompanyScope = "all" | "only" | "except"
+
+// Whether a rule applies to mail of this company (null/undefined = the mail has no company).
+export function appliesToCompany(rule: Pick<SubjectRule, "company_scope" | "company_ids">, companyId: string | number | null | undefined): boolean {
+  const scope = rule.company_scope ?? "all"
+  if (scope === "all") return true
+  const ids = rule.company_ids ?? []
+  const listed = companyId != null && ids.includes(String(companyId))
+  return scope === "only" ? listed : !listed
 }
 
 // First match wins, so order from most to least specific.
@@ -208,9 +223,13 @@ export function classifyByRules(input: {
   body: string
   senderEmail: string
   threadHasCase: boolean
+  // The company the mail belongs to, so company-scoped rules ("only these" / "all except these") can be
+  // skipped for the wrong ones. Omit when unknown — such mail matches only rules that apply to every
+  // company or exclude specific ones.
+  companyId?: string | number | null
   rules?: SubjectRule[]
 }): RuleResult | null {
-  const { subject, body, senderEmail, threadHasCase, rules = DEFAULT_SUBJECT_RULES } = input
+  const { subject, body, senderEmail, threadHasCase, companyId, rules = DEFAULT_SUBJECT_RULES } = input
 
   const cleanSubject = stripReplyPrefix(subject)
 
@@ -220,7 +239,7 @@ export function classifyByRules(input: {
   // subject, on the sender address, or both.
   for (const rule of rules) {
     if (rule.is_ignore) {
-      if (matchesSubject(rule, cleanSubject) && matchesSender(rule, senderEmail)) {
+      if (appliesToCompany(rule, companyId) && matchesSubject(rule, cleanSubject) && matchesSender(rule, senderEmail)) {
         return { action: "ignore", categoryKey: null, confidence: rule.confidence, ruleId: rule.id, hardIgnore: !!rule.hard_ignore }
       }
     }
@@ -231,7 +250,7 @@ export function classifyByRules(input: {
   // someone sees it, with no KRA task/case opened. notify_priority decides how loudly.
   for (const rule of rules) {
     if (rule.is_notify) {
-      if (matchesSubject(rule, cleanSubject) && matchesSender(rule, senderEmail)) {
+      if (appliesToCompany(rule, companyId) && matchesSubject(rule, cleanSubject) && matchesSender(rule, senderEmail)) {
         return {
           action: "notify", categoryKey: null, confidence: rule.confidence, ruleId: rule.id,
           notifyPriority: rule.notify_priority === "informational" ? "informational" : "urgent",
@@ -253,7 +272,7 @@ export function classifyByRules(input: {
   for (const rule of rules) {
     if (rule.is_ignore || rule.is_notify) continue
     // A classify rule with no wording would match every subject — never let that happen.
-    if (subjectWordings(rule).length && matchesSubject(rule, cleanSubject)) {
+    if (appliesToCompany(rule, companyId) && subjectWordings(rule).length && matchesSubject(rule, cleanSubject)) {
       return { action: "classify", categoryKey: rule.category_key, confidence: rule.confidence, ruleId: rule.id }
     }
   }

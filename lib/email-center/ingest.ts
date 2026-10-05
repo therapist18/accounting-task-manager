@@ -301,7 +301,9 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   // While paused this whole cheap pass is skipped too: it's what would otherwise drop hard-ignore
   // matches, non-KRA noise and confidently-informational KRA mail before ever reaching Needs Review.
   if (direction === "inbound" && !paused) {
-    const cheap = classifyByRules({ subject, body: snippet, senderEmail, threadHasCase: !!threadCase, rules })
+    // The company is only a best guess this early (the mailbox's own company, or the thread's) — the PIN
+    // match that can refine it needs the full body, fetched below.
+    const cheap = classifyByRules({ subject, body: snippet, senderEmail, threadHasCase: !!threadCase, companyId: account.company_id ?? threadCase?.company_id ?? null, rules })
     // Confident ignore rules are checked before classification and name no category: whatever the
     // sender, matching mail never opens a case or reaches review. Below the threshold it still goes
     // to review.
@@ -405,7 +407,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     disposition = "needs_review"
     reviewReason = "Classification paused — recovering synced mail."
   } else {
-    const rule = classifyByRules({ subject, body: text, senderEmail, threadHasCase: !!threadCase, rules })
+    const rule = classifyByRules({ subject, body: text, senderEmail, threadHasCase: !!threadCase, companyId, rules })
     // "Ignore and delete" reached only via the full body/subject (the cheap, snippet-only pass above
     // missed it): drop it now, before going any further.
     if (rule?.action === "ignore" && rule.confidence >= THRESHOLD && rule.hardIgnore) return "skipped"

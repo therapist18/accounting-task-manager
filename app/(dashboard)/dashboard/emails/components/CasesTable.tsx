@@ -29,6 +29,8 @@ const ROW_TINT = {
   normal: "",
 }
 
+const categoryLabel = (c: CaseRow) => c.notice_type || (c.category_key ? c.category_key.replace(/_/g, " ") : "")
+
 const td = TD_CLASS
 const badge = "text-sm font-semibold whitespace-nowrap border px-2.5 py-0.5 rounded-full"
 
@@ -65,6 +67,8 @@ const COLUMNS: ColDef[] = [
   { id: "kra_email_from", label: "KRA email from", band: "from", tdClassName: "min-w-[190px] break-all text-sm text-slate-600", sortValue: (r) => r.case.kra_email_from ?? "", renderCell: (c) => c.kra_email_from },
   { id: "kra_email_cc", label: "KRA email CC to", band: "from", tdClassName: "min-w-[190px] break-all text-sm text-slate-500", sortValue: (r) => r.case.kra_email_cc ?? "", renderCell: (c) => c.kra_email_cc || "—" },
   { id: "email_date", label: "Email date", band: "from", tdClassName: "whitespace-nowrap tabular-nums", sortValue: (r) => r.case.email_date ?? "", filterValue: (r) => fmtDate(r.case.email_date), renderCell: (c) => fmtDate(c.email_date) },
+  // notice_type holds the category's name (set when the task is opened); fall back to the key for older rows.
+  { id: "category", label: "Category", band: "from", tdClassName: "min-w-[150px] whitespace-nowrap", sortValue: (r) => categoryLabel(r.case), filterValue: (r) => categoryLabel(r.case) || "—", renderCell: (c) => categoryLabel(c) ? <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-slate-50 text-slate-700 border-slate-200">{categoryLabel(c)}</span> : <span className="text-slate-300">—</span> },
   { id: "deadline_date", label: "Deadline date (KRA)", band: "from", tdClassName: "whitespace-nowrap font-semibold tabular-nums", sortValue: (r) => r.case.deadline_date ?? "", filterValue: (r) => fmtDate(r.case.deadline_date), renderCell: (c) => fmtDate(c.deadline_date) || <span className="text-slate-300 font-normal">—</span> },
   { id: "subject", label: "Subject", band: "from", tdClassName: "min-w-[260px]", sortValue: (r) => r.case.subject ?? "", renderCell: (c) => <span className="line-clamp-2 leading-snug font-medium text-slate-900" title={c.subject ?? ""}>{c.subject}</span> },
   { id: "contents", label: "Contents (details)", band: "from", tdClassName: "min-w-[280px]", sortValue: (r) => r.case.contents ?? "", renderCell: (c) => <span className="line-clamp-2 leading-snug text-slate-600" title={c.contents ?? ""}>{c.contents}</span> },

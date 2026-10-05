@@ -74,16 +74,20 @@ export function CompanyMultiSelect({
         </div>
         <div className="max-h-72 overflow-y-auto py-1">
           {shown.map((o) => (
-            <button
+            // A div, not a button: the Checkbox below renders its own <button>, and a button can't
+            // contain another button.
+            <div
               key={o.value}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => toggle(o.value)}
-              className="flex w-full items-center gap-3 px-3 py-2 text-left text-base hover:bg-slate-100"
+              onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggle(o.value) } }}
+              className="flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left text-base hover:bg-slate-100"
             >
-              <Checkbox checked={selected.has(o.value)} className="h-4 w-4 rounded-sm pointer-events-none" />
+              <Checkbox checked={selected.has(o.value)} tabIndex={-1} className="h-4 w-4 rounded-sm pointer-events-none" />
               <span className="truncate flex-1">{o.label}</span>
               {selected.has(o.value) && <Check className="h-4 w-4 text-custom-blue shrink-0" />}
-            </button>
+            </div>
           ))}
           {shown.length === 0 && <p className="py-6 text-center text-sm text-slate-400">No companies match.</p>}
         </div>

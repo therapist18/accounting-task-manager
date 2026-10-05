@@ -21,6 +21,8 @@ import {
 import { PRIMARY_PILL_BUTTON_CLASS, SearchSelect, api, fmtDateTime, ruleOutcome, type CategoryOption, type RuleRow } from "./shared"
 import { exportRulesToExcel } from "./exportRules"
 import { RuleTesterDialog } from "./RuleTesterDialog"
+import { CompanyMultiSelect } from "./CompanyMultiSelect"
+import { ruleScopeLabel } from "./RuleInfo"
 import { compileRule } from "@/lib/email-center/rules"
 
 // The Rules tab: the subject rules that drive automatic classification, auto-ignore and important
@@ -37,6 +39,7 @@ const SORT_VALUE: Record<string, (r: RuleRow) => string | number> = {
   pattern: (r) => r.pattern,
   sender: (r) => r.sender_pattern ?? "",
   sender_match: (r) => r.sender_match_type ?? "",
+  companies: (r) => (r.company_scope ?? "all") === "all" ? "" : `${r.company_scope}:${(r.company_ids ?? []).length}`,
   category: (r) => r.category_key,
   confidence: (r) => r.confidence,
   active: (r) => (r.is_active ? 1 : 0),
@@ -54,6 +57,7 @@ const TOGGLEABLE_COLUMNS = [
   { id: "pattern", label: "Subject wordings" },
   { id: "sender", label: "Sender" },
   { id: "sender_match", label: "Sender match" },
+  { id: "companies", label: "Applies to" },
   { id: "category", label: "Category" },
   { id: "outcome", label: "Result" },
   { id: "confidence", label: "Confidence" },
@@ -147,6 +151,9 @@ type Draft = {
   // Only asked about when is_notify is true: "urgent" demands attention now, "informational" still
   // lands in Notifications but reads as FYI.
   notify_priority: "urgent" | "informational"
+  // Which companies the rule applies to: everyone, only the picked ones, or everyone except them.
+  company_scope: "all" | "only" | "except"
+  company_ids: string[]
   match_type: "contains" | "regex"
   // Subject wordings, one per line: the first is the rule's primary pattern, the rest are alternatives.
   wordings: string
@@ -161,7 +168,7 @@ type Draft = {
 }
 
 const emptyDraft = (nextOrder: number): Draft => ({
-  id: null, is_ignore: false, hard_ignore: false, is_notify: false, notify_priority: "urgent", match_type: "contains", wordings: "", sender_match_type: "contains", sender_patterns: "",
+  id: null, is_ignore: false, hard_ignore: false, is_notify: false, notify_priority: "urgent", company_scope: "all", company_ids: [], match_type: "contains", wordings: "", sender_match_type: "contains", sender_patterns: "",
   category_key: "", confidence: "90", sort_order: String(nextOrder), notes: "", is_active: true,
 })
 
@@ -169,6 +176,7 @@ export function RulesPanel({
   rules,
   source,
   categories,
+  companies,
   loading,
   search,
   onRulesChange,
@@ -177,12 +185,16 @@ export function RulesPanel({
   rules: RuleRow[]
   source: "database" | "builtin"
   categories: CategoryOption[]
+  // For the "applies to" picker and to name the companies in the Applies-to column.
+  companies: { id: string; company_name: string }[]
   loading: boolean
   search: string
   onRulesChange: (update: (prev: RuleRow[]) => RuleRow[]) => void
   onRuleCreated?: (rule: RuleRow) => void
 }) {
   const readOnly = source === "builtin"
+  const companyNames = useMemo(() => Object.fromEntries(companies.map((c) => [String(c.id), c.company_name])), [companies])
+  const companyOptions = useMemo(() => companies.map((c) => ({ value: String(c.id), label: c.company_name })), [companies])
   const catByKey = useMemo(() => new Map(categories.map((c) => [c.key, c])), [categories])
 
   const visible = useMemo(() => {
@@ -208,12 +220,13 @@ export function RulesPanel({
     () => ({
       match: (r) => (r.match_type === "regex" ? "Regex" : "Contains"),
       sender_match: (r) => (hasSender(r) ? (r.sender_match_type === "regex" ? "Regex" : "Contains") : ""),
+      companies: (r) => ruleScopeLabel(r, companyNames),
       category: categoryLabel,
       active: (r) => (r.is_active ? "Active" : "Inactive"),
       created: (r) => (r.created_at ? fmtDateTime(r.created_at) : ""),
       changed: (r) => (r.updated_at ? fmtDateTime(r.updated_at) : r.created_at ? fmtDateTime(r.created_at) : ""),
     }),
-    [catByKey] // eslint-disable-line react-hooks/exhaustive-deps
+    [catByKey, companyNames] // eslint-disable-line react-hooks/exhaustive-deps
   )
   const { filtered, configFor, activeCount: activeFilterCount, clearAll: clearAllFilters } = useColumnFilters(visible, FILTER_VALUE, ["created", "changed"])
   const { levels, sorted, toggle } = useTableSort(filtered, sortAccessors, [{ key: "order", dir: "asc" }])
@@ -233,6 +246,7 @@ export function RulesPanel({
     if (isVisible("pattern")) cols.push({ id: "pattern", getValue: (r) => [r.pattern, ...(r.extra_patterns ?? [])].filter(Boolean).join(" ") })
     if (isVisible("sender")) cols.push({ id: "sender", getValue: (r) => [r.sender_pattern, ...(r.extra_sender_patterns ?? [])].filter(Boolean).join(" ") })
     if (isVisible("sender_match")) cols.push({ id: "sender_match", getValue: (r) => (hasSender(r) ? (r.sender_match_type === "regex" ? "Regex" : "Contains") : "") })
+    if (isVisible("companies")) cols.push({ id: "companies", getValue: (r) => ruleScopeLabel(r, companyNames) })
     if (isVisible("category")) cols.push({ id: "category", getValue: categoryLabel })
     if (isVisible("outcome")) cols.push({ id: "outcome", getValue: outcomeLabel })
     if (isVisible("confidence")) cols.push({ id: "confidence", getValue: (r) => String(r.confidence) })
@@ -281,7 +295,7 @@ export function RulesPanel({
     setSample("")
     setSampleSender("")
     setDraft({
-      id: r.id, is_ignore: r.is_ignore, hard_ignore: r.hard_ignore, is_notify: r.is_notify, notify_priority: r.notify_priority ?? "urgent", match_type: r.match_type,
+      id: r.id, is_ignore: r.is_ignore, hard_ignore: r.hard_ignore, is_notify: r.is_notify, notify_priority: r.notify_priority ?? "urgent", company_scope: r.company_scope ?? "all", company_ids: (r.company_ids ?? []).map(String), match_type: r.match_type,
       // Lowercased on the way in too — a rule saved before this field forced lowercase (or with mixed
       // case some other way) should still open reading the same way it would if you retyped it now.
       wordings: [r.pattern, ...(r.extra_patterns ?? [])].filter(Boolean).join("\n").toLowerCase(),
@@ -299,6 +313,9 @@ export function RulesPanel({
     if (!lines.length && !senderLines.length) return toast.error("Add at least one subject wording, or a sender, to match.")
     if (!draft.is_ignore && !draft.is_notify && !lines.length) return toast.error("A classify rule needs at least one subject wording.")
     if (!draft.is_ignore && !draft.is_notify && !draft.category_key) return toast.error("Choose a category.")
+    if (draft.company_scope !== "all" && draft.company_ids.length === 0) {
+      return toast.error(draft.company_scope === "only" ? "Pick at least one company this rule applies to." : "Pick at least one company to exclude, or set it to apply to all companies.")
+    }
     const confidence = Number(draft.confidence) / 100
     if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) return toast.error("Confidence must be between 0 and 100.")
     const payload = {
@@ -306,6 +323,8 @@ export function RulesPanel({
       hard_ignore: draft.is_ignore && draft.hard_ignore,
       is_notify: draft.is_notify,
       notify_priority: draft.is_notify ? draft.notify_priority : "urgent",
+      company_scope: draft.company_scope,
+      company_ids: draft.company_scope === "all" ? [] : draft.company_ids,
       match_type: draft.match_type,
       pattern: lines[0] ?? "",
       extra_patterns: lines.slice(1),
@@ -459,6 +478,7 @@ export function RulesPanel({
                 {isVisible("pattern") && <SortTh tone="blue" id="pattern" levels={levels} onSort={toggle} className="min-w-[260px] text-left">Subject wordings</SortTh>}
                 {isVisible("sender") && <SortTh tone="blue" id="sender" levels={levels} onSort={toggle} className="min-w-[200px] text-left">Sender</SortTh>}
                 {isVisible("sender_match") && <SortTh tone="blue" id="sender_match" levels={levels} onSort={toggle} filter={configFor("sender_match")} className="w-32 text-left">Sender match</SortTh>}
+                {isVisible("companies") && <SortTh tone="blue" id="companies" levels={levels} onSort={toggle} filter={configFor("companies")} className="min-w-[200px] text-left">Applies to</SortTh>}
                 {isVisible("category") && <SortTh tone="blue" id="category" levels={levels} onSort={toggle} filter={configFor("category")} className="min-w-[220px] text-left">Category</SortTh>}
                 {isVisible("outcome") && <SortTh tone="blue" id="outcome" levels={levels} onSort={toggle} className="min-w-[220px] text-left">Result</SortTh>}
                 {isVisible("confidence") && <SortTh tone="blue" id="confidence" levels={levels} onSort={toggle} className="w-36 text-left">Confidence</SortTh>}
@@ -537,6 +557,20 @@ export function RulesPanel({
                           {r.sender_match_type === "regex" ? "Regex" : "Contains"}
                         </span>
                       ) : <span className="text-slate-300">—</span>}
+                    </td>
+                    )}
+                    {isVisible("companies") && (
+                    <td className={TD_CLASS}>
+                      {(r.company_scope ?? "all") === "all" ? (
+                        <span className="text-slate-400">All companies</span>
+                      ) : (
+                        <span
+                          className={cn("inline-block max-w-[260px] truncate align-middle text-sm font-semibold px-2.5 py-0.5 rounded-full border", r.company_scope === "only" ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-amber-50 text-amber-800 border-amber-200")}
+                          title={ruleScopeLabel(r, companyNames)}
+                        >
+                          {ruleScopeLabel(r, companyNames)}
+                        </span>
+                      )}
                     </td>
                     )}
                     {isVisible("category") && (
@@ -688,7 +722,7 @@ export function RulesPanel({
         </DialogContent>
       </Dialog>
 
-      <RuleTesterDialog open={testerOpen} onOpenChange={setTesterOpen} rules={rules} categories={categories} />
+      <RuleTesterDialog open={testerOpen} onOpenChange={setTesterOpen} rules={rules} categories={categories} companies={companies} />
 
       {/* Add / edit */}
       <Dialog open={!!draft} onOpenChange={(o) => !o && !saving && setDraft(null)}>
@@ -836,6 +870,49 @@ export function RulesPanel({
                     The rule matches when the subject contains <span className="font-medium text-slate-500">any</span> line. Not case-sensitive.
                     {draft.match_type === "regex" ? " Each line is a JavaScript regular expression." : ""}
                   </p>
+                </div>
+
+                {/* Which companies' mail the rule applies to */}
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium text-slate-600">
+                    Applies to <span className="text-slate-400 font-normal">— which companies' mail this rule looks at</span>
+                  </Label>
+                  <div className="grid sm:grid-cols-3 gap-2">
+                    {([
+                      ["all", "All companies", "Every mailbox"],
+                      ["only", "Only these companies", "Skip everyone else"],
+                      ["except", "All except these", "Skip the ones you pick"],
+                    ] as const).map(([value, title, hint]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setDraft({ ...draft, company_scope: value, company_ids: value === "all" ? [] : draft.company_ids })}
+                        className={cn(
+                          "text-left rounded-lg border px-3 py-2 transition-colors",
+                          draft.company_scope === value ? "border-custom-blue bg-blue-50/60 ring-1 ring-custom-blue" : "border-slate-200 bg-white hover:bg-slate-50"
+                        )}
+                      >
+                        <span className="block text-base font-semibold text-slate-900">{title}</span>
+                        <span className="block text-sm text-slate-500">{hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {draft.company_scope !== "all" && (
+                    <>
+                      <CompanyMultiSelect
+                        className="w-full"
+                        options={companyOptions}
+                        value={draft.company_ids}
+                        onChange={(ids) => setDraft({ ...draft, company_ids: ids })}
+                      />
+                      <p className="text-sm text-slate-400">
+                        {draft.company_scope === "only"
+                          ? "The rule only acts on mail belonging to the companies picked here."
+                          : "The rule acts on every company's mail except the ones picked here — e.g. ignore accounts@ everywhere but one company."}
+                        {" "}Mail not linked to any company counts as "not one of the picked companies".
+                      </p>
+                    </>
+                  )}
                 </div>
 
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-2">

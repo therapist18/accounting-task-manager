@@ -454,6 +454,24 @@ export function EmailDialog({
                       </dd>
                     </>
                   )}
+                  {shown.matched_rule_id && shown.classification_source !== "manual" && (() => {
+                    // Which rule decided this email — the rule may have been deleted since.
+                    const rule = rules?.find((r) => r.id === shown.matched_rule_id)
+                    if (!rule) return (<><dt className="text-slate-500">Rule</dt><dd className="text-slate-400">A rule that has since been deleted</dd></>)
+                    const subjects = [rule.pattern, ...(rule.extra_patterns ?? [])].map((w) => w.trim()).filter(Boolean)
+                    const senders = [rule.sender_pattern, ...(rule.extra_sender_patterns ?? [])].map((w) => (w ?? "").trim()).filter(Boolean)
+                    const kind = rule.is_ignore ? (rule.hard_ignore ? "Ignore and delete" : "Ignore") : rule.is_notify ? "Important notification" : "Classify"
+                    return (
+                      <>
+                        <dt className="text-slate-500">Rule</dt>
+                        <dd className="text-slate-800 break-words">
+                          <span className="font-medium">{kind}{rule.is_active === false ? " (inactive)" : ""}</span>
+                          <span className="block text-slate-600">From: {senders.length ? senders.join(" · ") : "any sender"}</span>
+                          <span className="block text-slate-600">Subject: {subjects.length ? subjects.join(" · ") : "any subject"}</span>
+                        </dd>
+                      </>
+                    )
+                  })()}
                   {shown.classification_source === "manual" && (
                     <>
                       <dt className="text-slate-500">Reclassified by</dt>

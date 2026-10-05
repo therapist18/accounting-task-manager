@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { EmailsTable } from "./NeedsReview"
+import { RuleInfoButton, ruleCategory } from "./RuleInfo"
 import type { CategoryOption, Disposition, EmailRow, RuleRow } from "./shared"
 
 // A sidebar grouped by which rule matched, for a tab that isn't Ignored — Notifications (grouped by
@@ -37,11 +38,15 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 function Row({
-  icon, label, sub, count, active, onClick, title, muted,
+  icon, label, sub, meta, info, count, active, onClick, title, muted,
 }: {
   icon: React.ReactNode
   label: string
   sub?: string
+  // A third, smaller line — the category this rule's mail shows in the table.
+  meta?: string
+  // The rule's info icon (opens its details); sits inside the row, so the row can't be a <button>.
+  info?: React.ReactNode
   count: number
   active: boolean
   onClick: () => void
@@ -49,11 +54,14 @@ function Row({
   muted?: boolean
 }) {
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); onClick() } }}
       title={title}
       className={cn(
-        "flex items-center w-full px-3 py-2 text-base rounded-md transition-colors text-left font-medium",
+        "flex items-center w-full px-3 py-2 text-base rounded-md transition-colors text-left font-medium cursor-pointer",
         active ? "bg-custom-blue text-white shadow-xs" : "text-slate-700 hover:bg-slate-200/60",
         muted && !active && "opacity-60"
       )}
@@ -62,6 +70,7 @@ function Row({
       <span className="min-w-0 flex-1">
         <span className="block truncate">{label}</span>
         {sub && <span className={cn("block truncate text-sm font-normal", active ? "text-white/80" : "text-slate-500")}>{sub}</span>}
+        {meta && <span className={cn("block truncate text-xs font-semibold", active ? "text-white/90" : "text-custom-blue")}>{meta}</span>}
       </span>
       {count > 0 && (
         <Badge
@@ -74,7 +83,8 @@ function Row({
           {count}
         </Badge>
       )}
-    </button>
+      {info}
+    </div>
   )
 }
 
@@ -82,6 +92,7 @@ export function RuleMatchedEmailsPanel({
   emails,
   rules,
   categories,
+  companyNames,
   onOpen,
   onQuickClassify,
   onDelete,
@@ -104,6 +115,7 @@ export function RuleMatchedEmailsPanel({
   // only these appear in the sidebar, so an email matched by an ignore rule elsewhere never shows here.
   rules: RuleRow[]
   categories: CategoryOption[]
+  companyNames?: Record<string, string>
   onOpen: (e: EmailRow) => void
   onQuickClassify: (e: EmailRow, d: Disposition) => void
   // Deletes emails from the app; resolves once done.
@@ -263,6 +275,8 @@ export function RuleMatchedEmailsPanel({
                       icon={<ListFilter className="w-5 h-5" />}
                       label={d.sender}
                       sub={d.subjects}
+                      meta={ruleCategory(rule, categories)}
+                      info={<RuleInfoButton rule={rule} categories={categories} companyNames={companyNames} active={group === key} />}
                       count={ruleCounts.get(rule.id) ?? 0}
                       active={group === key}
                       onClick={() => setGroup(key)}

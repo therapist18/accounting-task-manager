@@ -68,6 +68,9 @@ export function SyncDialog({
 }) {
   const eligible = useMemo(() => accounts.filter((a) => a.status === "active"), [accounts])
 
+  // "now" = a quick check of Gmail for new mail (what the toolbar's Sync now used to do, no dates);
+  // "date" = pull in a period of older mail.
+  const [mode, setMode] = useState<"now" | "date">("now")
   const [since, setSince] = useState(formatDateToDMY(addDaysIso(todayIso(), -30)) ?? "")
   // Optional end of the period; empty means "up to now".
   const [until, setUntil] = useState("")
@@ -91,6 +94,7 @@ export function SyncDialog({
     if (!open) return
     setProgress({})
     setFinished(false)
+    setMode("now")
     setSearch("")
     setPauseClassification(false)
     setExpandedFailures(new Set())
@@ -157,9 +161,30 @@ export function SyncDialog({
     }
   }
 
+  // Sync now: a full check of one mailbox for new mail (the same call the Mailboxes tab's per-row sync
+  // makes), also renewing its push watch if due. No listing step, so progress is just done/failed.
+  async function runNowMailbox(acc: AccountRow) {
+    try {
+      patch(acc.id, { status: "running" })
+      const res = await api<{ results: { email: string; ingested: number; failed: number; error?: string }[] }>("/api/email-center/sync", {
+        method: "POST",
+        body: JSON.stringify({ accountId: acc.id }),
+      })
+      const r = res.results[0]
+      if (r?.error) return patch(acc.id, { status: "error", error: r.error })
+      const ingested = r?.ingested ?? 0
+      const failed = r?.failed ?? 0
+      patch(acc.id, { status: "done", total: ingested + failed, done: ingested + failed, ingested, failed })
+    } catch (e: any) {
+      patch(acc.id, { status: "error", error: e.message })
+    }
+  }
+
   const start = async () => {
-    if (!sinceValid) return toast.error("Enter a valid start date (DD/MM/YYYY) that isn't in the future.")
-    if (!untilValid) return toast.error("The end date must be a valid date (DD/MM/YYYY) on or after the start date, and not in the future.")
+    if (mode === "date") {
+      if (!sinceValid) return toast.error("Enter a valid start date (DD/MM/YYYY) that isn't in the future.")
+      if (!untilValid) return toast.error("The end date must be a valid date (DD/MM/YYYY) on or after the start date, and not in the future.")
+    }
     if (!targets.length) return toast.error("Choose at least one connected mailbox.")
     stopRef.current = false
     setFinished(false)
@@ -170,7 +195,8 @@ export function SyncDialog({
     const worker = async () => {
       while (queue.length && !stopRef.current) {
         const acc = queue.shift()!
-        await runMailbox(acc, sinceIso, untilIso)
+        if (mode === "now") await runNowMailbox(acc)
+        else await runMailbox(acc, sinceIso, untilIso)
       }
     }
     await Promise.all(Array.from({ length: Math.min(PARALLEL_MAILBOXES, queue.length) }, worker))
@@ -179,7 +205,9 @@ export function SyncDialog({
     setFinished(true)
     const entries = Object.values(progressRef.current)
     const newCount = entries.reduce((n, p) => n + p.ingested, 0)
-    toast.success(stopRef.current ? `Stopped — ${newCount} new email(s) so far.` : `Done — ${newCount} new email(s) pulled in.`)
+    const errored = entries.filter((p) => p.status === "error" || p.failed > 0).length
+    if (mode === "now" && errored) toast.warning(`${newCount} new email(s); ${errored} mailbox(es) had issues — see Mailboxes.`)
+    else toast.success(stopRef.current ? `Stopped — ${newCount} new email(s) so far.` : `Done — ${newCount} new email(s) pulled in.`)
     onFinished()
   }
 
@@ -206,13 +234,40 @@ export function SyncDialog({
             <History className="h-6 w-6" />
           </span>
           <div>
-            <DialogTitle className="text-2xl font-bold tracking-tight text-slate-900">Sync from date</DialogTitle>
-            <DialogDescription className="text-base text-slate-500 mt-0.5">Pull in older mail from Gmail for a period, for all mailboxes or only the ones you pick.</DialogDescription>
+            <DialogTitle className="text-2xl font-bold tracking-tight text-slate-900">{mode === "now" ? "Sync now" : "Sync from date"}</DialogTitle>
+            <DialogDescription className="text-base text-slate-500 mt-0.5">
+              {mode === "now"
+                ? "Check Gmail for new mail, for all mailboxes or only the ones you pick."
+                : "Pull in older mail from Gmail for a period, for all mailboxes or only the ones you pick."}
+            </DialogDescription>
           </div>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-6 py-5 space-y-6">
+          {/* What to sync */}
+          <section className="grid sm:grid-cols-2 gap-3">
+            {([
+              ["now", "Sync now", "Check Gmail for new mail"],
+              ["date", "Sync from date", "Pull in older mail for a period"],
+            ] as const).map(([value, title, sub]) => (
+              <button
+                key={value}
+                type="button"
+                disabled={running}
+                onClick={() => setMode(value)}
+                className={cn(
+                  "text-left rounded-xl border px-4 py-3 transition-colors",
+                  mode === value ? "border-custom-blue bg-blue-50/60 ring-1 ring-custom-blue" : "border-slate-200 bg-white hover:bg-slate-50"
+                )}
+              >
+                <p className="text-base font-semibold text-slate-900">{title}</p>
+                <p className="text-sm text-slate-500">{sub}</p>
+              </button>
+            ))}
+          </section>
+
           {/* Period */}
+          {mode === "date" && (
           <section className="space-y-2.5">
             <div className="flex flex-wrap items-end gap-3">
               <div className="w-56 space-y-1.5">
@@ -262,6 +317,7 @@ export function SyncDialog({
               </span>
             </label>
           </section>
+          )}
 
           {/* Scope */}
           <section className="space-y-3">
@@ -352,7 +408,7 @@ export function SyncDialog({
                             {p.status === "stopped" && `Stopped at ${p.done} of ${p.total}`}
                             {p.status === "error" && <span className="text-red-600">{p.error}</span>}
                             {(p.status === "running" || p.status === "done") &&
-                              (p.total === 0 ? "Nothing new in that period" : `${p.done} of ${p.total} · ${p.ingested} new${p.failed ? ` · ${p.failed} failed` : ""}`)}
+                              (p.total === 0 ? (mode === "now" ? "No new mail" : "Nothing new in that period") : `${p.done} of ${p.total} · ${p.ingested} new${p.failed ? ` · ${p.failed} failed` : ""}`)}
                             {p.capped && " · very large period — only the newest 30,000 messages were listed; run again with an earlier end date for the rest"}
                           </span>
                         </span>
@@ -394,7 +450,7 @@ export function SyncDialog({
           ) : (
             <>
               <Button variant="ghost" size="sm" onClick={onClose} className="h-11 px-5 text-base font-medium text-slate-600 hover:text-slate-900 rounded-lg">{finished ? "Close" : "Cancel"}</Button>
-              <Button size="sm" onClick={start} disabled={!sinceValid || !untilValid || targets.length === 0} className="h-11 px-6 text-base font-semibold bg-custom-blue hover:bg-custom-blue/90 text-white rounded-lg shadow-xs gap-2">
+              <Button size="sm" onClick={start} disabled={(mode === "date" && (!sinceValid || !untilValid)) || targets.length === 0} className="h-11 px-6 text-base font-semibold bg-custom-blue hover:bg-custom-blue/90 text-white rounded-lg shadow-xs gap-2">
                 <History className="w-5 h-5" /> {finished ? "Sync again" : `Sync ${targets.length} mailbox${targets.length === 1 ? "" : "es"}`}
               </Button>
             </>

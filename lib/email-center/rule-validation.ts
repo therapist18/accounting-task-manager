@@ -9,6 +9,9 @@ export interface RuleInput {
   // Only meaningful when is_notify is true: "urgent" (default) demands attention now, "informational"
   // still lands in Notifications but reads as FYI.
   notify_priority?: "urgent" | "informational"
+  // Which companies the rule applies to (see appliesToCompany in rules.ts). "only"/"except" need ids.
+  company_scope?: "all" | "only" | "except"
+  company_ids?: string[]
   match_type?: RuleMatchType
   pattern?: string
   extra_patterns?: string[]
@@ -39,6 +42,18 @@ export function parseRuleBody(
       return { ok: false, error: "Notify priority must be 'urgent' or 'informational'." }
     }
     value.notify_priority = body.notify_priority
+  }
+  if ("company_scope" in body) {
+    if (body.company_scope !== "all" && body.company_scope !== "only" && body.company_scope !== "except") {
+      return { ok: false, error: "Company scope must be 'all', 'only' or 'except'." }
+    }
+    value.company_scope = body.company_scope
+  }
+  if ("company_ids" in body) {
+    if (!Array.isArray(body.company_ids)) return { ok: false, error: "Companies must be a list." }
+    const ids = [...new Set(body.company_ids.map((x) => String(x ?? "").trim()).filter(Boolean))]
+    if (ids.length > 500) return { ok: false, error: "Too many companies for one rule (500 max)." }
+    value.company_ids = ids
   }
   if ("match_type" in body) {
     if (body.match_type !== "contains" && body.match_type !== "regex") return { ok: false, error: "Match type must be 'contains' or 'regex'." }
@@ -116,6 +131,12 @@ export function parseRuleBody(
     if (value.sender_pattern) {
       value.extra_sender_patterns = value.extra_sender_patterns.filter((w) => w.toLowerCase() !== value.sender_pattern!.toLowerCase())
     }
+  }
+
+  // A scope that names companies needs at least one; "all" carries none.
+  if (value.company_scope === "all") value.company_ids = []
+  else if (value.company_scope && (!value.company_ids || value.company_ids.length === 0)) {
+    return { ok: false, error: value.company_scope === "only" ? "Pick at least one company for this rule to apply to." : "Pick at least one company to exclude, or set the rule to apply to all companies." }
   }
 
   if (!partial) {

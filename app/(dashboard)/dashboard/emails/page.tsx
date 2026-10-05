@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, Clock, Columns3, Download, History, ListFilter, Loader2, Plus, RefreshCw, RotateCcw, Search, Sparkles, Wifi, WifiOff } from "lucide-react"
+import { AlertTriangle, Clock, Columns3, Download, History, ListFilter, Loader2, Plus, RotateCcw, Search, Sparkles, Wifi, WifiOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DateInput } from "@/components/ui/date-input"
 import { Input } from "@/components/ui/input"
@@ -47,7 +47,7 @@ type Tab = "inprogress" | "completed" | "review" | "notifications" | "update" | 
 // Everything (mailboxes, companies, staff, every case, every needs-review email) is fetched ONCE on
 // load; switching tabs or changing a filter only re-slices what's already in memory — nothing here
 // triggers a network call. The only two things that talk to the server again after that are the
-// explicit "Refresh" button (reload from the database) and "Sync now" (actually go check Gmail).
+// explicit "Refresh" button (reload from the database) and "Sync" (actually go check Gmail — new mail, or a chosen period).
 // A save inside a dialog updates just that one row in local state from the save's own response,
 // never the whole list.
 //
@@ -55,6 +55,15 @@ type Tab = "inprogress" | "completed" | "review" | "notifications" | "update" | 
 // and ignore) as one sorted list; the tabs are client-side filters over it, so quick-classifying an
 // email simply moves it between tabs without a reload.
 const EMAIL_TABS = ["needs_review", "update_only", "ignore"] as const
+
+// The sections one Reclassify run can cover — keys are the server's scopes (see reclassify/route.ts).
+type ReclassifyScope = "needs_review" | "update_only" | "notification" | "ignore"
+const RECLASSIFY_SCOPES: { key: ReclassifyScope; label: string; hint: string }[] = [
+  { key: "needs_review", label: "Needs Review", hint: "Mail no rule has confidently matched yet" },
+  { key: "update_only", label: "Update only", hint: "Mail a rule filed as informational — after correcting a rule" },
+  { key: "notification", label: "Notifications", hint: "Unhandled important notifications — one no rule matches any more is left alone" },
+  { key: "ignore", label: "Ignored", hint: "Mail a rule ignored (mail you ignored by hand is never touched)" },
+]
 
 function byReceivedDesc(list: EmailRow[]): EmailRow[] {
   return list.sort((a, b) => (a.received_at < b.received_at ? 1 : a.received_at > b.received_at ? -1 : 0))
@@ -140,7 +149,6 @@ export default function EmailCenterPage() {
 
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [syncing, setSyncing] = useState(false)
   const [openCaseId, setOpenCaseId] = useState<string | null>(null)
   // The email behind the open dialog, captured as a row (from a table or a case thread) — the dialog
   // renders straight from it, so opening an email never waits on a request for its details.
@@ -150,7 +158,9 @@ export default function EmailCenterPage() {
   // Review would be classified as, so offer to re-run them through it (or skip and leave them).
   // `pattern` is absent when the dialog was opened from the toolbar's "Reclassify" button, or from the
   // Update tab's own Reclassify button, instead. `scope` defaults to "needs_review" when absent.
-  const [reclassifyPrompt, setReclassifyPrompt] = useState<{ pattern?: string; is_ignore?: boolean; is_notify?: boolean; scope?: "needs_review" | "update_only" } | null>(null)
+  const [reclassifyPrompt, setReclassifyPrompt] = useState<{ pattern?: string; is_ignore?: boolean; is_notify?: boolean } | null>(null)
+  // Which sections the Reclassify dialog will re-run the rules over (set to a sensible default on open).
+  const [reclassifyScopes, setReclassifyScopes] = useState<ReclassifyScope[]>(["needs_review"])
   const [reclassifying, setReclassifying] = useState(false)
   // 0→100 of a reclassify run, so the dialog shows a "10 of 128" progress bar like syncing does.
   const [reclassifyProgress, setReclassifyProgress] = useState<{ done: number; total: number } | null>(null)
@@ -247,27 +257,6 @@ export default function EmailCenterPage() {
     }
   }, [loadAll])
 
-  // The only thing that ever talks to Gmail — a full, real check of every mailbox. Also renews any
-  // Gmail push watch close to expiring (there is no scheduler and no automatic background sync).
-  const handleSync = useCallback(async () => {
-    setSyncing(true)
-    try {
-      const res = await api<{ results: { email: string; ingested: number; failed: number; error?: string }[] }>(
-        "/api/email-center/sync",
-        { method: "POST", body: JSON.stringify({ mode: "manual" }) }
-      )
-      const ingested = res.results.reduce((n, r) => n + r.ingested, 0)
-      const errors = res.results.filter((r) => r.error || r.failed)
-      if (errors.length) toast.warning(`${ingested} new email(s); ${errors.length} mailbox(es) had issues — see Mailboxes.`)
-      else toast.success(`${ingested} new email(s) from ${res.results.length} mailbox(es).`)
-      await loadAll()
-    } catch (e: any) {
-      toast.error(e.message)
-    } finally {
-      setSyncing(false)
-    }
-  }, [loadAll])
-
   // Returning from Google's OAuth screen (see /api/gmail/callback): surface the result and jump to
   // the Mailboxes tab so the "Connect Gmail account" button for the next mailbox is right there.
   // The mailbox — and anything its own first sync just found — is already reflected in the
@@ -333,6 +322,15 @@ export default function EmailCenterPage() {
     if (reclassifyPrompt) {
       setReclassifySince("")
       setReclassifyUntil("")
+      // A just-created rule offers to re-run Needs Review (its original purpose); opened from the
+      // toolbar, start on the section the user is looking at.
+      setReclassifyScopes([
+        reclassifyPrompt.pattern ? "needs_review"
+          : tab === "update" ? "update_only"
+          : tab === "notifications" ? "notification"
+          : tab === "ignored" ? "ignore"
+          : "needs_review",
+      ])
     }
   }, [reclassifyPrompt])
 
@@ -346,61 +344,70 @@ export default function EmailCenterPage() {
       (!reclassifySinceValid || reclassifySinceIso === "" || reclassifyUntilIso >= reclassifySinceIso))
   const reclassifyRangeSet = (reclassifySinceValid && reclassifySinceIso !== "") || (reclassifyUntilValid && reclassifyUntilIso !== "")
 
+  // Runs the current rules over every ticked section (Needs Review / Update only / Notifications /
+  // Ignored). Each section is listed first so the progress bar has one overall total, then reclassified
+  // in batches; the summary toast reports each section separately.
   const runReclassify = async () => {
-    const scope = reclassifyPrompt?.scope ?? "needs_review"
-    const label = scope === "update_only" ? "Update only" : "Needs Review"
+    const scopes = RECLASSIFY_SCOPES.filter((s) => reclassifyScopes.includes(s.key))
+    if (!scopes.length) return toast.error("Tick at least one section to reclassify.")
     const since = reclassifySinceValid && reclassifySinceIso ? reclassifySinceIso : undefined
     const until = reclassifyUntilValid && reclassifyUntilIso ? reclassifyUntilIso : undefined
     setReclassifying(true)
     setReclassifyProgress({ done: 0, total: 0 })
     try {
-      const listed = await api<{ ids: string[]; total: number }>("/api/email-center/reclassify", {
-        method: "POST",
-        body: JSON.stringify({ action: "list", scope, ...(since ? { since } : {}), ...(until ? { until } : {}) }),
-      })
-      if (listed.ids.length === 0) {
-        toast.info(since || until ? `Nothing in ${label} to reclassify in that date range.` : `Nothing in ${label} to reclassify.`)
-        if (scope === "needs_review" && !since && !until) setReclassifyDue(false)
+      const listed = await Promise.all(
+        scopes.map(async (s) => ({
+          ...s,
+          ids: (await api<{ ids: string[]; total: number }>("/api/email-center/reclassify", {
+            method: "POST",
+            body: JSON.stringify({ action: "list", scope: s.key, ...(since ? { since } : {}), ...(until ? { until } : {}) }),
+          })).ids,
+        }))
+      )
+      const total = listed.reduce((n, s) => n + s.ids.length, 0)
+      // A ranged run only ever covers part of the backlog, so the toolbar's "a new rule hasn't been run
+      // yet" glow (Needs Review only) should only clear once a run has actually swept the whole thing.
+      if (reclassifyScopes.includes("needs_review") && !since && !until) setReclassifyDue(false)
+      if (total === 0) {
+        toast.info(since || until ? "Nothing to reclassify in those sections for that date range." : "Nothing to reclassify in those sections.")
         return
       }
-      setReclassifyProgress({ done: 0, total: listed.ids.length })
-      let queue = [...listed.ids]
+      setReclassifyProgress({ done: 0, total })
       let done = 0
-      let changed = 0
-      let deleted = 0
       let opened = 0
+      let deleted = 0
       let failed = 0
-      while (queue.length) {
-        // Matches the server's own RUN_MAX (100) — was needlessly sending a quarter of that per
-        // round trip, which meant 4x the HTTP overhead on a large backlog for no reason.
-        const batch = queue.slice(0, 100)
-        const res = await api<{ processed: number; changed: number; deleted: number; cases_opened: number; failed: number }>("/api/email-center/reclassify", {
-          method: "POST",
-          body: JSON.stringify({ action: "run", scope, ids: batch }),
-        })
-        queue = queue.slice(batch.length)
-        done += res.processed
-        changed += res.changed
-        deleted += res.deleted ?? 0
-        opened += res.cases_opened
-        failed += res.failed ?? 0
-        setReclassifyProgress({ done, total: listed.ids.length })
+      const lines: string[] = []
+      for (const s of listed) {
+        let queue = [...s.ids]
+        let changed = 0
+        while (queue.length) {
+          // Matches the server's own RUN_MAX (100).
+          const batch = queue.slice(0, 100)
+          const res = await api<{ processed: number; changed: number; deleted: number; cases_opened: number; failed: number }>("/api/email-center/reclassify", {
+            method: "POST",
+            body: JSON.stringify({ action: "run", scope: s.key, ids: batch }),
+          })
+          queue = queue.slice(batch.length)
+          done += res.processed
+          changed += res.changed + (res.deleted ?? 0)
+          deleted += res.deleted ?? 0
+          opened += res.cases_opened
+          failed += res.failed ?? 0
+          setReclassifyProgress({ done, total })
+        }
+        if (s.ids.length) lines.push(`${s.label}: ${changed} of ${s.ids.length}`)
       }
       await loadAll()
-      // A ranged run only ever covers part of the backlog, so the toolbar's "a new rule hasn't been run
-      // yet" glow (Needs Review only — Update only has no such glow) should only clear once a run has
-      // actually swept the whole thing.
-      if (scope === "needs_review" && !since && !until) setReclassifyDue(false)
-      const touched = changed + deleted
       const rangeNote = since || until ? ` (${since ? `from ${formatDateToDMY(since)}` : "from the start"}${until ? ` to ${formatDateToDMY(until)}` : ""})` : ""
       const notes = [
         opened ? `${opened} case(s) opened` : "",
         deleted ? `${deleted} deleted (matched a hard-ignore rule)` : "",
       ].filter(Boolean).join(" — ")
-      const failedNote = failed ? ` — ${failed} couldn't be reclassified this run (still in ${label}, try again later)` : ""
-      if (touched === 0) toast.info(`Reclassified ${listed.ids.length} ${label} mail(s)${rangeNote} — none matched any rule.${failedNote}`)
-      else if (touched === listed.ids.length) toast.success(`All ${touched} ${label} mail(s)${rangeNote} reclassified${notes ? ` — ${notes}` : ""}.${failedNote}`)
-      else toast.success(`Reclassified ${touched} of ${listed.ids.length} ${label} mail(s)${rangeNote}${notes ? ` — ${notes}` : ""}.${failedNote}`)
+      const failedNote = failed ? ` — ${failed} couldn't be reclassified this run (try again later)` : ""
+      const message = `Reclassified${rangeNote} — ${lines.join(" · ")}${notes ? ` — ${notes}` : ""}.${failedNote}`
+      if (lines.every((l) => / 0 of /.test(l)) && !notes) toast.info(`${message} None matched a rule.`)
+      else toast.success(message)
     } catch (e: any) {
       toast.error(e.message)
     } finally {
@@ -683,6 +690,8 @@ export default function EmailCenterPage() {
   // Classify rules — the ones that can appear as an email/case's matched_rule_id / created_by_rule_id.
   const classifyRules = useMemo(() => rules.filter((r) => !r.is_ignore && !r.is_notify), [rules])
   const notifyRules = useMemo(() => rules.filter((r) => r.is_notify), [rules])
+  // company id -> name, so a rule's info popover can name the companies it is limited to.
+  const companyNames = useMemo(() => Object.fromEntries(companies.map((c) => [String(c.id), c.company_name])), [companies])
 
   const tabTable = (embedded: boolean) => {
     if (tab === "inprogress") {
@@ -690,6 +699,8 @@ export default function EmailCenterPage() {
         <CasesRulePanel
           cases={openCases}
           rules={classifyRules}
+          categories={categories}
+          companyNames={companyNames}
           onOpen={(c) => setOpenCaseId(c.id)}
           onDelete={deleteCases}
           showTime={showTime}
@@ -700,13 +711,16 @@ export default function EmailCenterPage() {
       )
     }
     if (isCaseTab) {
+      // Completed tasks get the same "Opened by rule" sidebar as In Progress.
       return (
-        <CasesTable
+        <CasesRulePanel
           cases={closedCases}
+          rules={classifyRules}
+          categories={categories}
+          companyNames={companyNames}
           onOpen={(c) => setOpenCaseId(c.id)}
           onDelete={deleteCases}
           showTime={showTime}
-          embedded={embedded}
           loading={loading}
           showStats={showStats}
           visibleColumns={casesColumns.visible}
@@ -719,6 +733,7 @@ export default function EmailCenterPage() {
           emails={ignoredEmails}
           rules={rules}
           categories={categories}
+          companyNames={companyNames}
           onOpen={(e) => setOpenEmailSeed(e)}
           onMove={moveEmails}
           onDelete={deleteEmails}
@@ -733,6 +748,7 @@ export default function EmailCenterPage() {
           emails={tab === "notifications" ? notificationEmails : updateEmails}
           rules={tab === "notifications" ? notifyRules : classifyRules}
           categories={categories}
+          companyNames={companyNames}
           onOpen={(e) => setOpenEmailSeed(e)}
           onQuickClassify={quickClassify}
           onDelete={deleteEmails}
@@ -744,8 +760,6 @@ export default function EmailCenterPage() {
           emptyMessage={emptyMessage}
           notificationsMode={tab === "notifications"}
           onMarkHandled={markHandled}
-          onReclassify={tab === "update" ? () => setReclassifyPrompt({ scope: "update_only" }) : undefined}
-          reclassifying={reclassifying}
           showStats={showStats}
           visibleColumns={emailColumns.visible}
         />
@@ -827,20 +841,16 @@ export default function EmailCenterPage() {
             {refreshing ? <Loader2 className="h-5 w-5 animate-spin" /> : <RotateCcw className="h-5 w-5" />}
             Refresh
           </Button>
-          <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing || loading} className={PILL_BUTTON_CLASS} title="Check Gmail for new mail">
-            {syncing ? <Loader2 className="h-5 w-5 animate-spin" /> : <RefreshCw className="h-5 w-5" />}
-            Sync now
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => openSyncFrom()} disabled={loading} className={PILL_BUTTON_CLASS} title="Pull in older mail from a chosen date">
+          <Button variant="outline" size="sm" onClick={() => openSyncFrom()} disabled={loading} className={PILL_BUTTON_CLASS} title="Check Gmail for new mail now, or pull in older mail from a chosen date">
             <History className="h-5 w-5" />
-            Sync from date
+            Sync
           </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={() => setReclassifyPrompt({})}
             disabled={reclassifying || loading}
-            title="Re-run the current rules against the mails in Needs Review"
+            title="Re-run the current rules against Needs Review, Update only, Notifications or Ignored mail"
             className={cn(
               PILL_BUTTON_CLASS,
               reclassifyDue
@@ -862,7 +872,7 @@ export default function EmailCenterPage() {
             size="sm"
             onClick={linkRules}
             disabled={loading || linkingRules}
-            title="Match existing tasks and ignored emails against the current rules and record which rule caught each (for ones classified before this was tracked)"
+            title="Match existing tasks and rule-classified emails (ignored, update-only, notifications) against the current rules and record which rule caught each — for ones classified before this was tracked"
             className={cn(PILL_BUTTON_CLASS, "h-10 gap-2")}
           >
             {linkingRules ? <Loader2 className="h-5 w-5 animate-spin" /> : <ListFilter className="h-5 w-5" />}
@@ -1046,7 +1056,7 @@ export default function EmailCenterPage() {
       {/* Body — tables own their scrolling and fill whatever height is left */}
       <div className="px-3 py-3 flex-1 min-h-0 flex flex-col overflow-hidden">
         {tab === "rules" ? (
-          <RulesPanel rules={rules} source={rulesSource} categories={categories} loading={loading} search={search} onRulesChange={setRules} onRuleCreated={handleRuleCreated} />
+          <RulesPanel rules={rules} source={rulesSource} categories={categories} companies={companies} loading={loading} search={search} onRulesChange={setRules} onRuleCreated={handleRuleCreated} />
         ) : tab === "mailboxes" ? (
           <MailboxesPanel
             accounts={accounts}
@@ -1113,17 +1123,33 @@ export default function EmailCenterPage() {
       <AlertDialog open={!!reclassifyPrompt} onOpenChange={(o) => !o && !reclassifying && setReclassifyPrompt(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              {reclassifyPrompt?.scope === "update_only" ? "Reclassify mail marked Update only?" : "Reclassify mails in Needs Review?"}
-            </AlertDialogTitle>
+            <AlertDialogTitle>Reclassify mail</AlertDialogTitle>
             <AlertDialogDescription>
               {reclassifyPrompt?.pattern
-                ? `The new ${reclassifyPrompt.is_ignore ? "ignore " : reclassifyPrompt.is_notify ? "important-notification " : ""}rule matches “${reclassifyPrompt.pattern}”. Run it against the mails currently in Needs Review now, so the ones it matches are ${reclassifyPrompt.is_ignore ? "ignored" : reclassifyPrompt.is_notify ? "flagged urgent" : "classified (and cases opened where needed)"} automatically?`
-                : reclassifyPrompt?.scope === "update_only"
-                  ? "Run the current rules against the mail currently marked Update only? Useful after correcting a rule — anything that should now be classified differently moves there; mail already attached to a case stays attached to it (an ignore or notify match is never applied to it). The rest stays Update only."
-                  : "Run the current rules against the mails currently in Needs Review? The ones the rules match confidently are classified (and cases opened where needed), ignored, or flagged as important notifications — the rest stay in Needs Review."}
+                ? `The new ${reclassifyPrompt.is_ignore ? "ignore " : reclassifyPrompt.is_notify ? "important-notification " : ""}rule matches “${reclassifyPrompt.pattern}”. Run the current rules over the sections below so the mail it matches is ${reclassifyPrompt.is_ignore ? "ignored" : reclassifyPrompt.is_notify ? "flagged urgent" : "classified (and cases opened where needed)"} automatically.`
+                : "Run the current rules over the sections you tick. Mail a rule matches confidently is classified (and cases opened where needed), ignored, or flagged as an important notification; the rest stays where it is. Mail already attached to a case stays attached to it."}
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {!reclassifying && (
+            <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+              <Label className="text-sm font-medium text-slate-600">Sections to reclassify</Label>
+              {RECLASSIFY_SCOPES.map((s) => (
+                <label key={s.key} className="flex items-start gap-2.5 cursor-pointer rounded-md px-1.5 py-1 hover:bg-white">
+                  <input
+                    type="checkbox"
+                    checked={reclassifyScopes.includes(s.key)}
+                    onChange={(ev) => setReclassifyScopes((prev) => (ev.target.checked ? [...prev, s.key] : prev.filter((k) => k !== s.key)))}
+                    className="mt-1 h-4 w-4 shrink-0 accent-custom-blue cursor-pointer"
+                  />
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-800">{s.label}</span>
+                    <span className="block text-xs text-slate-500 leading-snug">{s.hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
 
           {!reclassifying && (
             <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
@@ -1197,7 +1223,7 @@ export default function EmailCenterPage() {
             <AlertDialogCancel disabled={reclassifying}>Skip</AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => { e.preventDefault(); runReclassify() }}
-              disabled={reclassifying || !reclassifySinceValid || !reclassifyUntilValid}
+              disabled={reclassifying || reclassifyScopes.length === 0 || !reclassifySinceValid || !reclassifyUntilValid}
               className="bg-custom-blue hover:bg-custom-blue/90"
             >
               {reclassifying && <Loader2 className="w-4 h-4 animate-spin mr-2" />}

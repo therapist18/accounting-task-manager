@@ -24,7 +24,7 @@ export const RULES_TABLE = "email_classification_rules"
 // disappear from every response just because a DIFFERENT, unrelated column hadn't been added yet.
 export const RULE_COLUMNS_BASE =
   "id, match_type, pattern, category_key, confidence, sort_order, is_active, notes, is_ignore, is_notify, sender_pattern, sender_match_type, created_at, created_by_id, updated_at, updated_by_id"
-const OPTIONAL_RULE_COLUMNS = ["extra_patterns", "hard_ignore", "extra_sender_patterns", "notify_priority"] as const
+const OPTIONAL_RULE_COLUMNS = ["extra_patterns", "hard_ignore", "extra_sender_patterns", "notify_priority", "company_scope", "company_ids"] as const
 export type OptionalRuleColumn = (typeof OPTIONAL_RULE_COLUMNS)[number]
 export const RULE_COLUMNS = `${RULE_COLUMNS_BASE}, ${OPTIONAL_RULE_COLUMNS.join(", ")}`
 
@@ -52,6 +52,12 @@ export const isMissingExtraColumn = (error: { message?: string } | null | undefi
 export const isMissingHardIgnoreColumn = (error: { message?: string } | null | undefined) => missingRuleColumn(error) === "hard_ignore"
 export const isMissingExtraSenderColumn = (error: { message?: string } | null | undefined) => missingRuleColumn(error) === "extra_sender_patterns"
 export const isMissingNotifyPriorityColumn = (error: { message?: string } | null | undefined) => missingRuleColumn(error) === "notify_priority"
+export const isMissingCompanyScopeColumn = (error: { message?: string } | null | undefined) => {
+  const c = missingRuleColumn(error)
+  return c === "company_scope" || c === "company_ids"
+}
+export const COMPANY_SCOPE_MIGRATION_MESSAGE =
+  "Limiting a rule to certain companies needs the 20261012000000_email_rule_company_scope.sql migration applied first."
 export const EXTRA_MIGRATION_MESSAGE =
   "Saving several wordings for one rule needs the 20260927000000_email_rule_extra_patterns.sql migration applied first."
 export const EXTRA_SENDER_MIGRATION_MESSAGE =
@@ -92,6 +98,8 @@ export function normalizeRuleRow(r: any) {
     hard_ignore: !!r.hard_ignore,
     extra_sender_patterns: Array.isArray(r.extra_sender_patterns) ? r.extra_sender_patterns : [],
     notify_priority: r.notify_priority === "informational" ? "informational" : "urgent",
+    company_scope: r.company_scope === "only" || r.company_scope === "except" ? r.company_scope : "all",
+    company_ids: Array.isArray(r.company_ids) ? r.company_ids.map(String) : [],
   }
 }
 
@@ -140,6 +148,8 @@ export async function loadSubjectRules(sb: ReturnType<typeof getServiceClient>):
       extra_sender_patterns: Array.isArray(r.extra_sender_patterns) ? (r.extra_sender_patterns as string[]) : [],
       sender_match_type: (r.sender_match_type as RuleMatchType | undefined) ?? undefined,
       notify_priority: r.notify_priority === "informational" ? "informational" : "urgent",
+      company_scope: r.company_scope === "only" || r.company_scope === "except" ? r.company_scope : "all",
+      company_ids: Array.isArray(r.company_ids) ? (r.company_ids as unknown[]).map(String) : [],
     }))
 
   cache = { at: Date.now(), rules }

@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import {
-  classifyByRules, isKraSender, matchesSender, matchesSubject, stripReplyPrefix, subjectWordings,
+  appliesToCompany, classifyByRules, isKraSender, matchesSender, matchesSubject, stripReplyPrefix, subjectWordings,
   type SubjectRule,
 } from "@/lib/email-center/rules"
 import { AUTO_CONFIDENCE_THRESHOLD } from "@/lib/email-center/types"
@@ -36,6 +36,8 @@ function toSubjectRule(r: RuleRow): SubjectRule {
     sender_pattern: r.sender_pattern ?? undefined,
     extra_sender_patterns: r.extra_sender_patterns,
     sender_match_type: r.sender_match_type ?? undefined,
+    company_scope: r.company_scope,
+    company_ids: r.company_ids,
   }
 }
 
@@ -46,6 +48,8 @@ export function RuleTesterDialog({
   categories,
   initialSubject,
   initialSender,
+  companies,
+  initialCompany,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -55,15 +59,26 @@ export function RuleTesterDialog({
   // changing these while already open doesn't reset what's typed.
   initialSubject?: string
   initialSender?: string
+  // Company-scoped rules ("only these" / "all except these") depend on whose mail it is, so the tester
+  // takes an optional company too: pick from `companies`, or it is seeded from `initialCompany` (the
+  // email being tested). With neither, the test runs as mail that belongs to no company.
+  companies?: { id: string; company_name: string }[]
+  initialCompany?: { id: string; name: string } | null
 }) {
   const catByKey = useMemo(() => new Map(categories.map((c) => [c.key, c])), [categories])
   const [testSubject, setTestSubject] = useState("")
   const [testSender, setTestSender] = useState("")
+  const [testCompany, setTestCompany] = useState("")
+  const companyOptions = useMemo(
+    () => companies ?? (initialCompany ? [{ id: initialCompany.id, company_name: initialCompany.name }] : []),
+    [companies, initialCompany]
+  )
 
   useEffect(() => {
     if (open) {
       setTestSubject(initialSubject ?? "")
       setTestSender(initialSender ?? "")
+      setTestCompany(initialCompany?.id ?? "")
     }
     // Only seed on the open edge, not on every keystroke-adjacent re-render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -88,9 +103,9 @@ export function RuleTesterDialog({
   const rawTestResult = useMemo(
     () =>
       hasInput
-        ? classifyByRules({ subject: testSubject, body: "", senderEmail: testSender, threadHasCase: false, rules: activeSubjectRules })
+        ? classifyByRules({ subject: testSubject, body: "", senderEmail: testSender, threadHasCase: false, companyId: testCompany || null, rules: activeSubjectRules })
         : null,
-    [hasInput, testSubject, testSender, activeSubjectRules]
+    [hasInput, testSubject, testSender, testCompany, activeSubjectRules]
   )
   // A notify match always wins regardless of confidence (see rules.ts); every other action still needs
   // to clear the same auto-confidence bar ingestion and Reclassify both gate on, or it stays Needs
@@ -109,6 +124,7 @@ export function RuleTesterDialog({
     return activeRules.filter((r) => {
       if (testWinnerRule && r.id === testWinnerRule.id) return false
       const sr = toSubjectRule(r)
+      if (!appliesToCompany(sr, testCompany || null)) return false
       if (!matchesSender(sr, testSender)) return false
       if (r.is_ignore || r.is_notify) return matchesSubject(sr, cleanTestSubject)
       // A plain classify rule can only ever be reached for a KRA sender (classifyByRules returns
@@ -117,7 +133,7 @@ export function RuleTesterDialog({
       return kra && subjectWordings(sr).length > 0 && matchesSubject(sr, cleanTestSubject)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRules, cleanTestSubject, testSender, testSubject, testWinnerRule])
+  }, [activeRules, cleanTestSubject, testSender, testSubject, testCompany, testWinnerRule])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -156,6 +172,24 @@ export function RuleTesterDialog({
               placeholder="e.g. admin.itax2@kra.go.ke"
             />
           </div>
+
+          {companyOptions.length > 0 && (
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium text-slate-600">
+                Company <span className="text-slate-400 font-normal">— rules limited to certain companies only apply to their mail</span>
+              </Label>
+              <select
+                value={testCompany}
+                onChange={(e) => setTestCompany(e.target.value)}
+                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-base text-slate-800 focus:outline-none focus:ring-1 focus:ring-custom-blue"
+              >
+                <option value="">No company</option>
+                {companyOptions.map((c) => (
+                  <option key={c.id} value={String(c.id)}>{c.company_name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {hasInput && (
             <div className={cn(

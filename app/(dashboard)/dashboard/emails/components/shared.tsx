@@ -164,6 +164,9 @@ export interface RuleRow {
   // Only meaningful when is_notify is true: "urgent" demands attention now, "informational" still
   // lands in Notifications but reads as FYI.
   notify_priority: "urgent" | "informational"
+  // Which companies' mail the rule applies to: all (default), only company_ids, or all except company_ids.
+  company_scope?: "all" | "only" | "except"
+  company_ids?: string[]
   sender_pattern: string | null
   // Alternative senders; the rule matches sender_pattern OR any of these.
   extra_sender_patterns: string[]

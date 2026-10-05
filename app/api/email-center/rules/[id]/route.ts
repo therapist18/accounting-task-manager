@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { authorize, fail, userNames } from "@/lib/email-center/api"
 import {
-  EXTRA_MIGRATION_MESSAGE, EXTRA_SENDER_MIGRATION_MESSAGE, NOTIFY_PRIORITY_MIGRATION_MESSAGE, RULES_TABLE,
+  COMPANY_SCOPE_MIGRATION_MESSAGE, EXTRA_MIGRATION_MESSAGE, EXTRA_SENDER_MIGRATION_MESSAGE, NOTIFY_PRIORITY_MIGRATION_MESSAGE, RULES_TABLE,
   invalidateRulesCache, normalizeRuleRow, ruleColumns, withOptionalColumnFallback, withoutDroppedColumns,
 } from "@/lib/email-center/rule-store"
 import { parseRuleBody } from "@/lib/email-center/rule-validation"
@@ -36,6 +36,9 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
         // Clearing/keeping an empty list is harmless to drop; real extra wordings/senders can't be.
         // hard_ignore has a safe default (false), so it never blocks; notify_priority only blocks when
         // the edit would actually change it to "informational" — "urgent" is already the DB default.
+        // A company restriction can never be silently dropped: the rule would then apply to EVERY company
+        // (an "ignore except company 10" rule would ignore company 10 too). Only "all" is safe to lose.
+        if ((col === "company_scope" || col === "company_ids") && ((parsed.value.company_scope && parsed.value.company_scope !== "all") || parsed.value.company_ids?.length)) return COMPANY_SCOPE_MIGRATION_MESSAGE
         if (col === "extra_patterns" && parsed.value.extra_patterns?.length) return EXTRA_MIGRATION_MESSAGE
         if (col === "extra_sender_patterns" && parsed.value.extra_sender_patterns?.length) return EXTRA_SENDER_MIGRATION_MESSAGE
         if (col === "notify_priority" && parsed.value.notify_priority === "informational") return NOTIFY_PRIORITY_MIGRATION_MESSAGE
