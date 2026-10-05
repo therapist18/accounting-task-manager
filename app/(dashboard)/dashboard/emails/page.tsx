@@ -543,7 +543,7 @@ export default function EmailCenterPage() {
   // Deletes cases (In Progress's rule sidebar) — their emails aren't deleted, they go back to Needs
   // Review (the server does the reset), so a full reload picks up both the removed cases and the
   // emails that just reappeared there.
-  const deleteCases = useCallback(async (targets: CaseRow[]) => {
+  const deleteCasesCore = useCallback(async (targets: CaseRow[]): Promise<boolean> => {
     try {
       const res = await api<{ deleted: number; emailsReset: number }>("/api/email-center/cases", {
         method: "DELETE",
@@ -551,12 +551,19 @@ export default function EmailCenterPage() {
       })
       toast.success(`${res.deleted} case${res.deleted === 1 ? "" : "s"} deleted${res.emailsReset ? ` — ${res.emailsReset} email(s) back in Needs Review` : ""}.`)
       await loadAll()
+      return true
     } catch (e: any) {
       toast.error(e.message)
+      return false
     }
   }, [loadAll])
+  const deleteCases = useCallback(async (targets: CaseRow[]) => { await deleteCasesCore(targets) }, [deleteCasesCore])
 
   const closeCase = useCallback(() => setOpenCaseId(null), [])
+  // The case dialog's own Delete: close it once the task is actually gone.
+  const deleteOpenCase = useCallback(async (c: CaseRow) => {
+    if (await deleteCasesCore([c])) setOpenCaseId(null)
+  }, [deleteCasesCore])
   // Prefer the live copy in `emails` (kept current by local merges) over the row captured on open; emails
   // opened from a case thread that aren't in any tab just use the captured row.
   const openEmail = useMemo(
@@ -1090,6 +1097,7 @@ export default function EmailCenterPage() {
         onClose={closeCase}
         onCaseLoaded={upsertCase}
         onOpenEmail={(e) => setOpenEmailSeed(e)}
+        onDelete={deleteOpenCase}
       />
       <EmailDialog
         email={openEmail}

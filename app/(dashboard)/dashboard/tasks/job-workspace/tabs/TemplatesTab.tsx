@@ -3,16 +3,19 @@
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { FileType, Loader2, Wand2, Search, LayoutTemplate } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup, useCollapsiblePanel, PanelCollapseButton, CollapsedRail } from "@/components/ui/resizable"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { fetchMasterFields, buildTemplateGenerationInfo, isTemplateEligible } from "../../../tasks-requirements/utils/templateGenerationData"
 import type { JobWorkspaceData } from "../fetchJobWorkspaceData"
 import TemplateGenerationComponent, { resolveTemplatePlaceholders } from "../../../tasks-requirements/TemplateGenerationDialog"
 import { buildParticipantColumns } from "./RequirementsTab"
+import { TAB_LIST_CLASS, TAB_TRIGGER_CLASS, COUNT_BADGE_CLASS } from "../../../emails/components/shared"
+
+type FillFilter = "all" | "ready" | "inprogress"
 
 interface TemplatesTabProps {
   data: JobWorkspaceData
@@ -30,6 +33,8 @@ export function TemplatesTab({ data, targetDocumentId, onSummaryChange }: Templa
   const [loadingReqId, setLoadingReqId] = useState<string | null>(null)
   const [masterFields, setMasterFields] = useState<Map<number, any> | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
+  const [fillFilter, setFillFilter] = useState<FillFilter>("all")
+  const sidebar = useCollapsiblePanel()
   const [templateProgress, setTemplateProgress] = useState<Record<string, { filled: number; total: number } | 'loading'>>({})
 
   // Keyed by task+targetDocumentId (not just task) so a later in-app navigation to a
@@ -92,8 +97,10 @@ export function TemplatesTab({ data, targetDocumentId, onSummaryChange }: Templa
     return Array.from(seen.values())
   }, [task, kycDocsMap, resolveEntityForReq])
 
-  // Apply search query filtering
-  const filteredReqs = useMemo(() => {
+  const isReady = (progress: any) => !!progress && progress !== 'loading' && progress.total > 0 && progress.filled === progress.total
+
+  // Apply search + fill-status filtering
+  const searchedReqs = useMemo(() => {
     if (!searchQuery.trim()) return templateReqs
     const query = searchQuery.toLowerCase()
 
@@ -105,6 +112,20 @@ export function TemplatesTab({ data, targetDocumentId, onSummaryChange }: Templa
       return docName.toLowerCase().includes(query) || category.toLowerCase().includes(query)
     })
   }, [templateReqs, searchQuery, kycDocsMap])
+
+  const fillCounts = useMemo(() => {
+    let ready = 0
+    searchedReqs.forEach((req: any) => { if (isReady(templateProgress[String(req.id || templateReqs.indexOf(req))])) ready++ })
+    return { all: searchedReqs.length, ready, inprogress: searchedReqs.length - ready }
+  }, [searchedReqs, templateProgress, templateReqs])
+
+  const filteredReqs = useMemo(() => {
+    if (fillFilter === "all") return searchedReqs
+    return searchedReqs.filter((req: any) => {
+      const ready = isReady(templateProgress[String(req.id || templateReqs.indexOf(req))])
+      return fillFilter === "ready" ? ready : !ready
+    })
+  }, [searchedReqs, fillFilter, templateProgress, templateReqs])
 
   useEffect(() => {
     fetchMasterFields().then(setMasterFields)
@@ -205,45 +226,58 @@ export function TemplatesTab({ data, targetDocumentId, onSummaryChange }: Templa
   if (!task) return null
 
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-white px-6 py-4">
+    <div className="h-full flex flex-col overflow-hidden bg-slate-50/50 px-3 py-3 antialiased">
       {templateReqs.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
-          <div className="bg-white p-6 rounded-full shadow-md mb-4 border border-slate-100">
-            <Search className="h-10 w-10 text-slate-300" />
-          </div>
-          <p className="text-lg font-medium text-slate-600">No Templates Available</p>
-          <p className="text-sm font-medium text-slate-400 mt-2 max-w-sm leading-relaxed">
+        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-white rounded-lg border border-dashed border-slate-300">
+          <LayoutTemplate className="h-8 w-8 text-slate-300 mb-3" />
+          <p className="text-base font-semibold text-slate-700">No templates available</p>
+          <p className="text-base text-slate-400 mt-1 max-w-sm leading-relaxed">
             This job level has no requirements explicitly marked with template generation enabled.
           </p>
         </div>
       ) : (
-        <ResizablePanelGroup direction="horizontal" className="flex-1 overflow-hidden">
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+        {sidebar.collapsed && <CollapsedRail onExpand={sidebar.expand} label="Target documents" />}
+        <ResizablePanelGroup direction="horizontal" autoSaveId="templates-tab-layout" className="flex-1 overflow-hidden">
           {/* Sidebar Panel for Templates */}
-          <ResizablePanel defaultSize={28} minSize={20} maxSize={45} className="flex flex-col bg-slate-50/30 overflow-hidden">
-            <div className="bg-white px-4 py-3 flex flex-col gap-3 sticky top-0 z-10 border-b border-slate-100">
+          <ResizablePanel id="templates-sidebar" order={1} {...sidebar.panelProps} defaultSize={28} minSize={20} maxSize={45} className="flex flex-col bg-white overflow-hidden rounded-lg border border-slate-200/80">
+            <div className="bg-white px-3 py-3 flex flex-col gap-3 shrink-0 border-b border-slate-200/80">
               <div className="flex justify-between items-center">
-                <span className="text-lg font-bold text-slate-900 tracking-tight flex items-center">
-                  <LayoutTemplate className="w-4 h-4 mr-2 text-slate-500" /> Target Documents
+                <span className="text-base font-semibold text-slate-900 flex items-center gap-2">
+                  <LayoutTemplate className="h-4 w-4 text-slate-500" /> Target documents
+                  <span className={COUNT_BADGE_CLASS}>{templateReqs.length}</span>
                 </span>
-                <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-xs rounded-full px-3 py-0.5">
-                  {templateReqs.length} Available
-                </Badge>
+                <PanelCollapseButton onClick={sidebar.collapse} label="Hide target documents" />
               </div>
               <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
                 <Input
-                  placeholder="Search templates..."
+                  placeholder="Search document or category…"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-8 pl-8 text-xs bg-slate-50/50 border-slate-200 focus-visible:ring-blue-500 focus-visible:border-blue-500"
+                  className="w-full h-10 pl-10 pr-3 bg-white border-slate-200 rounded-md text-base focus-visible:ring-1 focus-visible:ring-custom-blue placeholder:text-slate-400 shadow-none"
                 />
               </div>
+              <Tabs value={fillFilter} onValueChange={(v) => setFillFilter(v as FillFilter)}>
+                <TabsList className={TAB_LIST_CLASS}>
+                  {([
+                    { value: "all", label: "All", title: "Every template" },
+                    { value: "ready", label: "Ready", title: "Every placeholder is filled" },
+                    { value: "inprogress", label: "In progress", title: "Some placeholders are still empty" },
+                  ] as const).map(t => (
+                    <TabsTrigger key={t.value} value={t.value} title={t.title} className={cn(TAB_TRIGGER_CLASS, "h-8 px-3")}>
+                      {t.label}
+                      <span className={COUNT_BADGE_CLASS}>{fillCounts[t.value]}</span>
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar border">
+            <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar bg-slate-50/50">
               {filteredReqs.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-400 font-medium">
-                  No templates match your search.
+                <div className="py-8 text-center text-base text-slate-400">
+                  No templates match the current filters.
                 </div>
               ) : (
                 filteredReqs.map((req: any, idx: number) => {
@@ -258,32 +292,32 @@ export function TemplatesTab({ data, targetDocumentId, onSummaryChange }: Templa
                       key={reqId}
                       ref={(el) => { listRefs.current[reqId] = el }}
                       className={cn(
-                        "flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer group",
+                        "flex items-center justify-between p-3 rounded-lg border transition-all cursor-pointer group",
                         isSelected
-                          ? "bg-blue-50 border-blue-200 ring-1 ring-blue-500 shadow-sm"
-                          : "bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50 shadow-sm"
+                          ? "bg-blue-50 border-custom-blue ring-1 ring-custom-blue"
+                          : "bg-white border-slate-200/80 hover:bg-slate-100"
                       )}
                       onClick={() => { if (!isSelected) handleGenerateTemplate(req, reqId) }}
                     >
                       <div className="flex flex-col min-w-0 pr-3">
                         <span className={cn(
-                          "text-sm font-semibold truncate transition-colors",
-                          isSelected ? "text-blue-800" : "text-slate-700"
+                          "text-base font-medium truncate transition-colors",
+                          isSelected ? "text-custom-blue" : "text-slate-900"
                         )}>
                           {docName}
                         </span>
                         <div className="flex items-center gap-2 mt-1.5">
-                          <Badge variant="outline" className="text-[10px] font-semibold bg-white text-slate-500 rounded-full px-2 py-0 border-slate-200">
+                          <span className="text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-slate-50 text-slate-700 border-slate-200">
                             {req.category || "General"}
-                          </Badge>
-                          <span className="text-[10px] text-slate-400 font-medium flex items-center">
-                            <FileType className="h-3 w-3 mr-1 opacity-70" /> DOCX/PDF
+                          </span>
+                          <span className="text-sm text-slate-400 flex items-center gap-1">
+                            <FileType className="h-3.5 w-3.5" /> DOCX/PDF
                           </span>
                         </div>
                         {(() => {
                           const progress = templateProgress[reqId]
                           if (!progress) return (
-                            <span className="text-[9px] text-slate-400 mt-1">Checking template...</span>
+                            <span className="text-sm text-slate-400 mt-1">Checking template…</span>
                           )
                           const pct = progress.total > 0 ? Math.round((progress.filled / progress.total) * 100) : 0
                           return (
@@ -294,7 +328,7 @@ export function TemplatesTab({ data, targetDocumentId, onSummaryChange }: Templa
                                   style={{ width: `${pct}%` }}
                                 />
                               </div>
-                              <span className={cn("text-[9px] font-bold shrink-0", pct === 100 ? "text-emerald-600" : "text-slate-500")}>
+                              <span className={cn("text-sm font-semibold tabular-nums shrink-0", pct === 100 ? "text-emerald-600" : "text-slate-500")}>
                                 {progress.total > 0 ? `${pct}%` : "N/A"}
                               </span>
                             </div>
@@ -306,10 +340,10 @@ export function TemplatesTab({ data, targetDocumentId, onSummaryChange }: Templa
                         variant="outline"
                         size="sm"
                         className={cn(
-                          "h-8 rounded-full px-4 text-xs font-semibold transition-all shrink-0",
+                          "h-8 rounded-md px-3 text-base font-medium transition-all shrink-0 shadow-none",
                           isSelected
-                            ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700"
-                            : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900 group-hover:border-slate-300"
+                            ? "bg-custom-blue text-white border-custom-blue hover:bg-custom-blue/90"
+                            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
                         )}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -318,7 +352,7 @@ export function TemplatesTab({ data, targetDocumentId, onSummaryChange }: Templa
                         disabled={isLoading || isSelected}
                       >
                         {isLoading ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <Loader2 className="h-4 w-4 animate-spin" />
                         ) : isSelected ? (
                           "Viewing"
                         ) : (
@@ -335,7 +369,7 @@ export function TemplatesTab({ data, targetDocumentId, onSummaryChange }: Templa
           <ResizableHandle withHandle />
 
           {/* Main Content / Inline Template Generation View */}
-          <ResizablePanel defaultSize={72} minSize={40} className="flex flex-col border rounded-xl bg-white shadow-sm overflow-hidden ml-1">
+          <ResizablePanel id="templates-main" order={2} defaultSize={72} minSize={40} className="flex flex-col border border-slate-200/80 rounded-lg bg-white overflow-hidden ml-1">
             {selectedTemplateReq && generationInfo ? (
               <TemplateGenerationComponent
                 key={selectedTemplateReq.id || generationInfo.template?.id}
@@ -358,18 +392,17 @@ export function TemplatesTab({ data, targetDocumentId, onSummaryChange }: Templa
                 onClose={() => setSelectedTemplateReq(null)}
               />
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-slate-50/30">
-                <div className="bg-slate-100 p-6 rounded-full mb-4">
-                  <LayoutTemplate className="h-10 w-10 text-slate-300" />
-                </div>
-                <p className="text-lg font-medium text-slate-500">No Template Selected</p>
-                <p className="text-sm text-slate-400 mt-1 max-w-sm">
+              <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+                <LayoutTemplate className="h-8 w-8 text-slate-300 mb-3" />
+                <p className="text-base font-semibold text-slate-700">No template selected</p>
+                <p className="text-base text-slate-400 mt-1 max-w-sm">
                   Select a target document from the sidebar to start populating and generating.
                 </p>
               </div>
             )}
           </ResizablePanel>
         </ResizablePanelGroup>
+        </div>
       )}
     </div>
   )

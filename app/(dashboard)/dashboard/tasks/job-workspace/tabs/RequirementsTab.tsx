@@ -7,10 +7,17 @@ import {
   CheckCircle2, AlertCircle, UploadCloud, Eye, FileText, Lock, Loader2,
   ChevronDown, ChevronRight, Trash2, RefreshCw, FileUp, XCircle, User,
   Briefcase, UserCheck, Users2, HeartPulse, Send, Search, AlertTriangle, Check, X, ArrowUpDown, ArrowUp, ArrowDown, HelpCircle,
-  Calendar, Plus, Minus, FileType, Zap, Wand2
+  Calendar, Plus, Minus, FileType, Zap, Wand2, Layers, BarChartHorizontal, MoreHorizontal, Download, ChevronsUpDown, ChevronsDownUp, Clock, Ban, ListChecks
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  TAB_LIST_CLASS, TAB_TRIGGER_CLASS, COUNT_BADGE_CLASS, URGENT_BADGE_CLASS,
+  PILL_BUTTON_CLASS, PILL_BUTTON_ACTIVE_CLASS, PRIMARY_PILL_BUTTON_CLASS,
+} from "../../../emails/components/shared"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
@@ -150,6 +157,16 @@ export function getCellStatus(req: any, col: ColDef, docsByInd: Record<string, a
 
   return { type: found.length > 0 ? "view" as const : "upload" as const, docs: found }
 }
+
+type StatusTab = "all" | "uploaded" | "missing" | "expired" | "na"
+
+const STATUS_TABS: { value: StatusTab; label: string; description: string; Icon: any; iconClass: string }[] = [
+  { value: "all", label: "All", description: "Every requirement", Icon: ListChecks, iconClass: "text-slate-500" },
+  { value: "uploaded", label: "Complete", description: "Every applicable participant has the document", Icon: CheckCircle2, iconClass: "text-emerald-600" },
+  { value: "missing", label: "Missing", description: "At least one applicable participant has no document", Icon: AlertCircle, iconClass: "text-amber-600" },
+  { value: "expired", label: "Expired / Expiring", description: "At least one document is expired or expiring within 30 days", Icon: Clock, iconClass: "text-red-600" },
+  { value: "na", label: "N/A", description: "No participant on this task needs the document", Icon: Ban, iconClass: "text-slate-400" },
+]
 
 function HighlightText({ text, query }: { text: string; query: string }) {
   if (!query || !text) return <>{text}</>
@@ -473,23 +490,16 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
 
   const renderStatusBadge = (status: any) => {
     if (!status) return null
-
-    let Icon
-    switch (status.status) {
-      case 'valid': Icon = CheckCircle2; break
-      case 'expiring': Icon = AlertCircle; break
-      case 'expired': Icon = XCircle; break
-      case 'error': Icon = AlertTriangle; break
-      default: Icon = CheckCircle2; break
+    const tone: Record<string, string> = {
+      valid: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      expiring: "bg-amber-50 text-amber-700 border-amber-200",
+      expired: "bg-red-50 text-red-700 border-red-200",
+      error: "bg-red-50 text-red-700 border-red-200",
     }
-
     return (
-      <div className="inline-flex items-center gap-1.5">
-        <Icon className={`h-3.5 w-3.5 shrink-0 ${status.color}`} />
-        <span className={`text-xs font-medium ${status.color}`}>
-          {status.label}
-        </span>
-      </div>
+      <span className={cn("inline-flex items-center text-sm font-semibold px-2.5 py-0.5 rounded-full border whitespace-nowrap", tone[status.status] || "bg-slate-50 text-slate-600 border-slate-200")}>
+        {status.label}
+      </span>
     )
   }
 
@@ -615,82 +625,312 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
     } catch { toast.error("Delete failed") }
   }
 
+  // ── Toolbar state: status tab, participant visibility, stats ──────────────
+  const [statusTab, setStatusTab] = useState<StatusTab>("all")
+  const [hiddenColumnIds, setHiddenColumnIds] = useState<Set<string>>(new Set())
+  const [showStats, setShowStats] = useState(false)
+
+  const visibleColumns = useMemo(
+    () => columns.filter(c => !hiddenColumnIds.has(String(c.id))),
+    [columns, hiddenColumnIds]
+  )
+
+  // Per-requirement roll-up across ALL participants (not just visible ones), so
+  // hiding a column never changes which tab a requirement lands in.
+  const requirementBuckets = useMemo(() => {
+    const buckets = new Map<string, { na: boolean; missing: boolean; expired: boolean }>()
+    if (!task?.requirements) return buckets
+    task.requirements.forEach((req: any, i: number) => {
+      const key = String(req.id || `${req.category || "other"}-${i}`)
+      const cells = columns
+        .map(col => ({ col, status: getCellStatus(req, col, documentsByIndividual, allCompanyDocumentsMap) }))
+        .filter(({ status }) => status.type !== "na")
+      if (cells.length === 0) {
+        buckets.set(key, { na: true, missing: false, expired: false })
+        return
+      }
+      const missing = cells.some(({ status }) => status.type === "upload")
+      const expired = cells.some(({ col, status }) => {
+        if (status.type !== "view") return false
+        const latest = getLatestDoc(status.docs)
+        const cached = latest ? documentStatusCache.get(`${task.id}-${latest.document_id}-${col.type}-${col.id}`) : null
+        return cached?.status === "expired" || cached?.status === "expiring"
+      })
+      buckets.set(key, { na: false, missing, expired })
+    })
+    return buckets
+  }, [task, columns, documentsByIndividual, allCompanyDocumentsMap, documentStatusCache])
+
+  const bucketKeyFor = (req: any, cat: string, idx: number) => String(req.id || `${cat}-${idx}`)
+
+  const matchesStatusTab = useCallback((req: any, cat: string, idx: number, tab: StatusTab) => {
+    if (tab === "all") return true
+    const b = requirementBuckets.get(bucketKeyFor(req, cat, idx))
+    if (!b) return false
+    if (tab === "na") return b.na
+    if (tab === "missing") return b.missing
+    if (tab === "expired") return b.expired
+    return !b.na && !b.missing // uploaded / complete
+  }, [requirementBuckets])
+
+  // Counts respect the search box so the tabs always describe what the user is looking at.
+  const statusCounts = useMemo(() => {
+    const base = searchQuery.trim() ? filteredRequirementMap : requirementMap
+    const counts: Record<StatusTab, number> = { all: 0, uploaded: 0, missing: 0, expired: 0, na: 0 }
+    Object.entries(base).forEach(([cat, reqs]) => {
+      ;(reqs as any[]).forEach(req => {
+        const idx = (requirementMap[cat] || []).indexOf(req)
+        counts.all++
+        ;(["uploaded", "missing", "expired", "na"] as StatusTab[]).forEach(t => {
+          if (matchesStatusTab(req, cat, idx, t)) counts[t]++
+        })
+      })
+    })
+    return counts
+  }, [requirementMap, filteredRequirementMap, searchQuery, matchesStatusTab])
+
+  const visibleRequirementMap = useMemo(() => {
+    const base = searchQuery.trim() ? filteredRequirementMap : requirementMap
+    if (statusTab === "all") return base
+    const out: Record<string, any[]> = {}
+    Object.entries(base).forEach(([cat, reqs]) => {
+      const kept = (reqs as any[]).filter(req => matchesStatusTab(req, cat, (requirementMap[cat] || []).indexOf(req), statusTab))
+      if (kept.length) out[cat] = kept
+    })
+    return out
+  }, [requirementMap, filteredRequirementMap, searchQuery, statusTab, matchesStatusTab])
+
+  const activeFilterChips = useMemo(() => {
+    const chips: { label: string; onClear: () => void }[] = []
+    if (searchQuery.trim()) chips.push({ label: `Search: ${searchQuery.trim()}`, onClear: () => setSearchQuery("") })
+    if (statusTab !== "all") {
+      const t = STATUS_TABS.find(s => s.value === statusTab)
+      chips.push({ label: `Status: ${t?.label}`, onClear: () => setStatusTab("all") })
+    }
+    if (hiddenColumnIds.size > 0) chips.push({ label: `${hiddenColumnIds.size} participant${hiddenColumnIds.size === 1 ? "" : "s"} hidden`, onClear: () => setHiddenColumnIds(new Set()) })
+    return chips
+  }, [searchQuery, statusTab, hiddenColumnIds])
+
+  const clearAllFilters = () => {
+    setSearchQuery("")
+    setStatusTab("all")
+    setHiddenColumnIds(new Set())
+  }
+
+  const allCategoriesExpanded = CATEGORY_ORDER.every(c => !(visibleRequirementMap[c]?.length) || expandedCategories.has(c))
+  const toggleAllCategories = () =>
+    setExpandedCategories(allCategoriesExpanded ? new Set() : new Set(CATEGORY_ORDER))
+
+  const handleExportExcel = useCallback(async () => {
+    try {
+      const XLSX = await import("xlsx")
+      const rows: any[] = []
+      CATEGORY_ORDER.forEach(cat => {
+        ;(visibleRequirementMap[cat] || []).forEach((req: any) => {
+          const row: Record<string, any> = {
+            Category: CATEGORY_LABELS[cat],
+            Requirement: req.name || req.display_name || "Untitled Requirement",
+            "Document Type": getDocTypeDisplay(req, kycDocsMap)?.allNames?.join(" + ") || "",
+          }
+          visibleColumns.forEach(col => {
+            const status = getCellStatus(req, col, documentsByIndividual, allCompanyDocumentsMap)
+            const latest = status.docs.length ? getLatestDoc(status.docs) : null
+            const cached = latest ? documentStatusCache.get(`${task.id}-${latest.document_id}-${col.type}-${col.id}`) : null
+            const key = `${col.label} (${col.subLabel})`
+            row[key] = status.type === "na" ? "N/A" : status.type === "view" ? (cached ? `${cached.label}${cached.expiryDate ? ` – ${cached.expiryDate}` : ""}` : "Uploaded") : "Missing"
+          })
+          rows.push(row)
+        })
+      })
+      if (rows.length === 0) { toast.info("Nothing to export"); return }
+      const ws = XLSX.utils.json_to_sheet(rows)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, "Requirements")
+      XLSX.writeFile(wb, `requirements-task-${task.id}.xlsx`)
+    } catch (err) {
+      console.error(err)
+      toast.error("Export failed")
+    }
+  }, [visibleRequirementMap, visibleColumns, kycDocsMap, documentsByIndividual, allCompanyDocumentsMap, documentStatusCache, task])
+
   if (!task) return null
 
-  const totalCols = columns.length + 3 // # + DocType + Name + entity columns
+  const totalCols = visibleColumns.length + 3 // # + DocType + Name + entity columns
 
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-white px-6 py-4">
-      {/* Header Bar */}
-      <div className="flex items-center justify-between border-b pb-4 mb-3 bg-white shrink-0 z-40">
-        <div className="flex items-center gap-4">
-          <h3 className="text-xl font-medium text-slate-800 tracking-tight">Requirements Matrix</h3>
-          <div className="flex gap-2">
-            {lockState.processingLocked && <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-xs font-medium rounded-full px-3 py-0.5"><Lock className="h-3.5 w-3.5 mr-1.5" />Processing Locked</Badge>}
-            {lockState.issuanceLocked && <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-xs font-medium rounded-full px-3 py-0.5"><Lock className="h-3.5 w-3.5 mr-1.5" />Issuance Locked</Badge>}
-          </div>
-          <div className="relative ml-2">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+    <div className="h-full flex flex-col overflow-hidden bg-slate-50/50 px-3 py-3">
+      {/* Toolbar — Email Center tokens: pill tabs with count badges, h-10 outline controls, one primary action */}
+      <div className="flex items-center gap-x-3 gap-y-2 flex-wrap pb-3 shrink-0 antialiased">
+        <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as StatusTab)}>
+          <TabsList className={TAB_LIST_CLASS}>
+            {STATUS_TABS.map(tab => {
+              const count = statusCounts[tab.value]
+              const urgent = (tab.value === "missing" || tab.value === "expired") && count > 0
+              return (
+                <TabsTrigger key={tab.value} value={tab.value} title={tab.description} className={TAB_TRIGGER_CLASS}>
+                  {tab.label}
+                  <span className={urgent ? URGENT_BADGE_CLASS : COUNT_BADGE_CLASS}>{count}</span>
+                </TabsTrigger>
+              )
+            })}
+          </TabsList>
+        </Tabs>
+
+        {lockState.processingLocked && (
+          <span className="inline-flex items-center gap-1.5 text-base font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
+            <Lock className="h-4 w-4 text-amber-600 shrink-0" /> Processing locked
+          </span>
+        )}
+        {lockState.issuanceLocked && (
+          <span className="inline-flex items-center gap-1.5 text-base font-medium text-blue-800 bg-blue-50 border border-blue-200 rounded-full px-3 py-1">
+            <Lock className="h-4 w-4 text-blue-600 shrink-0" /> Issuance locked
+          </span>
+        )}
+        {clientDraft && clientDraft.status !== "applied" && (
+          <button
+            onClick={() => setReviewOpen(true)}
+            className="inline-flex items-center gap-1.5 text-base font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-full px-3 py-1 hover:bg-amber-100 transition-colors"
+            title="The client submitted requirement changes that haven't been applied yet"
+          >
+            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+            Client draft to review
+            <span className="underline font-semibold">Review →</span>
+          </button>
+        )}
+
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
+          <div className="relative w-72">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search requirements..."
-              className="h-9 w-64 pl-9 pr-8 text-sm rounded-full border border-slate-200 bg-slate-50 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-all"
+              placeholder="Search requirement, document, description…"
+              className="w-full h-10 pl-10 pr-9 bg-white border border-slate-200 rounded-md text-base placeholder:text-slate-400 shadow-none focus:outline-none focus-visible:ring-1 focus-visible:ring-custom-blue"
             />
             {searchQuery && (
-              <button
-                onClick={() => setSearchQuery("")}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-              >
-                <X className="h-3.5 w-3.5" />
+              <button onClick={() => setSearchQuery("")} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 transition-colors">
+                <X className="h-4 w-4" />
               </button>
             )}
           </div>
-        </div>
-        <div className="flex items-center gap-3">
-          {clientDraft && clientDraft.status !== "applied" && (
-            <Button variant="outline" className="h-10 px-5 text-sm font-semibold rounded-full border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 shadow-sm" onClick={() => setReviewOpen(true)}>
-              <AlertTriangle className="h-4 w-4 mr-2" /> Review Draft
+
+          {activeFilterChips.length > 0 && (
+            <button onClick={clearAllFilters} className="inline-flex items-center gap-1 text-base text-custom-blue hover:underline font-medium">
+              <X className="h-4 w-4" /> Clear filters
+            </button>
+          )}
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className={cn(PILL_BUTTON_CLASS, hiddenColumnIds.size > 0 && PILL_BUTTON_ACTIVE_CLASS)}>
+                <Layers className="h-5 w-5" /> Participants{hiddenColumnIds.size > 0 ? ` (${hiddenColumnIds.size} hidden)` : ""}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72 p-0 rounded-lg">
+              <div className="max-h-80 overflow-y-auto py-1">
+                {columns.map(col => {
+                  const checked = !hiddenColumnIds.has(String(col.id))
+                  return (
+                    <label key={col.id} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 cursor-pointer">
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={() => setHiddenColumnIds(prev => { const n = new Set(prev); if (checked) n.add(String(col.id)); else n.delete(String(col.id)); return n })}
+                      />
+                      <span className="truncate font-normal text-slate-700 flex-1">{col.label}</span>
+                      <span className="text-xs uppercase text-slate-400">{col.subLabel}</span>
+                    </label>
+                  )
+                })}
+              </div>
+              {hiddenColumnIds.size > 0 && (
+                <div className="border-t border-slate-100 p-1.5">
+                  <button type="button" onClick={() => setHiddenColumnIds(new Set())} className="w-full text-center text-sm text-custom-blue hover:underline py-1">Show all</button>
+                </div>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Button variant="outline" size="sm" onClick={toggleAllCategories} className={PILL_BUTTON_CLASS}>
+            {allCategoriesExpanded ? <ChevronsDownUp className="h-5 w-5" /> : <ChevronsUpDown className="h-5 w-5" />}
+            {allCategoriesExpanded ? "Collapse" : "Expand"}
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowStats(v => !v)}
+            aria-pressed={showStats}
+            className={cn(PILL_BUTTON_CLASS, showStats && PILL_BUTTON_ACTIVE_CLASS)}
+            title="Show Total / Complete / Missing / Expired counts"
+          >
+            <BarChartHorizontal className="h-5 w-5" /> Stats
+          </Button>
+
+          <Button variant="outline" size="sm" onClick={handleExportExcel} className={PILL_BUTTON_CLASS} title="Download what's shown (current tab, search and participants) as an Excel file">
+            <Download className="h-5 w-5" /> Export
+          </Button>
+
+          {onRefresh && (
+            <Button variant="outline" size="sm" onClick={() => onRefresh()} className={PILL_BUTTON_CLASS} title="Reload from the database">
+              <RefreshCw className="h-5 w-5" /> Refresh
             </Button>
           )}
-          <Button className="h-10 px-6 text-sm font-medium rounded-full bg-custom-blue hover:bg-blue-700 shadow-sm" onClick={() => setIsSendRequirementsOpen(true)}>
-            <Send className="h-4 w-4 mr-2" /> Send Requirements
+
+          <Button size="sm" onClick={() => setIsSendRequirementsOpen(true)} className={PRIMARY_PILL_BUTTON_CLASS}>
+            <Send className="h-5 w-5" /> Send Requirements
           </Button>
         </div>
       </div>
 
+      {/* Stats cards */}
+      {showStats && (
+        <div className="grid grid-cols-4 gap-3 pb-3 shrink-0">
+          {[
+            { label: "Requirements", value: statusCounts.all, cls: "text-slate-900" },
+            { label: "Complete", value: statusCounts.uploaded, cls: "text-emerald-600" },
+            { label: "Missing", value: statusCounts.missing, cls: statusCounts.missing > 0 ? "text-red-600" : "text-slate-400" },
+            { label: "Expired / Expiring", value: statusCounts.expired, cls: statusCounts.expired > 0 ? "text-amber-600" : "text-slate-400" },
+          ].map(card => (
+            <div key={card.label} className="px-4 py-3 rounded-lg border border-slate-200/80 bg-white">
+              <div className="text-sm font-bold uppercase tracking-wide text-slate-500">{card.label}</div>
+              <div className={cn("mt-1 text-2xl font-semibold tabular-nums", card.cls)}>{card.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Main Table Container */}
-      <div className="flex-1 overflow-auto relative custom-scrollbar border rounded-lg bg-white shadow-sm">
+      <div className="flex-1 overflow-auto relative custom-scrollbar border border-slate-200/80 rounded-lg bg-white">
         <Table className="border-separate border-spacing-0 min-w-full">
           <TableHeader className="sticky top-0 z-30 text-white">
             <TableRow className="bg-custom-blue hover:bg-custom-blue">
-              <TableHead className="w-12 border-b border-r border-white/15 sticky left-0 top-0 bg-custom-blue z-40 p-0 text-white">
-                <div className="flex items-center justify-center text-xs font-medium uppercase tracking-wider">#</div>
+              <TableHead className="w-12 border-b border-r border-white/20 sticky left-0 top-0 bg-custom-blue z-40 p-0 text-white">
+                <div className="flex items-center justify-center text-base font-semibold">#</div>
               </TableHead>
-              <TableHead className="w-[300px] border-b border-r border-white/15 sticky left-12 top-0 bg-custom-blue z-40 p-0 text-white">
-                <div className="flex items-center px-6 text-[11px] font-medium uppercase tracking-wider">
+              <TableHead className="w-[300px] border-b border-r border-white/20 sticky left-12 top-0 bg-custom-blue z-40 p-0 text-white">
+                <div className="flex items-center px-4 py-2.5 text-base font-semibold">
                   Requirement
                 </div>
               </TableHead>
-              <TableHead className="max-w-[280px] border-b border-r border-white/15 sticky left-[348px] top-0 bg-custom-blue z-40 p-0 text-white">
-                <div className="flex items-center px-6 text-[11px] font-medium uppercase tracking-wider">
+              <TableHead className="max-w-[280px] border-b border-r border-white/20 sticky left-[348px] top-0 bg-custom-blue z-40 p-0 text-white">
+                <div className="flex items-center px-4 py-2.5 text-base font-semibold">
                   Document Type
                 </div>
               </TableHead>
-              {columns.map(col => {
+              {visibleColumns.map(col => {
                 const { bgColor, Icon } = getEntityTypeConfig(col.type)
                 return (
-                  <TableHead key={col.id} className={cn("min-w-[340px] border-b border-r border-white/15 top-0 p-0 text-white align-top", bgColor)}>
+                  <TableHead key={col.id} className={cn("min-w-[340px] border-b border-r border-white/20 top-0 p-0 text-white align-top", bgColor)}>
                     <div className="flex flex-col h-full w-full">
-                      <div className="flex flex-col items-center justify-center gap-1.5 border-b border-white/15 flex-1 p-3">
-                        <span className={cn("flex items-center gap-2 text-[11px] font-semibold tracking-wide")}>
+                      <div className="flex flex-col items-center justify-center gap-1.5 border-b border-white/20 flex-1 p-3">
+                        <span className={cn("flex items-center gap-2 text-base font-semibold")}>
                           <Icon className="h-4 w-4 opacity-90" />
                           <span className="truncate max-w-[200px]">{col.label}</span>
                         </span>
-                        <span className="text-[10px] font-medium uppercase tracking-wide opacity-80">{col.subLabel}</span>
+                        <span className="text-sm font-medium opacity-80">{col.subLabel}</span>
                       </div>
-                      <div className="grid grid-cols-[90px_120px_1fr] text-[10px] uppercase font-medium tracking-wider bg-black/10 shrink-0">
+                      <div className="grid grid-cols-[90px_120px_1fr] text-sm font-semibold bg-black/10 shrink-0">
                         <div className="py-2 px-2 text-center border-r border-white/10 opacity-80">Date</div>
                         <div className="py-2 px-2 text-center border-r border-white/10 opacity-80">Status</div>
                         <div className="py-2 px-2 text-center opacity-80">Action</div>
@@ -702,8 +942,17 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
             </TableRow>
           </TableHeader>
           <TableBody>
+            {Object.keys(visibleRequirementMap).length === 0 && (
+              <TableRow>
+                <TableCell colSpan={totalCols} className="h-48 text-center text-slate-500">
+                  <Search className="h-10 w-10 mx-auto mb-2 opacity-40" />
+                  <div className="text-base">No requirements match the current filters</div>
+                  {activeFilterChips.length > 0 && <button onClick={clearAllFilters} className="mt-2 text-base text-custom-blue hover:underline">Clear all filters</button>}
+                </TableCell>
+              </TableRow>
+            )}
             {CATEGORY_ORDER.map(cat => {
-              const reqs = (searchQuery.trim() ? filteredRequirementMap : requirementMap)[cat] || []
+              const reqs = visibleRequirementMap[cat] || []
               if (reqs.length === 0) return null
               const isLocked = isSectionLocked(task, cat)
               const isExpanded = expandedCategories.has(cat)
@@ -712,7 +961,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
                 <React.Fragment key={cat}>
                   {/* Category Separator Row */}
                   <TableRow
-                    className="bg-slate-50 hover:bg-slate-100 cursor-pointer transition-colors"
+                    className="bg-slate-100 hover:bg-slate-200/70 cursor-pointer transition-colors"
                     onClick={() => setExpandedCategories(prev => {
                       const next = new Set(prev)
                       if (next.has(cat)) next.delete(cat)
@@ -722,13 +971,13 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
                   >
                     <TableCell
                       colSpan={totalCols}
-                      className="py-2.5 px-5 border-b border-slate-200 sticky left-0 z-20"
+                      className="py-2 px-4 border-b border-slate-200/80 sticky left-0 z-20"
                     >
                       <div className="flex items-center gap-3">
                         {isExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
-                        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-700">{CATEGORY_LABELS[cat]}</span>
-                        <Badge variant="outline" className="text-xs font-medium rounded-full px-2.5 py-0.5 bg-white border-slate-200 text-slate-500">{reqs.length}</Badge>
-                        {isLocked && <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-[10px] rounded-full px-2.5 py-0.5"><Lock className="h-3 w-3 mr-1" />Locked</Badge>}
+                        <span className="text-sm font-bold uppercase tracking-wide text-slate-500">{CATEGORY_LABELS[cat]}</span>
+                        <span className={COUNT_BADGE_CLASS}>{reqs.length}</span>
+                        {isLocked && <span className="inline-flex items-center gap-1 text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200"><Lock className="h-3.5 w-3.5" />Locked</span>}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -746,7 +995,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
                     
                     // ONLY render the template wand if explicitly marked hasTemplate === true
                     const hasTemplateExplicitly = req.hasTemplate === true || String(req.hasTemplate) === 'true'
-                    const stripeBg = idx % 2 === 1 ? "bg-slate-50/50" : "bg-white"
+                    const stripeBg = idx % 2 === 1 ? "bg-slate-50" : "bg-white"
 
                     return (
                       <React.Fragment key={reqId}>
@@ -755,21 +1004,21 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
                           ref={(el) => { requirementRowRefs.current[String(reqId)] = el }}
                           className={cn(
                             "group transition-colors",
-                            stripeBg, "hover:bg-blue-50/30",
-                            highlightedRowId === reqId && "ring-2 ring-inset ring-blue-500 bg-blue-50/90 animate-pulse"
+                            stripeBg, "hover:bg-slate-100",
+                            highlightedRowId === reqId && "ring-2 ring-inset ring-custom-blue bg-blue-50 animate-pulse"
                           )}
                         >
-                          <TableCell className={cn("w-12 py-0 px-0 text-center text-xs font-mono text-slate-400 border-b border-r border-slate-100 sticky left-0 z-10 align-middle", stripeBg, "group-hover:bg-blue-50/30")}>
+                          <TableCell className={cn("w-12 py-0 px-0 text-center text-sm tabular-nums text-slate-400 border-b border-r border-slate-200/70 sticky left-0 z-10 align-middle", stripeBg, "group-hover:bg-slate-100")}>
                             <div className="flex items-center justify-center h-full font-medium">
                               {idx + 1}
                             </div>
                           </TableCell>
 
-                          <TableCell className={cn("w-[400px] py-0 px-4 border-b border-r border-slate-100 sticky left-12 z-10 align-middle", stripeBg, "group-hover:bg-blue-50/30")}>
+                          <TableCell className={cn("w-[400px] py-0 px-4 border-b border-r border-slate-200/70 sticky left-12 z-10 align-middle", stripeBg, "group-hover:bg-slate-100")}>
                             <div className="flex items-center gap-3 h-full py-3 justify-between">
                               <div className="flex flex-col min-w-0">
                                 <div className="flex items-center gap-1.5">
-                                  <span className="text-[11px] font-semibold text-slate-800 line-clamp-2 leading-tight">
+                                  <span className="text-base font-medium text-slate-900 line-clamp-2 leading-snug">
                                     <HighlightText text={req.name || req.display_name || "Untitled Requirement"} query={searchQuery} />
                                   </span>
                                   {req.web_automation?.automationId && (
@@ -779,7 +1028,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
                                       className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-purple-600 text-white ring-1 ring-purple-100 hover:bg-purple-700 hover:ring-purple-200 transition-colors shrink-0"
                                       title={`Generated by automation: ${req.web_automation.automationName || 'View automation'}`}
                                     >
-                                      <Zap className="h-3 w-3" fill="currentColor" />
+                                      <Zap className="h-3.5 w-3.5" fill="currentColor" />
                                     </button>
                                   )}
                                   {hasTemplateExplicitly && isTemplateEligible(req, docMeta) && (
@@ -789,14 +1038,14 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
                                       className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-blue-600 text-white ring-1 ring-blue-100 hover:bg-blue-700 hover:ring-blue-200 transition-colors shrink-0"
                                       title="Generate document from template"
                                     >
-                                      <Wand2 className="h-3 w-3" />
+                                      <Wand2 className="h-3.5 w-3.5" />
                                     </button>
                                   )}
                                 </div>
                                 {hasTemplateExplicitly && isTemplateEligible(req, docMeta) && (() => {
                                   const progress = templateProgress[String(req.id)]
                                   if (!progress) return (
-                                    <span className="text-[9px] text-slate-400 mt-1">Checking template...</span>
+                                    <span className="text-sm text-slate-400 mt-1">Checking template...</span>
                                   )
                                   const pct = progress.total > 0 ? Math.round((progress.filled / progress.total) * 100) : 0
                                   return (
@@ -807,21 +1056,21 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
                                           style={{ width: `${pct}%` }}
                                         />
                                       </div>
-                                      <span className={cn("text-[9px] font-bold shrink-0", pct === 100 ? "text-emerald-600" : "text-slate-500")}>
+                                      <span className={cn("text-sm font-semibold tabular-nums shrink-0", pct === 100 ? "text-emerald-600" : "text-slate-500")}>
                                         {progress.total > 0 ? `${progress.filled}/${progress.total}` : "N/A"}
                                       </span>
                                     </div>
                                   )
                                 })()}
                                 {isComposite && (
-                                  <span className="text-[10px] font-medium text-blue-600 mt-1 uppercase tracking-wide">
+                                  <span className="text-sm font-semibold text-custom-blue mt-1">
                                     {docTypeInfo.count} Types
                                   </span>
                                 )}
                               </div>
                               {isComposite ? (
                                 <button
-                                  className="p-1.5 bg-slate-50 hover:bg-slate-200 rounded-full transition-colors shrink-0 border border-slate-200"
+                                  className="p-1.5 bg-slate-50 hover:bg-slate-200 rounded-full transition-colors shrink-0 border border-slate-200/70"
                                   onClick={() => toggleCompositeExpansion(reqId)}
                                   title="Expand document types"
                                 >
@@ -829,7 +1078,7 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
                                 </button>
                               ) : fieldsToRender.length > 0 ? (
                                 <button
-                                  className="p-1.5 bg-slate-50 hover:bg-slate-200 rounded-full transition-colors shrink-0 border border-slate-200"
+                                  className="p-1.5 bg-slate-50 hover:bg-slate-200 rounded-full transition-colors shrink-0 border border-slate-200/70"
                                   onClick={() => toggleRequirementExpansion(reqId)}
                                   title="Expand fields"
                                 >
@@ -842,16 +1091,16 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
                             </div>
                           </TableCell>
 
-                          <TableCell className={cn("max-w-[280px] py-0 px-5 border-b border-r border-slate-100 sticky left-[348px] z-10 align-middle", stripeBg, "group-hover:bg-blue-50/30")}>
+                          <TableCell className={cn("max-w-[280px] py-0 px-5 border-b border-r border-slate-200/70 sticky left-[348px] z-10 align-middle", stripeBg, "group-hover:bg-slate-100")}>
                             <div className="flex flex-col gap-1.5 h-full justify-center py-3">
-                              <span className="text-[11px] font-medium text-slate-700 line-clamp-2 leading-snug">
+                              <span className="text-base text-slate-700 line-clamp-2 leading-snug">
                                 <HighlightText text={docTypeInfo?.primary?.display_name || docTypeInfo?.primary?.name || docName} query={searchQuery} />
                               </span>
-                              {req.description && <span className="text-sm font-medium text-slate-500 line-clamp-2 leading-relaxed"><HighlightText text={req.description} query={searchQuery} /></span>}
+                              {req.description && <span className="text-sm text-slate-500 line-clamp-2 leading-snug"><HighlightText text={req.description} query={searchQuery} /></span>}
                             </div>
                           </TableCell>
 
-                          {columns.map(col => {
+                          {visibleColumns.map(col => {
                             const status = getCellStatus(req, col, documentsByIndividual, allCompanyDocumentsMap)
                             const docIds = req.document_ids || (req.document_id ? [req.document_id] : [])
                             const latestDoc = status.docs.length > 0 ? getLatestDoc(status.docs) : null
@@ -860,40 +1109,40 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
                             const docStatus = statusKey ? documentStatusCache.get(statusKey) : null
 
                             return (
-                              <TableCell key={col.id} className={cn("p-0 border-b border-r border-slate-100 align-middle transition-colors", stripeBg, "group-hover:bg-blue-50/20")}>
+                              <TableCell key={col.id} className={cn("p-0 border-b border-r border-slate-200/70 align-middle transition-colors", stripeBg, "group-hover:bg-slate-100")}>
                                 {status.type === "na" ? (
-                                  <div className="flex h-full items-center justify-center p-3">
-                                    <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wide italic">N/A</span>
+                                  <div className="flex h-full min-h-[48px] items-center justify-center p-3" title="Not applicable">
+                                    <span className="text-slate-300">—</span>
                                   </div>
                                 ) : (
                                   <div className="grid grid-cols-[90px_120px_1fr] h-full">
-                                    <div className="p-3 border-r border-slate-100 flex items-center justify-center text-sm font-medium text-slate-600 text-center break-words">
-                                      {status.type === 'view' ? (docStatus?.expiryDate || 'NO EXPIRY') : '-'}
+                                    <div className="p-3 border-r border-slate-200/70 flex items-center justify-center text-base text-slate-700 tabular-nums text-center break-words">
+                                      {status.type === 'view' ? (docStatus?.expiryDate || <span className="text-slate-400">No expiry</span>) : <span className="text-slate-300">—</span>}
                                     </div>
-                                    <div className="p-3 border-r border-slate-100 flex items-center justify-center text-center">
+                                    <div className="p-3 border-r border-slate-200/70 flex items-center justify-center text-center">
                                       {status.type === 'view' ? (
                                         docStatus ? renderStatusBadge(docStatus) : <Loader2 className="h-4 w-4 animate-spin text-slate-300" />
                                       ) : (
                                         isLocked ? (
-                                          <span className="text-xs font-medium text-red-600">Missing</span>
+                                          <span className="inline-flex items-center text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200">Missing</span>
                                         ) : (
-                                          <span className="text-xs font-medium text-amber-600">Pending</span>
+                                          <span className="inline-flex items-center text-sm font-semibold px-2.5 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">Pending</span>
                                         )
                                       )}
                                     </div>
                                     <div className="p-3 flex items-center justify-center text-center">
                                       {status.type === 'view' ? (
-                                        <button className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline" onClick={() => handlePreview(req, col, isLocked, isComposite ? latestDocId : undefined)}>
+                                        <button className="inline-flex items-center gap-1.5 text-base font-medium text-custom-blue hover:underline" onClick={() => handlePreview(req, col, isLocked, isComposite ? latestDocId : undefined)}>
                                           <Eye className="h-4 w-4" /> View
                                         </button>
                                       ) : (
                                         isLocked ? (
-                                          <span className="text-sm font-medium text-slate-400 uppercase tracking-wide">Locked</span>
+                                          <span className="text-sm font-medium text-slate-400">Locked</span>
                                         ) : (
                                           <Button
                                             variant="outline"
                                             size="sm"
-                                            className="h-8 px-4 text-xs font-medium text-blue-600 bg-white hover:bg-blue-50 border-dashed border-blue-300 hover:border-blue-500 rounded-lg transition-all"
+                                            className="h-8 px-3 rounded-md text-base font-medium gap-1.5 border-slate-200/70 bg-white text-custom-blue hover:bg-blue-50 shadow-none transition-all"
                                             onClick={() => {
                                               setSelectedDocForUpload({ ...req, person: { id: col.id, full_name: col.label } });
                                               setUploadModalOpen(true);
@@ -917,18 +1166,18 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
                           if (!subDocMeta) return null
 
                           return (
-                            <TableRow key={`${reqId}-sub-${docIdx}`} className="bg-slate-50/60 hover:bg-slate-100/60 transition-colors">
-                              <TableCell className="w-12 py-3 text-center text-sm font-medium font-mono text-slate-400 border-b border-r sticky left-0 bg-slate-50/95 z-10 align-middle">
+                            <TableRow key={`${reqId}-sub-${docIdx}`} className="bg-slate-100 hover:bg-slate-200/70 transition-colors">
+                              <TableCell className="w-12 py-3 text-center text-sm tabular-nums text-slate-400 border-b border-r sticky left-0 bg-slate-100 z-10 align-middle">
                                 {idx + 1}.{docIdx + 1}
                               </TableCell>
-                              <TableCell className="w-[300px] py-3 border-b border-r sticky left-12 bg-slate-50/95 z-10 pl-14 pr-4 align-middle">
+                              <TableCell className="w-[300px] py-3 border-b border-r sticky left-12 bg-slate-100 z-10 pl-14 pr-4 align-middle">
                                 <span className="flex items-center gap-2">
-                                  <FileText className="h-3.5 w-3.5 text-blue-400 shrink-0" />
-                                  <span className="text-sm font-medium text-slate-700 leading-tight">{subDocMeta.display_name || subDocMeta.name}</span>
+                                  <FileText className="h-4 w-4 text-blue-400 shrink-0" />
+                                  <span className="text-base font-medium text-slate-800 leading-tight">{subDocMeta.display_name || subDocMeta.name}</span>
                                 </span>
                               </TableCell>
-                              <TableCell className="min-w-[280px] py-3 px-5 border-b border-r sticky left-[348px] bg-slate-50/95 z-10 align-middle" />
-                              {columns.map(col => {
+                              <TableCell className="min-w-[280px] py-3 px-5 border-b border-r sticky left-[348px] bg-slate-100 z-10 align-middle" />
+                              {visibleColumns.map(col => {
                                 const subDocs = col.type === "company"
                                   ? (allCompanyDocumentsMap[col.id] || []).filter((d: any) => d.document_id === docId)
                                   : (documentsByIndividual[col.id] || []).filter((d: any) => d.document_id === docId)
@@ -938,28 +1187,28 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
                                 const subDocStatus = documentStatusCache.get(subStatusKey)
 
                                 return (
-                                  <TableCell key={`${docId}-${col.id}`} className="p-0 border-b border-r align-middle bg-slate-50/50">
+                                  <TableCell key={`${docId}-${col.id}`} className="p-0 border-b border-r align-middle bg-slate-100">
                                     {!checkApplicability(col.type, req) ? (
                                       <div className="flex h-full items-center justify-center p-2">
-                                        <span className="text-sm font-medium text-slate-300">-</span>
+                                        <span className="text-slate-300">—</span>
                                       </div>
                                     ) : hasDocs ? (
                                       <div className="grid grid-cols-[90px_120px_1fr] h-full">
-                                        <div className="p-2 border-r border-slate-200/60 flex items-center justify-center text-sm font-semibold text-slate-600 text-center break-words">
+                                        <div className="p-2 border-r border-slate-200/70 flex items-center justify-center text-base text-slate-700 tabular-nums text-center break-words">
                                           {subDocStatus?.expiryDate || 'NO EXPIRY'}
                                         </div>
-                                        <div className="p-2 border-r border-slate-200/60 flex items-center justify-center">
+                                        <div className="p-2 border-r border-slate-200/70 flex items-center justify-center">
                                           {subDocStatus ? renderStatusBadge(subDocStatus) : <span className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />}
                                         </div>
                                         <div className="p-2 flex items-center justify-center">
-                                          <Button variant="ghost" size="sm" className="h-7 px-3 text-[10px] font-medium text-blue-600 hover:bg-blue-100 rounded-full" onClick={() => handlePreview(req, col, isLocked, docId)}>
-                                            <Eye className="h-3.5 w-3.5 mr-1.5" /> View
+                                          <Button variant="ghost" size="sm" className="h-8 px-3 text-base font-medium text-custom-blue hover:bg-blue-50 rounded-md" onClick={() => handlePreview(req, col, isLocked, docId)}>
+                                            <Eye className="h-4 w-4 mr-1.5" /> View
                                           </Button>
                                         </div>
                                       </div>
                                     ) : (
                                       <div className="flex h-full items-center justify-center p-2">
-                                        <span className="text-sm font-medium text-slate-300">-</span>
+                                        <span className="text-slate-300">—</span>
                                       </div>
                                     )}
                                   </TableCell>
@@ -971,25 +1220,25 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
 
                         {/* Non-Composite: Expanded Field Rows */}
                         {!isComposite && isReqExpanded && fieldsToRender.map((field: any, fIdx: number) => (
-                          <TableRow key={`${reqId}-field-${field.id || fIdx}`} className="bg-slate-50/60 hover:bg-slate-100/60 transition-colors">
-                            <TableCell className="w-12 py-2.5 text-center text-[10px] font-medium font-mono text-slate-400 border-b border-r sticky left-0 bg-slate-50/95 z-10 align-middle">
+                          <TableRow key={`${reqId}-field-${field.id || fIdx}`} className="bg-slate-100 hover:bg-slate-200/70 transition-colors">
+                            <TableCell className="w-12 py-2.5 text-center text-sm tabular-nums text-slate-400 border-b border-r sticky left-0 bg-slate-100 z-10 align-middle">
                               {idx + 1}.{fIdx + 1}
                             </TableCell>
-                            <TableCell className="w-[300px] py-2.5 border-b border-r sticky left-12 bg-slate-50/95 z-10 pl-14 pr-4 align-middle">
-                              <span className="text-sm font-medium text-slate-500 italic">{field.name}</span>
+                            <TableCell className="w-[300px] py-2.5 border-b border-r sticky left-12 bg-slate-100 z-10 pl-14 pr-4 align-middle">
+                              <span className="text-base text-slate-600 italic">{field.name}</span>
                             </TableCell>
-                            <TableCell className="min-w-[280px] py-2.5 border-b border-r sticky left-[348px] bg-slate-50/95 z-10 align-middle" />
-                            {columns.map(col => {
+                            <TableCell className="min-w-[280px] py-2.5 border-b border-r sticky left-[348px] bg-slate-100 z-10 align-middle" />
+                            {visibleColumns.map(col => {
                               const isApplicable = checkApplicability(col.type, req)
                               const docData = isApplicable ? getDocDataForReq(req, col, documentsByIndividual, allCompanyDocumentsMap) : null
                               return (
-                                <TableCell key={`${field.id || fIdx}-${col.id}`} className="py-2.5 px-3 text-center border-b border-r align-middle bg-slate-50/30">
+                                <TableCell key={`${field.id || fIdx}-${col.id}`} className="py-2.5 px-3 text-center border-b border-r align-middle bg-slate-100">
                                   {isApplicable ? (() => {
                                     const val = docData?.extracted_details?.[field.name]
-                                    if (val === null || val === undefined) return <span className="text-sm text-slate-300 font-medium">-</span>
-                                    if (typeof val === 'object') return <span className="text-sm font-semibold text-slate-600 bg-white px-2.5 py-1 rounded border">{JSON.stringify(val)}</span>
-                                    return <span className="text-sm text-slate-800 font-medium bg-white px-3 py-1 rounded-md border inline-block max-w-full truncate">{String(val)}</span>
-                                  })() : <span className="text-sm text-slate-300 font-medium">-</span>}
+                                    if (val === null || val === undefined) return <span className="text-slate-300">—</span>
+                                    if (typeof val === 'object') return <span className="text-base text-slate-700 bg-white px-2.5 py-1 rounded border border-slate-200/70">{JSON.stringify(val)}</span>
+                                    return <span className="text-base text-slate-700 bg-white px-3 py-1 rounded-md border border-slate-200/70 inline-block max-w-full truncate">{String(val)}</span>
+                                  })() : <span className="text-slate-300">—</span>}
                                 </TableCell>
                               )
                             })}
@@ -1033,20 +1282,29 @@ export function RequirementsTab({ data, onRefresh, autoOpenSendDialog, highlight
 
       {previewDocument && (
         <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
-          <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden">
-            <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+          <DialogContent className="max-w-[90vw] w-full h-[90vh] max-h-[90vh] flex flex-col p-0 overflow-hidden">
+            <DialogHeader className="sr-only">
+              <DialogTitle>
+                {previewDocument.documents?.[0]?.name || "Document preview"}
+              </DialogTitle>
+            </DialogHeader>
+            {/* Definite height all the way down (dialog h-[90vh] -> flex-1 min-h-0 -> h-full per document),
+                so ExtractionPreview's h-full panels fill the dialog instead of falling back to their floor.
+                With several documents each one gets a full-height page and the area scrolls. */}
+            <div className="flex-1 min-h-0 overflow-y-auto p-6 bg-slate-50 flex flex-col gap-6">
               {previewDocument.documents.map((doc: any) => (
-                <ExtractionPreview
-                  key={doc.id}
-                  documentName={doc.name}
-                  extractedData={doc.extractedData}
-                  fields={doc.fields}
-                  fileUrl={doc.fileUrl}
-                  expanded={true}
-                  showSaveButton={!previewDocument.locked}
-                  onDelete={() => handleDeleteDocument(doc.originalDoc)}
-                  onDialogClose={() => setPreviewDialogOpen(false)}
-                />
+                <div key={doc.id} className="h-full min-h-0 shrink-0">
+                  <ExtractionPreview
+                    documentName={doc.name}
+                    extractedData={doc.extractedData}
+                    fields={doc.fields}
+                    fileUrl={doc.fileUrl}
+                    expanded={true}
+                    showSaveButton={!previewDocument.locked}
+                    onDelete={() => handleDeleteDocument(doc.originalDoc)}
+                    onDialogClose={() => setPreviewDialogOpen(false)}
+                  />
+                </div>
               ))}
             </div>
           </DialogContent>

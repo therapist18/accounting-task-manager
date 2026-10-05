@@ -6,12 +6,14 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   CheckCircle2,
+  ChevronDown,
   FileSpreadsheet,
   FolderPlus,
   Loader2,
   Mail,
   Paperclip,
   RotateCcw,
+  Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -20,6 +22,10 @@ import { Textarea } from "@/components/ui/textarea"
 import { DateInput } from "@/components/ui/date-input"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { dateFieldToIso } from "@/lib/dateUtils"
 import { useCurrentUser } from "@/lib/hooks/use-current-user"
@@ -111,6 +117,7 @@ export function CaseDialog({
   onClose,
   onCaseLoaded,
   onOpenEmail,
+  onDelete,
 }: {
   caseId: string | null
   initialCase: CaseRow | null
@@ -119,8 +126,16 @@ export function CaseDialog({
   onClose: () => void
   onCaseLoaded: (c: CaseRow) => void
   onOpenEmail: (email: EmailRow) => void
+  // Deletes this task (its emails go back to Needs Review). The page closes the dialog once it succeeds;
+  // when it fails the dialog stays open. Omit to hide the Delete button.
+  onDelete?: (c: CaseRow) => Promise<void>
 }) {
   const [saving, setSaving] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  // The Notice tab leads with the notice itself; PIN / attachments / signing officer that are still
+  // empty stay folded away until asked for.
+  const [moreOpen, setMoreOpen] = useState(false)
   const [row, setRow] = useState<CaseRow | null>(null)
   const [form, setForm] = useState<Record<FieldKey, string>>({} as Record<FieldKey, string>)
   const [emails, setEmails] = useState<EmailRow[]>([])
@@ -171,6 +186,7 @@ export function CaseDialog({
     if (!caseId) return
     const seed = initialRef.current
     setTab("notice")
+    setMoreOpen(false)
     setEmails([])
     setThreadLoading(true)
     setRow(seed)
@@ -243,15 +259,13 @@ export function CaseDialog({
           </div>
           {shown && (
             <div className="flex items-center gap-2 shrink-0">
-              <span className={cn("inline-flex items-center gap-1.5 text-sm font-semibold px-3 py-1 rounded-full border", APPROVAL_BADGE[shown.approval_status])}>
-                {APPROVAL_LABEL[shown.approval_status]}
-              </span>
+              {/* One chip: where the task is (open / completed) and, while open, where KRA's approval stands. */}
               <span className={cn(
                 "inline-flex items-center gap-1.5 text-sm font-semibold px-3 py-1 rounded-full border",
-                closed ? "bg-slate-100 text-slate-700 border-slate-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                closed ? "bg-slate-100 text-slate-700 border-slate-200" : APPROVAL_BADGE[shown.approval_status]
               )}>
-                <span className={cn("h-2 w-2 rounded-full", closed ? "bg-slate-400" : "bg-emerald-500")} />
-                {closed ? "Closed" : "Active"}
+                <span className={cn("h-2 w-2 rounded-full", closed ? "bg-slate-400" : "bg-current opacity-70")} />
+                {closed ? "Completed" : `Open · ${APPROVAL_LABEL[shown.approval_status]}`}
               </span>
             </div>
           )}
@@ -259,11 +273,7 @@ export function CaseDialog({
 
         {/* Key facts */}
         {shown && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3 px-6 py-3.5 bg-slate-50 border-b border-slate-200 shrink-0">
-            <div className="min-w-0">
-              <p className="text-sm text-slate-500">Client</p>
-              <p className="text-base font-semibold text-slate-900 truncate">{shown.company_name ?? <span className="text-red-500">Unassigned</span>}</p>
-            </div>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-3 px-6 py-3.5 bg-slate-50 border-b border-slate-200 shrink-0">
             <div className="min-w-0">
               <p className="text-sm text-slate-500">KRA sender</p>
               <p className="text-base font-medium text-slate-800 truncate" title={shown.kra_email_from ?? ""}>{shown.kra_email_from || "—"}</p>
@@ -282,9 +292,9 @@ export function CaseDialog({
                 )}
               </p>
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 col-span-2">
               <p className="text-sm text-slate-500">Subject</p>
-              <p className="text-base font-medium text-slate-800 truncate" title={shown.subject ?? ""}>{shown.subject || "—"}</p>
+              <p className="text-base font-medium text-slate-800 leading-snug line-clamp-2" title={shown.subject ?? ""}>{shown.subject || "—"}</p>
             </div>
           </div>
         )}
@@ -311,6 +321,10 @@ export function CaseDialog({
               <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-6 py-5">
                 <TabsContent value="notice" className="mt-0">
                   <div className="grid md:grid-cols-2 gap-x-6 gap-y-5">
+                    {/* The notice itself first — it's what people open this to read. */}
+                    <Field label="What KRA is asking for" hint="Periods, taxes, records — a short summary of the notice." className="md:col-span-2">
+                      <Textarea rows={5} className={TEXTAREA} value={form.contents ?? ""} onChange={(e) => set("contents", e.target.value)} />
+                    </Field>
                     <Field label="Company" className="md:col-span-2">
                       <SearchSelect
                         className="w-full"
@@ -326,24 +340,40 @@ export function CaseDialog({
                     <Field label="Notice type">
                       <Input className={INPUT} value={form.notice_type ?? ""} onChange={(e) => set("notice_type", e.target.value)} />
                     </Field>
-                    <Field label="KRA PIN">
-                      <Input className={cn(INPUT, "font-mono")} value={form.kra_pin ?? ""} onChange={(e) => set("kra_pin", e.target.value)} />
-                    </Field>
                     <Field label="Deadline date (KRA)">
                       <DateInput className={INPUT} value={form.deadline_date ?? ""} onChange={(v) => set("deadline_date", v)} />
                     </Field>
-                    <Field label="Attached documents">
-                      <Input className={INPUT} value={form.attachments_summary ?? ""} onChange={(e) => set("attachments_summary", e.target.value)} placeholder="e.g. letter.pdf, assessment.xlsx" />
-                    </Field>
-                    <Field label="Signing officer">
-                      <Input className={INPUT} value={form.signing_officer_name ?? ""} onChange={(e) => set("signing_officer_name", e.target.value)} />
-                    </Field>
-                    <Field label="Officer position">
-                      <Input className={INPUT} value={form.signing_officer_position ?? ""} onChange={(e) => set("signing_officer_position", e.target.value)} />
-                    </Field>
-                    <Field label="What KRA is asking for" hint="Periods, taxes, records — a short summary of the notice." className="md:col-span-2">
-                      <Textarea rows={5} className={TEXTAREA} value={form.contents ?? ""} onChange={(e) => set("contents", e.target.value)} />
-                    </Field>
+                    {/* Optional details: filled ones always show; empty ones fold away until asked for. */}
+                    {(moreOpen || !!form.kra_pin) && (
+                      <Field label="KRA PIN">
+                        <Input className={cn(INPUT, "font-mono")} value={form.kra_pin ?? ""} onChange={(e) => set("kra_pin", e.target.value)} />
+                      </Field>
+                    )}
+                    {(moreOpen || !!form.attachments_summary) && (
+                      <Field label="Attached documents">
+                        <Input className={INPUT} value={form.attachments_summary ?? ""} onChange={(e) => set("attachments_summary", e.target.value)} placeholder="e.g. letter.pdf, assessment.xlsx" />
+                      </Field>
+                    )}
+                    {(moreOpen || !!form.signing_officer_name) && (
+                      <Field label="Signing officer">
+                        <Input className={INPUT} value={form.signing_officer_name ?? ""} onChange={(e) => set("signing_officer_name", e.target.value)} />
+                      </Field>
+                    )}
+                    {(moreOpen || !!form.signing_officer_position) && (
+                      <Field label="Officer position">
+                        <Input className={INPUT} value={form.signing_officer_position ?? ""} onChange={(e) => set("signing_officer_position", e.target.value)} />
+                      </Field>
+                    )}
+                    {(!form.kra_pin || !form.attachments_summary || !form.signing_officer_name || !form.signing_officer_position) && (
+                      <button
+                        type="button"
+                        onClick={() => setMoreOpen((v) => !v)}
+                        className="md:col-span-2 inline-flex items-center gap-1.5 text-sm font-medium text-custom-blue hover:underline justify-self-start"
+                      >
+                        <ChevronDown className={cn("h-4 w-4 transition-transform", moreOpen && "rotate-180")} />
+                        {moreOpen ? "Hide empty details" : "Add details — KRA PIN, attachments, signing officer"}
+                      </button>
+                    )}
                   </div>
                 </TabsContent>
 
@@ -498,6 +528,18 @@ export function CaseDialog({
 
         {/* Footer */}
         <div className="border-t border-slate-200 bg-white px-6 py-3.5 flex items-center gap-3 shrink-0">
+          {onDelete && shown && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={saving || deleting}
+              onClick={() => setConfirmDelete(true)}
+              className="h-11 px-4 gap-2 rounded-lg border-red-200 text-red-700 bg-white hover:bg-red-50 text-base font-medium"
+              title="Delete this task — its emails go back to Needs Review"
+            >
+              <Trash2 className="w-5 h-5" /> Delete task
+            </Button>
+          )}
           {dirty && <span className="text-sm text-amber-700 font-medium">{dirtyFields.length} unsaved change{dirtyFields.length === 1 ? "" : "s"}</span>}
           <div className="ml-auto flex items-center gap-2.5">
             <Button variant="ghost" size="sm" onClick={onClose} className="h-11 px-5 text-base font-medium text-slate-600 hover:text-slate-900 rounded-lg">Close</Button>
@@ -508,6 +550,38 @@ export function CaseDialog({
           </div>
         </div>
       </DialogContent>
+
+      <AlertDialog open={confirmDelete} onOpenChange={(o) => !o && !deleting && setConfirmDelete(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this task?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {shown?.case_ref ? `${shown.case_ref} will be removed. ` : ""}Its emails aren't deleted — they go back to Needs Review. This can't be undone (the tracked dates, approval status and assignment are gone).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700"
+              onClick={async (e) => {
+                e.preventDefault()
+                if (!shown || !onDelete) return
+                setDeleting(true)
+                try {
+                  await onDelete(shown)
+                } finally {
+                  setDeleting(false)
+                  setConfirmDelete(false)
+                }
+              }}
+            >
+              {deleting && <Loader2 className="w-4 h-4 animate-spin mr-1.5" />}
+              {deleting ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   )
 }

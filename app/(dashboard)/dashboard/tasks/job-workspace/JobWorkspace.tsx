@@ -222,13 +222,13 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
           {/* Main header row */}
           <div className="flex items-center justify-between gap-6 py-2">
             <div className="flex items-center gap-3 min-w-0">
-              <h1 className="text-3xl font-bold text-slate-900 uppercase truncate">{applicantName}</h1>
-              <Badge variant="outline" className={cn("text-sm font-bold capitalize px-3 py-0.5 rounded-full border-blue-200", STATUS_COLORS[task?.status] || "bg-slate-100 text-slate-600")}>
+              <h1 className="text-2xl tracking-tight font-bold text-slate-900 uppercase truncate">{applicantName}</h1>
+              <Badge variant="outline" className={cn("text-sm font-semibold capitalize px-2.5 py-0.5 rounded-full border-blue-200", STATUS_COLORS[task?.status] || "bg-slate-100 text-slate-600")}>
                 {statusLabel}
               </Badge>
               <span className="text-sm text-slate-500 font-semibold bg-slate-100 px-2.5 py-0.5 rounded-full font-mono">#{task?.id}</span>
               {jobLevelLabel && (
-                <Badge variant="outline" className="text-sm font-bold px-3 py-0.5 rounded-full bg-blue-50 text-blue-700 border-blue-200">
+                <Badge variant="outline" className="text-sm font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border-blue-200">
                   {jobLevelLabel}
                 </Badge>
               )}
@@ -241,7 +241,7 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
                 <div className="h-full bg-blue-600 rounded-full transition-all duration-500" style={{ width: `${stageProgress.percentage}%` }} />
               </div>
               {currentStage && (
-                <Badge variant="outline" className="text-sm font-bold px-3 py-0.5 rounded-full bg-blue-50 text-blue-700 border-blue-200">
+                <Badge variant="outline" className="text-sm font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border-blue-200">
                   {currentStage.name}
                 </Badge>
               )}
@@ -268,7 +268,7 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
                 key={tab.value}
                 onClick={() => handleTabChange(tab.value)}
                 className={cn(
-                  "px-4 py-3 my-1.5 rounded-lg text-sm font-semibold flex items-center gap-2 whitespace-nowrap transition-all relative",
+                  "px-4 py-3 my-1.5 rounded-lg text-base font-medium flex items-center gap-2 whitespace-nowrap transition-all relative",
                   isActive
                     ? "text-blue-700 bg-blue-50"
                     : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
@@ -413,11 +413,11 @@ function OverviewTabContent({ data }: { data: JobWorkspaceData }) {
         <CardHeader className="pb-2 px-5 pt-4">
           <div className="flex items-center gap-2">
             <Briefcase className="h-4 w-4 text-custom-blue" />
-            <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Job Details</CardTitle>
+            <CardTitle className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Job Details</CardTitle>
           </div>
         </CardHeader>
         <CardContent className="px-5 pb-4">
-          <div className="grid grid-cols-2 gap-x-10 gap-y-3 text-sm">
+          <div className="grid grid-cols-2 gap-x-10 gap-y-3 text-base">
             <div className="flex justify-between items-center py-1 border-b border-slate-50">
               <span className="text-slate-500 flex items-center gap-1.5"><User className="h-3.5 w-3.5 text-slate-400" /> Applicant</span>
               <span className="font-medium text-slate-800 text-right">{task?.applicant_name}</span>
@@ -452,11 +452,11 @@ function OverviewTabContent({ data }: { data: JobWorkspaceData }) {
         <CardHeader className="pb-2 px-5 pt-4">
           <div className="flex items-center gap-2">
             <Building2 className="h-4 w-4 text-amber-600" />
-            <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Assignment &amp; Company</CardTitle>
+            <CardTitle className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Assignment &amp; Company</CardTitle>
           </div>
         </CardHeader>
         <CardContent className="px-5 pb-4">
-          <div className="grid grid-cols-2 gap-x-10 gap-y-3 text-sm">
+          <div className="grid grid-cols-2 gap-x-10 gap-y-3 text-base">
             <div className="flex justify-between items-center py-1 border-b border-slate-50">
               <span className="text-slate-500">Department</span>
               <span className="font-medium text-slate-800 text-right">{department?.name || "N/A"}</span>
@@ -491,7 +491,7 @@ function OverviewTabContent({ data }: { data: JobWorkspaceData }) {
         <CardHeader className="pb-2 px-5 pt-4">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="h-4 w-4 text-green-600" />
-            <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Progress</CardTitle>
+            <CardTitle className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Progress</CardTitle>
           </div>
         </CardHeader>
         <CardContent className="px-5 pb-4">
@@ -499,16 +499,16 @@ function OverviewTabContent({ data }: { data: JobWorkspaceData }) {
             <div className="h-full bg-gradient-to-r from-green-400 to-emerald-500 rounded-full transition-all duration-700" style={{ width: `${progress.percentage}%` }} />
           </div>
           <div className="flex items-center justify-between mb-3">
-            <p className="text-xs text-slate-500">{progress.completed}/{progress.total} stages completed</p>
-            <span className="text-xs font-bold text-slate-700">{progress.percentage}%</span>
+            <p className="text-sm text-slate-500">{progress.completed}/{progress.total} stages completed</p>
+            <span className="text-sm font-bold text-slate-700">{progress.percentage}%</span>
           </div>
           {currentStage && (
             <div className="p-3.5 bg-blue-50/80 rounded-lg border border-blue-100">
               <div className="flex items-center gap-2 mb-1">
                 <Clock className="h-3.5 w-3.5 text-blue-600" />
-                <p className="text-xs font-semibold text-blue-700">Current Stage: {currentStage.name}</p>
+                <p className="text-sm font-semibold text-blue-700">Current Stage: {currentStage.name}</p>
               </div>
-              {currentStage.description && <p className="text-[11px] text-blue-500 mt-1 ml-5 leading-relaxed">{currentStage.description}</p>}
+              {currentStage.description && <p className="text-sm text-blue-500 mt-1 ml-5 leading-relaxed">{currentStage.description}</p>}
             </div>
           )}
           {stages.length > 0 && (
