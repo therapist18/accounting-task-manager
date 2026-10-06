@@ -262,17 +262,18 @@ export function classifyByRules(input: {
   if (isNoiseSender(senderEmail) && !isKraSender(senderEmail)) {
     return { action: "classify", categoryKey: "system_noise", confidence: 0.92 }
   }
-  if (!isKraSender(senderEmail)) return null
 
   // A KRA reply on a thread we already track is most likely the answer to our extension request.
-  if (threadHasCase && detectApproval(body)) {
+  if (isKraSender(senderEmail) && threadHasCase && detectApproval(body)) {
     return { action: "classify", categoryKey: "extension_response", confidence: 0.85 }
   }
 
+  // Classify rules follow their own sender setting like ignore/notify rules do: no sender = any sender
+  // (not just @kra.go.ke), so a rule is never silently skipped for mail it was written to catch.
   for (const rule of rules) {
     if (rule.is_ignore || rule.is_notify) continue
     // A classify rule with no wording would match every subject — never let that happen.
-    if (appliesToCompany(rule, companyId) && subjectWordings(rule).length && matchesSubject(rule, cleanSubject)) {
+    if (appliesToCompany(rule, companyId) && matchesSender(rule, senderEmail) && subjectWordings(rule).length && matchesSubject(rule, cleanSubject)) {
       return { action: "classify", categoryKey: rule.category_key, confidence: rule.confidence, ruleId: rule.id }
     }
   }

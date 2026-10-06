@@ -297,6 +297,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   // Set when a confident ignore rule matches: the mail is stored as ignored (headers only — no body,
   // no attachments), tagged with the rule, so the Ignored tab can show what each rule caught.
   let ruleIgnore: { ruleId: string; confidence: number } | null = null
+  let cheapRule: ReturnType<typeof classifyByRules> = null
 
   // While paused this whole cheap pass is skipped too: it's what would otherwise drop hard-ignore
   // matches, non-KRA noise and confidently-informational KRA mail before ever reaching Needs Review.
@@ -304,6 +305,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     // The company is only a best guess this early (the mailbox's own company, or the thread's) — the PIN
     // match that can refine it needs the full body, fetched below.
     const cheap = classifyByRules({ subject, body: snippet, senderEmail, threadHasCase: !!threadCase, companyId: account.company_id ?? threadCase?.company_id ?? null, rules })
+    cheapRule = cheap
     // Confident ignore rules are checked before classification and name no category: whatever the
     // sender, matching mail never opens a case or reaches review. Below the threshold it still goes
     // to review.
@@ -323,7 +325,10 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
   }
 
   // 3. Full fetch — KRA mail, our replies in a case, and unknown senders needing review.
-  const needsFull = (direction === "outbound" || kra) && !ruleIgnore
+  // A non-KRA sender that a classify rule confidently caught is handled like KRA mail (full body,
+  // attachments) since the rule was written to catch it.
+  const cheapClassified = !!cheapRule && cheapRule.action === "classify" && !!cheapRule.ruleId && cheapRule.confidence >= THRESHOLD
+  const needsFull = (direction === "outbound" || kra || cheapClassified) && !ruleIgnore
   const payload = needsFull
     ? (await withRetry(() => gmail.users.messages.get({ userId: "me", id: messageId, format: "full" }))).data.payload
     : undefined
@@ -453,7 +458,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     // resyncable) rather than left to pile up forever. threadCase is checked first so a reply that
     // genuinely belongs to an already-tracked case is never silently dropped just because its sender
     // isn't @kra.go.ke.
-    if (!notifyFlag && !kra && !threadCase && categoryKey !== "system_noise") {
+    if (!notifyFlag && !kra && !threadCase && categoryKey !== "system_noise" && !matchedRuleId) {
       categoryKey = "system_noise"
       confidence = 0.5 // heuristic, not a specific rule match — cosmetic only, disposition is set directly
       disposition = "ignore"

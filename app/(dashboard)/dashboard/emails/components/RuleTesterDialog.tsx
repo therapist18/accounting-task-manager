@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import {
-  appliesToCompany, classifyByRules, isKraSender, matchesSender, matchesSubject, stripReplyPrefix, subjectWordings,
+  appliesToCompany, classifyByRules, matchesSender, matchesSubject, stripReplyPrefix, subjectWordings,
   type SubjectRule,
 } from "@/lib/email-center/rules"
 import { AUTO_CONFIDENCE_THRESHOLD } from "@/lib/email-center/types"
@@ -120,17 +120,13 @@ export function RuleTesterDialog({
   const cleanTestSubject = useMemo(() => stripReplyPrefix(testSubject), [testSubject])
   const otherMatches = useMemo(() => {
     if (!hasInput) return []
-    const kra = isKraSender(testSender)
     return activeRules.filter((r) => {
       if (testWinnerRule && r.id === testWinnerRule.id) return false
       const sr = toSubjectRule(r)
       if (!appliesToCompany(sr, testCompany || null)) return false
       if (!matchesSender(sr, testSender)) return false
       if (r.is_ignore || r.is_notify) return matchesSubject(sr, cleanTestSubject)
-      // A plain classify rule can only ever be reached for a KRA sender (classifyByRules returns
-      // before trying any of them otherwise) — mirror that here or this list would claim a match that
-      // could never actually happen.
-      return kra && subjectWordings(sr).length > 0 && matchesSubject(sr, cleanTestSubject)
+      return subjectWordings(sr).length > 0 && matchesSubject(sr, cleanTestSubject)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRules, cleanTestSubject, testSender, testSubject, testCompany, testWinnerRule])
@@ -163,7 +159,7 @@ export function RuleTesterDialog({
           </div>
           <div className="space-y-1.5">
             <Label className="text-sm font-medium text-slate-600">
-              Sender <span className="text-slate-400 font-normal">— optional, but sender-driven ignore/notify rules and the KRA-only check need it to mean anything</span>
+              Sender <span className="text-slate-400 font-normal">— optional, but rules that name a sender need it to mean anything</span>
             </Label>
             <Input
               className="h-10 text-base rounded-md border-slate-200 font-mono"

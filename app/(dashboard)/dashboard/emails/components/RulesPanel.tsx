@@ -812,9 +812,9 @@ export function RulesPanel({
               <Step
                 n={2}
                 title="Which emails does it match?"
-                hint={draft.is_ignore || draft.is_notify ? "Match on the sender, the subject, or both — when you fill in both, both must match." : "Classify rules apply to mail from KRA (@kra.go.ke) and match on the subject."}
+                hint={draft.is_ignore || draft.is_notify ? "Match on the sender, the subject, or both — when you fill in both, both must match." : "Match on the subject, and optionally narrow it to certain senders. Leave the sender blank to match mail from any sender."}
               >
-                {(draft.is_ignore || draft.is_notify) && (
+                {(
                   <div className="space-y-1.5">
                     <div className="flex flex-wrap items-end justify-between gap-3">
                       <Label className="text-sm font-medium text-slate-600">
