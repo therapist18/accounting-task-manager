@@ -27,14 +27,30 @@ interface ContractTemplateDialogProps {
   // Bumped by the caller after close so its own template list refetches -
   // mirrors LettersPage's templateVersion/onTemplateUpdate pattern.
   onSaved: () => void;
+  // Reuse options - Employment Contracts' Letter Templates tab uses this
+  // same dialog for letter templates. Defaults are Consultancy's own.
+  // Placeholders table "Belongs To" column; null hides it.
+  belongsToLabel?: ((p: Placeholder) => string) | null;
+  showCompanyRoleField?: boolean;
+  // entity_type a newly added placeholder starts with.
+  defaultEntityType?: string[];
 }
+
+const consultancyBelongsTo = (p: Placeholder) => {
+  const role = resolveCompanyRole({ key: p.name, company_role: p.company_role });
+  const label = role === 'consultant' ? 'Consultant' : 'Client';
+  return p.company_role ? label : `${label} (auto)`;
+};
 
 // The "just the template and placeholders panels" editor for ONE template
 // variant - moved out of settings/page.tsx (which now just lists variants,
 // see ContractTemplateList.tsx) into its own dialog, matching how
 // DocumentTemplateManager is a dialog LettersPage opens per template rather
 // than an always-visible full-page editor.
-export function ContractTemplateDialog({ isOpen, onClose, templateId, documentId, onSaved }: ContractTemplateDialogProps) {
+export function ContractTemplateDialog({
+  isOpen, onClose, templateId, documentId, onSaved,
+  belongsToLabel = consultancyBelongsTo, showCompanyRoleField = true, defaultEntityType = ['company'],
+}: ContractTemplateDialogProps) {
   const { masterFields } = useTemplateData(true, null);
   const { toast } = useToast();
   const [template, setTemplate] = useState<CcTemplate | null>(null);
@@ -64,7 +80,7 @@ export function ContractTemplateDialog({ isOpen, onClose, templateId, documentId
       name: '',
       type: 'text',
       required: true,
-      entity_type: ['company'],
+      entity_type: defaultEntityType as any,
       master_field_ids: [],
       linked_job_question_ids: [],
       linked_requirement_ids: [],
@@ -170,16 +186,16 @@ export function ContractTemplateDialog({ isOpen, onClose, templateId, documentId
           <div className="flex items-center gap-3 min-w-0">
             <FileText className="w-5 h-5 text-custom-blue shrink-0" />
             <div className="min-w-0">
-              <DialogTitle className="text-lg font-bold text-slate-800 dark:text-slate-100 tracking-tight truncate flex items-center gap-2">
+              <DialogTitle className="text-2xl font-bold tracking-tight text-slate-800 dark:text-slate-100 truncate flex items-center gap-2">
                 {template?.file_name || 'Template'}
                 {template?.is_default && (
-                  <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200 gap-1">
+                  <Badge variant="outline" className="text-sm bg-amber-50 text-amber-700 border-amber-200 gap-1">
                     <Star className="w-2.5 h-2.5 fill-amber-500 text-amber-500" /> Default
                   </Badge>
                 )}
               </DialogTitle>
-              <DialogDescription className="text-xs text-slate-400">
-                Type <code className="text-[11px] bg-slate-100 dark:bg-slate-800 px-1 rounded">{'{{token}}'}</code> for any value that should vary per client - use Re-scan to update placeholders.
+              <DialogDescription className="text-sm text-slate-400">
+                Type <code className="text-sm bg-slate-100 dark:bg-slate-800 px-1 rounded">{'{{token}}'}</code> for any value that should vary per client - use Re-scan to update placeholders.
               </DialogDescription>
             </div>
           </div>
@@ -260,11 +276,7 @@ export function ContractTemplateDialog({ isOpen, onClose, templateId, documentId
                   onAddPlaceholder={handleAddPlaceholder}
                   onEditPlaceholder={handleEditPlaceholder}
                   onRemovePlaceholder={handleRemovePlaceholder}
-                  belongsToLabel={(p) => {
-                    const role = resolveCompanyRole({ key: p.name, company_role: p.company_role });
-                    const label = role === 'consultant' ? 'Consultant' : 'Client';
-                    return p.company_role ? label : `${label} (auto)`;
-                  }}
+                  belongsToLabel={belongsToLabel || undefined}
                 />
               </div>
             </Panel>
@@ -282,7 +294,7 @@ export function ContractTemplateDialog({ isOpen, onClose, templateId, documentId
             name: '',
             type: 'text',
             required: true,
-            entity_type: ['company'],
+            entity_type: defaultEntityType as any,
             master_field_ids: [],
             linked_job_question_ids: [],
             linked_requirement_ids: [],
@@ -298,7 +310,7 @@ export function ContractTemplateDialog({ isOpen, onClose, templateId, documentId
           onSave={handleSavePlaceholder}
           onChange={(updates) => setEditingPlaceholder(prev => prev ? { ...prev, ...updates } : null)}
           isEditing={!!editingPlaceholder}
-          showCompanyRoleField
+          showCompanyRoleField={showCompanyRoleField}
         />
       </DialogContent>
     </Dialog>

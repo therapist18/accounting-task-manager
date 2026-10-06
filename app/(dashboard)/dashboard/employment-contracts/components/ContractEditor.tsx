@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { fetchCompanyEmployees, ContractEmployeeInfo } from '../utils/data';
 import { EcJobProfile, fetchJobProfiles, fetchGlobalJobProfiles, matchJobProfile } from '../utils/jobProfileData';
 import { EmploymentOffer, fetchLatestOffer } from '../utils/employmentOfferData';
@@ -14,17 +14,21 @@ import type { StatutoryDeductionsBreakdown } from '../utils/statutoryDeductions'
 import { fetchClauses, EcClause } from '../utils/clauseLibraryData';
 import { detectTokens } from '../utils/placeholderDetection';
 import { SearchableSelect } from './SearchableSelect';
-import { MasterFieldEditControl } from './MasterFieldEditControl';
+import { MasterFieldEditControl, MultiSourceValueControl, SourceValueEditor, linkedMasterFieldIds } from './MasterFieldEditControl';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, UserRound, RotateCcw, RefreshCw, AlertCircle, FileText, CheckCircle2, Search, X, Wallet, FileSpreadsheet, Upload } from 'lucide-react';
+import { Loader2, UserRound, RotateCcw, RefreshCw, AlertCircle, FileText, CheckCircle2, Search, X, Wallet, FileSpreadsheet, Upload, Mail, Settings } from 'lucide-react';
 import { generateEcContractExcel, EC_SHEET_NAME } from '../utils/ecExcelExport';
 import { importEcContractExcel } from '../utils/ecExcelImport';
 import { cn } from '@/lib/utils';
 import { ENTITY_TYPES } from '@/lib/constants/entity-types';
 import { useToast } from '@/components/ui/use-toast';
+import { Textarea } from '@/components/ui/textarea';
+import Link from 'next/link';
+import { letterFieldsFor, letterTokenKeys, type LetterField } from '../utils/letterTemplates';
+import type { DocumentTab, EmploymentLetters } from '../hooks/useEmploymentLetters';
 
 interface ContractEditorProps {
   companyId: string | null;
@@ -33,6 +37,12 @@ interface ContractEditorProps {
   setContractData: (data: any) => void;
   selectedJobProfile: EcJobProfile | null;
   setSelectedJobProfile: (profile: EcJobProfile | null) => void;
+  // Contract vs Letters - the Letters tab swaps the job profile picker and
+  // Compensation card for a letter type picker and the letter-only Details
+  // card, and scopes the same Contract Fields panel to the letter's tokens.
+  documentTab: DocumentTab;
+  onDocumentTabChange: (tab: DocumentTab) => void;
+  letters: EmploymentLetters;
 }
 
 const getSourceLabel = (
@@ -63,7 +73,11 @@ export function ContractEditor({
   setContractData,
   selectedJobProfile,
   setSelectedJobProfile,
+  documentTab,
+  onDocumentTabChange,
+  letters,
 }: ContractEditorProps) {
+  const isLetters = documentTab === 'letters';
   const [employee, setEmployee] = useState<ContractEmployeeInfo | null>(null);
   const [profiles, setProfiles] = useState<EcJobProfile[]>([]);
   const [company, setCompany] = useState<Company | null>(null);
@@ -271,10 +285,24 @@ export function ContractEditor({
     return Array.from(keys);
   }, [selectedJobProfile, allClauses]);
 
+  // The letter's tokens (header, subject, body, sign-off) - in the Letters tab
+  // the Contract Fields panel lists the EC placeholders among these instead of
+  // the job profile's clause tokens, with the same sources and overrides.
+  const letterKeys = useMemo(() => letterTokenKeys(letters.letter), [letters.letter]);
+
   const profileScopedPlaceholders = useMemo(() => {
+    if (isLetters) return ecPlaceholders.filter((p) => letterKeys.includes(p.key));
     if (!selectedJobProfile) return [];
     return ecPlaceholders.filter((p) => profilePlaceholderKeys.includes(p.key));
-  }, [ecPlaceholders, selectedJobProfile, profilePlaceholderKeys]);
+  }, [ecPlaceholders, selectedJobProfile, profilePlaceholderKeys, isLetters, letterKeys]);
+
+  // What's left for the Details card: tokens nothing in the contract value
+  // map resolves (same rule ContractPreview renders with). Registry keys and
+  // standard contract values both count as resolved elsewhere.
+  const letterFields = useMemo(() => {
+    const resolvedElsewhere = new Set([...ecPlaceholders.map((p) => p.key), ...Object.keys(placeholderValues)]);
+    return letterFieldsFor(letters.letter, resolvedElsewhere);
+  }, [letters.letter, ecPlaceholders, placeholderValues]);
 
   const placeholderIsMissing = useMemo(() => {
     const map = new Map<string, boolean>();
@@ -288,7 +316,6 @@ export function ContractEditor({
   }, [profileScopedPlaceholders, placeholderValues, offer.placeholder_overrides]);
 
   const missingCount = useMemo(() => profileScopedPlaceholders.filter((p) => placeholderIsMissing.get(p.id)).length, [profileScopedPlaceholders, placeholderIsMissing]);
-  const withDataCount = profileScopedPlaceholders.length - missingCount;
 
   const dataFilteredPlaceholders = useMemo(() => {
     let result = profileScopedPlaceholders;
@@ -317,7 +344,7 @@ export function ContractEditor({
           <UserRound className="w-10 h-10 text-slate-300 dark:text-slate-700" />
         </div>
         <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300">No Employee Selected</h3>
-        <p className="text-sm mt-1 max-w-sm text-center">Please select an employee from the sidebar to begin reviewing or generating a contract.</p>
+        <p className="text-base mt-1 max-w-sm text-center">Please select an employee from the sidebar to begin reviewing or generating a contract.</p>
       </div>
     );
   }
@@ -326,7 +353,7 @@ export function ContractEditor({
     return (
       <div className="flex flex-col items-center justify-center h-full text-slate-500 bg-slate-50 dark:bg-slate-950/50">
         <Loader2 className="w-8 h-8 animate-spin mb-4 text-indigo-600" />
-        <p className="text-sm font-medium tracking-wide animate-pulse">Loading workspace...</p>
+        <p className="text-base font-medium tracking-wide animate-pulse">Loading workspace...</p>
       </div>
     );
   }
@@ -342,84 +369,145 @@ export function ContractEditor({
   }
   const sortedEntities = Array.from(entityGroups.entries()).sort(([a], [b]) => a === 'none' ? 1 : b === 'none' ? -1 : a.localeCompare(b));
 
+  // Letter-only fields (Letters tab) sit in the same list as their own
+  // "Letter" group - same search, same All/With Data/Missing filter and counts.
+  const letterFieldIsMissing = (key: string) => !(letters.values[key] || '').trim();
+  const fieldQuery = fieldSearch.trim().toLowerCase();
+  const passesFieldFilter = (missing: boolean, label: string, key: string) => {
+    if (dataFilter === 'missing' && !missing) return false;
+    if (dataFilter === 'with' && missing) return false;
+    return !fieldQuery || label.toLowerCase().includes(fieldQuery) || key.includes(fieldQuery);
+  };
+  const shownLetterFields = isLetters
+    ? letterFields.filter((f) => passesFieldFilter(letterFieldIsMissing(f.key), f.label, f.key))
+    : [];
+
+  // Compensation (Contract tab) - Basic Salary & Currency are written
+  // straight to offer.basic_salary/offer.currency rather than through the
+  // generic placeholder override: basic_salary is the one figure every
+  // salary-derived value reads directly ({{basic_salary}}/{{gross_salary}}
+  // and the statutory_deductions_table PAYE/SHIF/AHL/NSSF breakdown all
+  // compute off offer.basic_salary itself, see standardPlaceholders.ts), so a
+  // placeholder_overrides string would only patch the displayed text in one
+  // spot. See ec_placeholders' `editable` column comment - these two rows are
+  // deliberately not editable there, so this group is the one place to change
+  // them. Listed as their own group in the same table.
+  const compensationRows = isLetters ? [] : [
+    {
+      key: 'basic_salary',
+      label: 'Basic Salary',
+      missing: offer.basic_salary == null,
+      input: (
+        <Input
+          type="number"
+          min={0}
+          value={offer.basic_salary ?? ''}
+          onChange={(e) => updateOffer({ basic_salary: e.target.value === '' ? null : Number(e.target.value) })}
+          placeholder="e.g. 120000"
+          className="h-9 text-base px-3 rounded-md border-slate-200 bg-white dark:bg-slate-950"
+        />
+      ),
+    },
+    {
+      key: 'currency',
+      label: 'Currency',
+      missing: false,
+      input: (
+        <select
+          value={offer.currency || 'KES'}
+          onChange={(e) => updateOffer({ currency: e.target.value })}
+          className="h-9 w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 text-base text-slate-900 dark:text-slate-100"
+        >
+          {['KES', 'USD', 'GBP', 'EUR'].map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      ),
+    },
+  ];
+  const shownCompensationRows = compensationRows.filter((r) => passesFieldFilter(r.missing, r.label, r.key));
+
+  const totalFieldCount = profileScopedPlaceholders.length + (isLetters ? letterFields.length : 0) + compensationRows.length;
+  const totalMissingCount = missingCount
+    + (isLetters ? letterFields.filter((f) => letterFieldIsMissing(f.key)).length : 0)
+    + compensationRows.filter((r) => r.missing).length;
+  const shownFieldCount = dataFilteredPlaceholders.length + shownLetterFields.length + shownCompensationRows.length;
+  // Running row number across all groups of the Fields table (# column + zebra).
+  let rowIndex = 0;
+
   return (
     <div className="flex flex-col h-full bg-slate-50/50 dark:bg-slate-950 relative">
-      {/* Sleek Hero Header */}
-      <div className="px-8 py-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 z-30 sticky top-0 shadow-[0_4px_20px_-10px_rgba(0,0,0,0.05)] flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-5">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 shadow-inner flex items-center justify-center text-white font-bold text-lg">
-            {employee?.fullName?.charAt(0) || <UserRound className="w-6 h-6" />}
+      {/* Compact header - one row: employee, Contract/Letters switch, and the
+          job profile (contract) or letter type (letters) picker. Kept tight so
+          the fields table gets the room. */}
+      <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 z-30 shrink-0 flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="w-9 h-9 shrink-0 rounded-lg bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center text-white font-bold text-base">
+            {employee?.fullName?.charAt(0) || <UserRound className="w-5 h-5" />}
           </div>
-          <div>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-              {employee?.fullName}
-            </h2>
-            <div className="flex items-center gap-2 mt-1 text-sm text-slate-500 dark:text-slate-400">
-              <Badge variant="secondary" className="bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400 font-medium border-0">
-                EMP-{employee?.employeeNumber || '000000'}
-              </Badge>
-              <span>•</span>
-              <span className="font-medium">{employee?.jobTitle || 'No Title'}</span>
-              <span>•</span>
-              <span>{employee?.department || 'No Dept'}</span>
-            </div>
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 truncate leading-tight">{employee?.fullName}</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 truncate">
+              EMP-{employee?.employeeNumber || '000000'} · {employee?.jobTitle || 'No Title'} · {employee?.department || 'No Dept'}
+            </p>
           </div>
         </div>
-        <div className="w-full md:w-[340px] shrink-0">
-          <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Job Profile Assignment</Label>
-          <SearchableSelect
-            value={selectedJobProfile?.id || null}
-            onChange={handleProfileChange}
-            placeholder="Select a job profile..."
-            searchPlaceholder="Search profiles..."
-            options={positionProfiles.map((p) => ({ value: p.id, label: p.company_id ? p.name : `${p.name} (Generic)` }))}
-          />
+
+        {/* Contract / Letters - same employee, values and theme; switching only
+            changes what the preview renders and which fields are listed. */}
+        <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg border border-slate-200/80 dark:border-slate-700 shrink-0">
+          {([
+            { key: 'contract', label: 'Contract', icon: FileText },
+            { key: 'letters', label: 'Letters', icon: Mail },
+          ] as const).map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => onDocumentTabChange(tab.key)}
+              className={cn(
+                'flex items-center gap-1.5 px-3 h-8 rounded-md text-base font-medium transition-colors',
+                documentTab === tab.key
+                  ? 'bg-custom-blue text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-white/70 dark:hover:bg-slate-700'
+              )}
+            >
+              <tab.icon className="w-4 h-4" />
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-1.5 w-full sm:w-[300px] shrink-0">
+          <div className="flex-1 min-w-0" title={isLetters ? 'Letter type' : 'Job profile'}>
+            {isLetters ? (
+              <SearchableSelect
+                value={letters.letterKey}
+                onChange={letters.setLetterKey}
+                placeholder="Select a letter..."
+                searchPlaceholder="Search letters..."
+                options={letters.catalog.map((l) => ({ value: l.key, label: l.title }))}
+              />
+            ) : (
+              <SearchableSelect
+                value={selectedJobProfile?.id || null}
+                onChange={handleProfileChange}
+                placeholder="Select a job profile..."
+                searchPlaceholder="Search profiles..."
+                options={positionProfiles.map((p) => ({ value: p.id, label: p.company_id ? p.name : `${p.name} (Generic)` }))}
+              />
+            )}
+          </div>
+          {isLetters && (
+            <Link
+              href="/dashboard/employment-contracts/job-profiles?tab=letters"
+              className="w-9 h-9 shrink-0 flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-custom-blue hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+              title="Manage letter types and templates"
+            >
+              <Settings className="w-4 h-4" />
+            </Link>
+          )}
         </div>
       </div>
 
       <ScrollArea className="flex-1 [&>[data-radix-scroll-area-viewport]>div]:!block">
-        <div className="max-w-[1000px] mx-auto p-6 pb-12">
-
-          {/* Compensation - Basic Salary & Currency get their own dedicated
-              inputs (writing straight to offer.basic_salary/offer.currency)
-              instead of the generic placeholder-override control below -
-              basic_salary is the one figure every salary-derived value reads
-              directly (the {{basic_salary}}/{{gross_salary}} tokens and the
-              statutory_deductions_table PAYE/SHIF/AHL/NSSF breakdown all
-              compute off offer.basic_salary itself, see
-              standardPlaceholders.ts), so a placeholder_overrides string
-              would only patch the displayed text in one spot and leave those
-              other computations stale. See ec_placeholders' `editable`
-              column comment - these two rows are deliberately not editable
-              there so this card is the one place to change them. */}
-          <div className="mb-6 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200/60 dark:border-slate-800 p-5">
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wide mb-4 flex items-center gap-2">
-              <Wallet className="w-4 h-4 text-indigo-500" /> Compensation
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr] gap-4">
-              <div>
-                <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Basic Salary</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={offer.basic_salary ?? ''}
-                  onChange={(e) => updateOffer({ basic_salary: e.target.value === '' ? null : Number(e.target.value) })}
-                  placeholder="e.g. 120000"
-                  className="h-11 text-[15px] px-3.5"
-                />
-              </div>
-              <div>
-                <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Currency</Label>
-                <select
-                  value={offer.currency || 'KES'}
-                  onChange={(e) => updateOffer({ currency: e.target.value })}
-                  className="h-11 w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 text-[15px] text-slate-900 dark:text-slate-100"
-                >
-                  {['KES', 'USD', 'GBP', 'EUR'].map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-            </div>
-          </div>
+        <div className="px-4 pt-0 pb-8">
 
           {/* Sticky toolbar + column header block - pinned to the top of the
               ScrollArea's own scrollport while reviewing a long field list.
@@ -427,26 +515,19 @@ export function ContractEditor({
               headers further down know exactly how far to stick below it. */}
           <div
             ref={stickyHeaderRef}
-            className="sticky top-0 z-30 -mx-6 px-6 pb-2 bg-slate-50/95 dark:bg-slate-950/95 backdrop-blur-sm"
+            className="sticky top-0 z-30 -mx-4 px-4 bg-slate-50/95 dark:bg-slate-950/95 backdrop-blur-sm"
           >
-          {/* Toolbar: Stats & Filters */}
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pt-1 pb-4">
-            <div>
-              <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <FileText className="w-5 h-5 text-indigo-500" /> Contract Fields
-              </h3>
-              <p className="text-sm text-slate-500 mt-1">Review and override placeholders resolved for this document.</p>
-            </div>
-
-            <div className="flex items-center gap-4">
+          {/* Toolbar: one row - search, data filter, actions. */}
+          <div className="flex items-center gap-2 py-2.5 flex-wrap">
+            <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
               {/* Field search */}
-              <div className="relative">
+              <div className="relative flex-1 min-w-[160px] max-w-xs">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <Input
                   value={fieldSearch}
                   onChange={(e) => setFieldSearch(e.target.value)}
-                  placeholder="Search fields..."
-                  className="h-9 w-48 pl-9 pr-8 text-sm bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 shadow-sm"
+                  placeholder={isLetters ? 'Search letter fields...' : 'Search contract fields...'}
+                  className="h-9 w-full pl-9 pr-8 text-base bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700"
                 />
                 {fieldSearch && (
                   <button
@@ -454,17 +535,17 @@ export function ContractEditor({
                     className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                     title="Clear search"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-4 h-4" />
                   </button>
                 )}
               </div>
 
               {/* Modern Segmented Control */}
-              <div className="p-1 bg-slate-200/50 dark:bg-slate-800/80 rounded-lg inline-flex items-center shadow-inner">
+              <div className="p-0.5 bg-slate-200/50 dark:bg-slate-800/80 rounded-lg inline-flex items-center">
                 {([
-                  { key: 'all', label: 'All Fields', count: profileScopedPlaceholders.length },
-                  { key: 'with', label: 'With Data', count: withDataCount },
-                  { key: 'missing', label: 'Missing', count: missingCount },
+                  { key: 'all', label: 'All', count: totalFieldCount },
+                  { key: 'with', label: 'With Data', count: totalFieldCount - totalMissingCount },
+                  { key: 'missing', label: 'Missing', count: totalMissingCount },
                 ] as const).map((tab) => {
                   const isActive = dataFilter === tab.key;
                   return (
@@ -472,7 +553,7 @@ export function ContractEditor({
                       key={tab.key}
                       onClick={() => setDataFilter(tab.key)}
                       className={cn(
-                        "px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-200 flex items-center gap-2",
+                        "px-3 h-8 rounded-md text-base font-medium transition-all duration-200 flex items-center gap-1.5 whitespace-nowrap",
                         isActive 
                           ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm" 
                           : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-800"
@@ -480,7 +561,7 @@ export function ContractEditor({
                     >
                       {tab.label}
                       <span className={cn(
-                        "text-[10px] px-1.5 py-0.5 rounded-full font-bold", 
+                        "text-sm px-1.5 py-0.5 rounded-full font-bold", 
                         isActive 
                           ? (tab.key === 'missing' && tab.count > 0 ? "bg-rose-100 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400" : "bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300") 
                           : "bg-transparent text-inherit"
@@ -495,7 +576,7 @@ export function ContractEditor({
               <button
                 onClick={handleRefreshMasterFieldValues}
                 disabled={isResolving}
-                className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-600 bg-white dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all shadow-sm disabled:opacity-50"
+                className="ml-auto w-9 h-9 flex items-center justify-center rounded-lg text-slate-600 bg-white dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all shadow-sm disabled:opacity-50"
                 title="Refresh master field values"
               >
                 <RefreshCw className={cn("w-4 h-4", isResolving && "animate-spin text-indigo-500")} />
@@ -521,30 +602,24 @@ export function ContractEditor({
             </div>
           </div>
 
-          {/* Column definitions header - only when there's a list to label */}
-          {profileScopedPlaceholders.length > 0 && dataFilteredPlaceholders.length > 0 && (
-            <div className="hidden md:grid grid-cols-[35%_20%_1fr] gap-4 px-4 py-2 border-b border-slate-200 dark:border-slate-800 text-xs font-bold uppercase tracking-wider text-slate-400">
-              <div>Placeholder Field</div>
-              <div>Data Source</div>
-              <div>Resolved Output</div>
-            </div>
-          )}
           </div>
 
           {/* Empty States */}
-          {profileScopedPlaceholders.length === 0 ? (
+          {totalFieldCount === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 px-4 bg-white/50 dark:bg-slate-900/30 border border-dashed border-slate-300 dark:border-slate-800 rounded-2xl">
               <FileText className="w-12 h-12 text-slate-300 dark:text-slate-700 mb-4" />
               <h4 className="text-slate-700 dark:text-slate-300 font-medium">No Fields Available</h4>
-              <p className="text-sm text-slate-500 mt-1">
-                {selectedJobProfile ? 'This profile\'s clauses don\'t reference any dynamic placeholders.' : 'Select a job profile above to load required contract fields.'}
+              <p className="text-base text-slate-500 mt-1">
+                {isLetters
+                  ? 'This letter only uses the employee/company basics and the Letter Details above.'
+                  : selectedJobProfile ? 'This profile\'s clauses don\'t reference any dynamic placeholders.' : 'Select a job profile above to load required contract fields.'}
               </p>
             </div>
-          ) : dataFilteredPlaceholders.length === 0 ? (
+          ) : shownFieldCount === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 px-4 bg-white/50 dark:bg-slate-900/30 border border-dashed border-slate-300 dark:border-slate-800 rounded-2xl">
               <CheckCircle2 className="w-12 h-12 text-emerald-400/50 mb-4" />
               <h4 className="text-slate-700 dark:text-slate-300 font-medium">You're All Set</h4>
-              <p className="text-sm text-slate-500 mt-1">
+              <p className="text-base text-slate-500 mt-1">
                 {fieldSearch.trim()
                   ? `No fields match "${fieldSearch.trim()}".`
                   : dataFilter === 'missing' ? 'Awesome! No fields are missing data.' : 'No matching fields found for this filter.'}
@@ -552,51 +627,65 @@ export function ContractEditor({
             </div>
           ) : (
             
-            /* Main Content List */
-            <div className="space-y-8 mt-4">
-              {sortedEntities.map(([entityKey, group]) => (
-                <div key={entityKey} className="space-y-3">
-
-                  {/* Entity Group Header - sticks directly below the toolbar
-                      block above, whose live-measured height is stickyHeaderHeight */}
-                  <div
-                    className="flex items-center gap-3 sticky z-20 bg-slate-50/90 dark:bg-slate-950/90 backdrop-blur-md py-2 shadow-[0_1px_0_0_rgba(0,0,0,0.03)] dark:shadow-none"
-                    style={{ top: stickyHeaderHeight }}
-                  >
-                    <h4 className="text-sm font-bold tracking-wide text-slate-800 dark:text-slate-200 uppercase">
-                      {group.label}
-                    </h4>
-                    <div className="h-px flex-1 bg-slate-200 dark:bg-slate-800"></div>
-                  </div>
-
-                  {/* Rows Container */}
-                  <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200/60 dark:border-slate-800 overflow-hidden divide-y divide-slate-100 dark:divide-slate-800/60">
-                    {group.placeholders.map((p) => {
-                      const val = placeholderValues[p.key] ?? '';
-                      const overrideVal = offer.placeholder_overrides?.[p.key];
-                      const isOverridden = overrideVal !== undefined;
-                      const effectiveVal = overrideVal ?? val;
-                      const isMissing = !effectiveVal;
-
-                      return (
-                        <PlaceholderRow 
-                          key={p.id}
-                          placeholder={p}
-                          value={val}
-                          overrideValue={overrideVal}
-                          isMissing={isMissing}
-                          isOverridden={isOverridden}
-                          masterFields={masterFields}
-                          employee={employee}
-                          companyId={companyId}
-                          onOverride={(v) => handlePlaceholderOverride(p.key, v)}
-                          onRefresh={refreshMasterFieldValues}
+            /* Main Content List - one table (see FieldsTableHead below) */
+            <div className="mt-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-clip">
+              <table className="w-full table-fixed border-separate border-spacing-0 text-base [&>tbody>tr:last-child>td]:border-b-0">
+                <FieldsColGroup />
+                <FieldsTableHead top={stickyHeaderHeight} />
+                <tbody>
+                  {shownCompensationRows.length > 0 && (
+                    <>
+                      <FieldGroupRow label="Compensation" count={shownCompensationRows.length} />
+                      {shownCompensationRows.map((r) => (
+                        <FieldRow key={r.key} index={rowIndex++} label={r.label} token={`{{${r.key}}}`} source="Employment offer" isMissing={r.missing}>
+                          {r.input}
+                        </FieldRow>
+                      ))}
+                    </>
+                  )}
+                  {shownLetterFields.length > 0 && (
+                    <>
+                      <FieldGroupRow label="Letter" count={shownLetterFields.length} />
+                      {shownLetterFields.map((f) => (
+                        <LetterFieldRow
+                          key={f.key}
+                          index={rowIndex++}
+                          field={f}
+                          value={letters.values[f.key] || ''}
+                          onChange={(v) => letters.setValue(f.key, v)}
                         />
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
+                      ))}
+                    </>
+                  )}
+                  {sortedEntities.map(([entityKey, group]) => (
+                    <Fragment key={entityKey}>
+                      <FieldGroupRow label={group.label} count={group.placeholders.length} />
+                      {group.placeholders.map((p) => {
+                        const val = placeholderValues[p.key] ?? '';
+                        const overrideVal = offer.placeholder_overrides?.[p.key];
+                        const isOverridden = overrideVal !== undefined;
+                        const effectiveVal = overrideVal ?? val;
+                        return (
+                          <PlaceholderRow
+                            key={p.id}
+                            index={rowIndex++}
+                            placeholder={p}
+                            value={val}
+                            overrideValue={overrideVal}
+                            isMissing={!effectiveVal}
+                            isOverridden={isOverridden}
+                            masterFields={masterFields}
+                            employee={employee}
+                            companyId={companyId}
+                            onOverride={(v) => handlePlaceholderOverride(p.key, v)}
+                            onRefresh={refreshMasterFieldValues}
+                          />
+                        );
+                      })}
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
@@ -606,10 +695,173 @@ export function ContractEditor({
 }
 
 // ----------------------------------------------------------------------
-// Extracted Sub-Component for Sleeker Row Rendering
+// A typed-in row with no placeholder of its own (Compensation) - same cells
+// as PlaceholderRow, the input as its value.
 // ----------------------------------------------------------------------
 
+function FieldRow({ index, label, token, source, isMissing, children }: {
+  index: number;
+  label: string;
+  token: string;
+  // Data Source column - where this value is written.
+  source: string;
+  isMissing?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <tr className={cn('transition-colors', fieldRowClass(index, isMissing ? 'amber' : undefined))}>
+      <td className={cn(FIELD_TD, 'text-center text-slate-400 tabular-nums font-medium')}>{index + 1}</td>
+      <FieldLabelCell label={label} token={token} isMissing={!!isMissing} />
+      <td className={FIELD_TD}>
+        <span className={cn(SOURCE_BADGE, 'bg-purple-50 text-purple-700 border-purple-100 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-800')}>{source}</span>
+      </td>
+      <td className={FIELD_TD}>{children}</td>
+      <td className={cn(FIELD_TD, 'border-r-0')} />
+    </tr>
+  );
+}
+
+// ----------------------------------------------------------------------
+// Fields table - same design as the Email Center's tables (emails/
+// components/table.tsx): one bordered card, sticky slate header, thin
+// gridlines, zebra rows, a # column and a full-width row per group. Missing
+// values tint the row (rose = required, amber = optional) instead of a
+// separate card per field.
+// ----------------------------------------------------------------------
+
+const FIELD_TH = 'px-3 py-2.5 text-left text-base font-semibold whitespace-nowrap border-b border-r border-slate-200/80 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200';
+const FIELD_TD = 'px-3 py-2.5 text-base text-slate-700 dark:text-slate-200 border-b border-r border-slate-200/70 dark:border-slate-800 align-middle';
+const FIELD_COLUMNS = ['#', 'Placeholder Field', 'Data Source', 'Resolved Output', ''];
+
+// Opaque backgrounds, as in the Email Center's zebraRow.
+const fieldRowClass = (index: number, tint?: 'rose' | 'amber') =>
+  tint === 'rose' ? 'bg-rose-50 hover:bg-rose-100/70 dark:bg-rose-950/30 dark:hover:bg-rose-950/50'
+  : tint === 'amber' ? 'bg-amber-50/70 hover:bg-amber-100/60 dark:bg-amber-950/20 dark:hover:bg-amber-950/40'
+  : index % 2 === 0 ? 'bg-white hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800'
+  : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-900/60 dark:hover:bg-slate-800';
+
+function FieldsTableHead({ top }: { top: number }) {
+  return (
+    <thead>
+      <tr>
+        {FIELD_COLUMNS.map((label, i) => (
+          <th
+            key={i}
+            style={{ top }}
+            className={cn(FIELD_TH, 'sticky z-20', i === 0 && 'text-center', i === FIELD_COLUMNS.length - 1 && 'border-r-0')}
+          >
+            {label}
+          </th>
+        ))}
+      </tr>
+    </thead>
+  );
+}
+
+// Shared by the Fields table and the input sections so their columns line up.
+function FieldsColGroup() {
+  return (
+    <colgroup>
+      <col className="w-12" />
+      <col className="w-[32%]" />
+      <col className="w-[18%]" />
+      <col />
+      <col className="w-[84px]" />
+    </colgroup>
+  );
+}
+
+function FieldGroupRow({ label, count }: { label: string; count?: number }) {
+  return (
+    <tr>
+      <td
+        colSpan={FIELD_COLUMNS.length}
+        className="px-3 py-1.5 bg-slate-50 dark:bg-slate-950 text-sm font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200/80 dark:border-slate-800"
+      >
+        {label}
+        {count !== undefined && <span className="ml-2 font-semibold text-slate-400 tabular-nums">{count}</span>}
+      </td>
+    </tr>
+  );
+}
+
+function FieldLabelCell({ label, token, isMissing, required, modified }: {
+  label: string;
+  token: string;
+  isMissing: boolean;
+  required?: boolean;
+  modified?: boolean;
+}) {
+  return (
+    <td className={FIELD_TD}>
+      <div className="flex items-center gap-2 min-w-0">
+        {isMissing && <AlertCircle className={cn('w-4 h-4 shrink-0', required ? 'text-rose-500' : 'text-amber-500')} />}
+        {/* Label only - the {{token}} is in the tooltip, not taking a line. */}
+        <span className={cn('font-semibold truncate', isMissing && required ? 'text-rose-900 dark:text-rose-200' : 'text-slate-800 dark:text-slate-100')} title={`${label} - ${token}`}>
+          {label}
+        </span>
+        {modified && (
+          <Badge variant="outline" className="text-xs uppercase font-bold tracking-wider h-5 px-1.5 rounded shrink-0 bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/20 dark:text-indigo-300 dark:border-indigo-500/30">
+            Modified
+          </Badge>
+        )}
+      </div>
+    </td>
+  );
+}
+
+const SOURCE_BADGE = 'px-2 py-0.5 rounded-md text-sm font-medium truncate max-w-full inline-block border';
+
+// A letter-only field (Letters tab) as a row of the same table - typed in,
+// so the value cell is the input itself. Kept in page state for the letter
+// only, never written to the employment offer.
+function LetterFieldRow({ index, field, value, onChange }: {
+  index: number;
+  field: LetterField;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const isMissing = !value.trim();
+  return (
+    <tr className={cn('transition-colors', fieldRowClass(index, isMissing ? 'amber' : undefined))}>
+      <td className={cn(FIELD_TD, 'text-center text-slate-400 tabular-nums font-medium')}>{index + 1}</td>
+      <FieldLabelCell label={field.label} token={`{{${field.key}}}`} isMissing={isMissing} />
+      <td className={FIELD_TD}>
+        <span
+          className={cn(SOURCE_BADGE, 'bg-indigo-50 text-indigo-700 border-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:border-indigo-800')}
+          title={field.linked
+            ? "Prefilled from the template placeholder's master field - edit to override for this letter only"
+            : 'Typed in for this letter only - not saved to any record'}
+        >
+          {field.linked ? 'Master field' : 'Letter input'}
+        </span>
+      </td>
+      <td className={FIELD_TD}>
+        {field.type === 'textarea' ? (
+          <Textarea
+            rows={2}
+            value={value}
+            placeholder={field.placeholder}
+            onChange={(e) => onChange(e.target.value)}
+            className="text-base px-3 py-2 resize-none rounded-md border-slate-200 bg-white dark:bg-slate-950 min-h-0"
+          />
+        ) : (
+          <Input
+            type={field.type === 'date' ? 'date' : field.type === 'number' ? 'number' : 'text'}
+            value={value}
+            placeholder={field.placeholder}
+            onChange={(e) => onChange(e.target.value)}
+            className="h-9 text-base px-3 rounded-md border-slate-200 bg-white dark:bg-slate-950"
+          />
+        )}
+      </td>
+      <td className={cn(FIELD_TD, 'border-r-0')} />
+    </tr>
+  );
+}
+
 function PlaceholderRow({
+  index,
   placeholder: p,
   value,
   overrideValue,
@@ -621,6 +873,7 @@ function PlaceholderRow({
   onOverride,
   onRefresh
 }: {
+  index: number;
   placeholder: EcPlaceholder;
   value: string;
   overrideValue: string | undefined;
@@ -634,50 +887,26 @@ function PlaceholderRow({
 }) {
   const effectiveVal = overrideValue ?? value;
   const sourceLabel = getSourceLabel(p, masterFields);
+  // Linked to more than one master field - the value cell becomes the
+  // source picker (TemplateGenerationDialog's multi-source design).
+  const linkedIds = linkedMasterFieldIds(p);
+  const multiSource = linkedIds.length > 1 && p.type !== 'image' && p.type !== 'boolean';
+  // Save-to-source editing (pencil) takes over this row's value cell - never
+  // a second input squeezed into the actions column.
+  const [editingFieldId, setEditingFieldId] = useState<number | null>(null);
 
   return (
-    <div className={cn(
-      "grid grid-cols-1 md:grid-cols-[35%_20%_1fr] gap-4 p-5 items-center transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40 group relative overflow-hidden",
-      isMissing && p.required ? "bg-rose-50/30 dark:bg-rose-900/10" : ""
-    )}>
-      
-      {/* Visual Status Indicator (Left Bar) */}
-      <div className={cn(
-        "absolute left-0 top-0 bottom-0 w-[3px]",
-        isMissing ? (p.required ? "bg-rose-500" : "bg-amber-400") :
-        isOverridden ? "bg-indigo-500" : "bg-transparent"
-      )} />
+    <tr className={cn('transition-colors', fieldRowClass(index, isMissing ? (p.required ? 'rose' : 'amber') : undefined))}>
+      {/* An overridden value is marked on the # cell's left edge. */}
+      <td className={cn(FIELD_TD, 'text-center text-slate-400 tabular-nums font-medium', isOverridden && !isMissing && 'shadow-[inset_3px_0_0_0_#6366f1]')}>
+        {index + 1}
+      </td>
 
-      {/* Column 1: Field Label & Status */}
-      <div className="flex flex-col gap-1 pr-2 pl-2">
-        <div className="flex items-center gap-2">
-          {isMissing && (
-            <AlertCircle className={cn(
-              "w-4 h-4 shrink-0", 
-              p.required ? "text-rose-500 animate-pulse" : "text-amber-500"
-            )} />
-          )}
-          <Label className={cn(
-            "text-sm font-semibold truncate",
-            isMissing && p.required ? "text-rose-900 dark:text-rose-200" : "text-slate-700 dark:text-slate-200"
-          )} title={p.label}>
-            {p.label}
-          </Label>
-        </div>
-        <div className="flex gap-2">
-          {isOverridden && (
-            <Badge variant="outline" className="text-[10px] uppercase font-bold tracking-wider h-5 px-1.5 rounded bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/20 dark:text-indigo-300 dark:border-indigo-500/30">
-              Modified
-            </Badge>
-          )}
-          <span className="text-xs text-slate-400 font-mono">{`{{${p.key}}}`}</span>
-        </div>
-      </div>
+      <FieldLabelCell label={p.label} token={`{{${p.key}}}`} isMissing={isMissing} required={p.required} modified={isOverridden} />
 
-      {/* Column 2: Data Source Tag */}
-      <div className="hidden md:flex items-center">
+      <td className={FIELD_TD}>
         <span className={cn(
-          "px-2.5 py-1 rounded-md text-xs font-medium truncate max-w-full inline-flex items-center gap-1.5 border",
+          SOURCE_BADGE,
           p.source_kind === 'master_field' ? "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700" :
           p.source_kind === 'settings_cascade' ? "bg-sky-50 text-sky-700 border-sky-100 dark:bg-sky-900/30 dark:text-sky-300 dark:border-sky-800" :
           p.source_kind === 'offer' ? "bg-purple-50 text-purple-700 border-purple-100 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-800" :
@@ -686,67 +915,75 @@ function PlaceholderRow({
         )} title={sourceLabel}>
           {sourceLabel}
         </span>
-      </div>
+      </td>
 
-      {/* Column 3: Value Control */}
-      <div className="flex items-center gap-3">
-        {p.editable ? (
+      <td className={FIELD_TD}>
+        {editingFieldId != null ? (
+          <SourceValueEditor
+            placeholder={p}
+            masterFieldId={editingFieldId}
+            masterFields={masterFields}
+            individualId={employee?.individualId}
+            companyId={companyId}
+            // A single-link placeholder's resolved value IS that field's
+            // value; otherwise SourceValueEditor fetches the field's own.
+            initialValue={linkedIds.length === 1 ? value : undefined}
+            onDone={() => setEditingFieldId(null)}
+            onSaved={onRefresh}
+          />
+        ) : multiSource ? (
+          <MultiSourceValueControl
+            placeholder={p}
+            masterFields={masterFields}
+            individualId={employee?.individualId}
+            companyId={companyId}
+            value={value}
+            overrideValue={overrideValue}
+            onOverride={p.editable ? onOverride : undefined}
+            onSaved={onRefresh}
+          />
+        ) : p.editable ? (
           <Input
             className={cn(
-              "h-11 text-[15px] px-3.5 transition-all rounded-lg flex-1 border-transparent hover:border-slate-300 focus:border-indigo-500 shadow-none focus:shadow-sm bg-slate-50 dark:bg-slate-950 dark:hover:border-slate-700",
-              isOverridden && "border-indigo-200 bg-indigo-50/30 text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-900/10 dark:text-indigo-100",
-              isMissing && (p.required
-                ? "border-rose-200 bg-rose-50/50 dark:border-rose-900/50 dark:bg-rose-900/10"
-                : "border-amber-200 bg-amber-50/50 dark:border-amber-900/50 dark:bg-amber-900/10")
+              "h-9 text-base px-3 rounded-md border-slate-200 bg-white dark:bg-slate-950 dark:border-slate-700",
+              isOverridden && "border-indigo-200 bg-indigo-50/40 text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-900/10 dark:text-indigo-100"
             )}
             value={effectiveVal}
             onChange={(e) => onOverride(e.target.value)}
             placeholder={p.required ? "Value is required..." : "Optional / Leave blank"}
           />
+        ) : effectiveVal ? (
+          <span className="block truncate" title={effectiveVal}>{effectiveVal}</span>
         ) : (
-          <div className={cn(
-            "flex-1 min-h-[44px] flex items-center px-3.5 rounded-lg",
-            isMissing
-              ? (p.required ? "bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400" : "bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400")
-              : "bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200"
-          )}>
-            <span className="text-[15px] truncate">
-              {effectiveVal || (
-                <span className="italic opacity-70">
-                  {p.required ? 'Missing (Required)' : 'No value computed'}
-                </span>
-              )}
-            </span>
-          </div>
+          <span className={cn('italic', p.required ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400')}>
+            {p.required ? 'Missing (Required)' : 'No value computed'}
+          </span>
         )}
+      </td>
 
-        {/* Supplementary Actions */}
-        <div className="flex items-center justify-end shrink-0 w-[80px] gap-1">
-          {p.source_kind === 'master_field' && (
+      <td className={cn(FIELD_TD, 'border-r-0')}>
+        <div className="flex items-center justify-end gap-1">
+          {p.source_kind === 'master_field' && !multiSource && editingFieldId == null && (
             <MasterFieldEditControl
               placeholder={p}
               masterFields={masterFields}
               individualId={employee?.individualId}
               companyId={companyId}
-              currentValue={value}
-              onSaved={onRefresh}
+              onStartEdit={setEditingFieldId}
             />
           )}
-
-          {p.editable && isOverridden ? (
+          {p.editable && isOverridden && (
             <button
               type="button"
               title="Revert to computed default"
               onClick={() => onOverride(undefined)}
-              className="w-9 h-9 flex items-center justify-center rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-900/30 dark:hover:border-rose-900/50 transition-colors shadow-sm"
+              className="w-8 h-8 flex items-center justify-center rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-colors"
             >
               <RotateCcw className="w-4 h-4" />
             </button>
-          ) : (
-            <div className="w-9 h-9" /> // Spacer for alignment consistency
           )}
         </div>
-      </div>
-    </div>
+      </td>
+    </tr>
   );
 }

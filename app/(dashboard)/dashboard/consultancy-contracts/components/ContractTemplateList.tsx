@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ComponentProps } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +20,12 @@ import { ContractTemplateDialog } from './ContractTemplateDialog';
 interface ContractTemplateListProps {
   documentId: string;
   documentDisplayName: string;
+  // Reuse options - Employment Contracts' Letter Templates tab lists letter
+  // templates with this same component. Defaults are Consultancy's own.
+  noun?: string; // "contract type" / "letter type"
+  // Creates a new variant (default: a blank one via createTemplateVariant).
+  createVariant?: (documentId: string, name: string) => Promise<{ id: string } | null>;
+  dialogProps?: Pick<ComponentProps<typeof ContractTemplateDialog>, 'belongsToLabel' | 'showCompanyRoleField' | 'defaultEntityType'>;
 }
 
 // Replaces the always-visible template/placeholders editor panels that used
@@ -28,7 +34,7 @@ interface ContractTemplateListProps {
 // so this shows them as a list first, matching LettersPage's own
 // TemplateDisplayArea + DocumentTemplateManager dialog pattern. Editing one
 // variant's content/placeholders happens in ContractTemplateDialog.
-export function ContractTemplateList({ documentId, documentDisplayName }: ContractTemplateListProps) {
+export function ContractTemplateList({ documentId, documentDisplayName, noun = 'contract type', createVariant = createTemplateVariant, dialogProps }: ContractTemplateListProps) {
   const { toast } = useToast();
   const [templates, setTemplates] = useState<CcTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,7 +62,7 @@ export function ContractTemplateList({ documentId, documentDisplayName }: Contra
     if (!newName.trim()) return;
     setCreating(true);
     try {
-      const created = await createTemplateVariant(documentId, newName.trim());
+      const created = await createVariant(documentId, newName.trim());
       if (!created) {
         toast({ title: 'Failed to create template', variant: 'destructive' });
         return;
@@ -91,12 +97,12 @@ export function ContractTemplateList({ documentId, documentDisplayName }: Contra
     <Card className="h-full flex flex-col rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
       <CardHeader className="flex flex-row items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4 shrink-0">
         <div>
-          <CardTitle className="text-base font-bold text-slate-800 dark:text-slate-100">{documentDisplayName}</CardTitle>
-          <CardDescription className="text-xs text-slate-400">Template variants for this contract type.</CardDescription>
+          <CardTitle className="text-base font-semibold text-slate-800 dark:text-slate-100">{documentDisplayName}</CardTitle>
+          <CardDescription className="text-sm text-slate-400">Template variants for this {noun}. The default one is used for generation.</CardDescription>
         </div>
         <Button
           onClick={() => setCreateDialogOpen(true)}
-          className="h-9 px-4 rounded-full bg-custom-blue hover:bg-custom-blue/90 text-white text-xs font-bold gap-1.5"
+          className="h-9 px-4 rounded-full bg-custom-blue hover:bg-custom-blue/90 text-white text-sm font-bold gap-1.5"
         >
           <PlusCircle className="h-4 w-4" /> Create New
         </Button>
@@ -111,8 +117,8 @@ export function ContractTemplateList({ documentId, documentDisplayName }: Contra
           <div className="h-full flex items-center justify-center text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
             <div>
               <FileText className="h-10 w-10 mx-auto mb-3 text-slate-300" />
-              <h3 className="text-sm font-semibold text-slate-600 dark:text-slate-300">No templates yet</h3>
-              <p className="text-xs text-slate-400 mt-1">Create the first one to get started.</p>
+              <h3 className="text-base font-semibold text-slate-600 dark:text-slate-300">No templates yet</h3>
+              <p className="text-sm text-slate-400 mt-1">Create the first one to get started.</p>
             </div>
           </div>
         ) : (
@@ -121,25 +127,25 @@ export function ContractTemplateList({ documentId, documentDisplayName }: Contra
               {templates.map((template) => (
                 <Card key={template.id} className="border border-slate-100 dark:border-slate-800 rounded-xl shadow-sm hover:shadow-md transition-shadow">
                   <CardHeader className="p-4">
-                    <CardTitle className="flex justify-between items-center text-sm font-bold text-slate-800 dark:text-slate-100">
+                    <CardTitle className="flex justify-between items-center text-base font-semibold text-slate-800 dark:text-slate-100">
                       <span className="flex items-center gap-2 min-w-0">
                         <span className="truncate">{template.file_name}</span>
                         {template.is_default && (
-                          <Badge variant="outline" className="text-[9px] shrink-0 bg-amber-50 text-amber-700 border-amber-200 gap-1">
+                          <Badge variant="outline" className="text-sm shrink-0 bg-amber-50 text-amber-700 border-amber-200 gap-1">
                             <Star className="w-2.5 h-2.5 fill-amber-500 text-amber-500" /> Default
                           </Badge>
                         )}
                       </span>
                       <div className="flex gap-1.5 shrink-0">
                         <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full text-slate-400 hover:text-custom-blue" onClick={() => setEditingTemplateId(template.id)} title="Edit">
-                          <Pencil className="h-3.5 w-3.5" />
+                          <Pencil className="h-4 w-4" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full text-slate-400 hover:text-red-600" onClick={() => setDeletingTemplate(template)} title="Delete">
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </CardTitle>
-                    <CardDescription className="text-xs text-slate-400 pt-1">
+                    <CardDescription className="text-sm text-slate-400 pt-1">
                       {template.placeholders?.length || 0} placeholder{template.placeholders?.length === 1 ? '' : 's'}
                     </CardDescription>
                   </CardHeader>
@@ -203,6 +209,7 @@ export function ContractTemplateList({ documentId, documentDisplayName }: Contra
           templateId={editingTemplateId}
           documentId={documentId}
           onSaved={refresh}
+          {...dialogProps}
         />
       )}
     </Card>

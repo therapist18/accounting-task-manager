@@ -1,10 +1,29 @@
 // Employment letters (resignation, termination, dismissal, ...) - the
-// "other side" of employment next to contract generation. Templates live in
-// code for now (body markup + the fields each letter asks for); they use the
-// same {{token}} syntax as contract clauses, but are resolved by
-// renderLetterHtml below instead of the clause/placeholder engine, since a
-// letter is a single self-contained document rather than an assembly of
-// library clauses.
+// "other side" of employment next to contract generation.
+//
+// A letter type is an acc_portal_kyc row (letterDocumentTypes.ts) and its
+// templates are acc_portal_templates rows - the SAME records consultancy
+// contract templates are, managed with the same modules
+// (consultancy-contracts' ContractTypesSidebar / ContractTemplateList /
+// ContractTemplateDialog, hosted by the Job Profiles page's Letter Templates
+// tab). A template's content is the whole letter (date, addressee, RE: line,
+// body, sign-off - the letterhead comes from the theme) and its placeholders
+// column is edited with the shared PlaceholderPanel, so a token can be linked
+// to master fields like any other template.
+//
+// In the Employment Contracts workspace (ContractEditor's Letters tab +
+// ContractPreview) a letter is filled from:
+//   1. employee/company basics (LetterContext) - lowest
+//   2. the same value map as the contract (EC placeholders, master fields,
+//      Contract Fields overrides)
+//   3. letter fields: every other token - prefilled from its master field
+//      link if the template's placeholder has one, otherwise typed in.
+//
+// STANDARD_LETTERS below are the standard set: the seed content
+// "Add standard letters" writes, and the fallback the workspace renders from
+// when no letter types exist yet.
+
+import type { Placeholder } from '../../templates/document-template-manager/types';
 
 export type LetterTypeKey =
   | 'resignation'
@@ -24,24 +43,44 @@ export interface LetterField {
   type: LetterFieldType;
   placeholder?: string;
   defaultValue?: string;
+  // Prefilled from a master field link (vs typed in from scratch).
+  linked?: boolean;
 }
 
-export interface LetterTemplate {
+export type LetterAuthor = 'employee' | 'employer';
+
+// The wording of a standard letter (and of letter templates saved before
+// templates held the whole document) - turned into full template content by
+// buildLetterDocument.
+interface LetterParts {
+  author: LetterAuthor;
+  subject: string;
+  body: string;
+}
+
+interface StandardLetterDef extends LetterParts {
   key: LetterTypeKey;
   title: string;
   description: string;
-  // Who authors the letter: 'employee' letters are addressed to the company
-  // and signed by the employee; 'employer' letters are addressed to the
-  // employee and signed by the company signatory.
-  author: 'employee' | 'employer';
   fields: LetterField[];
-  // Body paragraphs/lists only - the letterhead, date, addressee, subject and
-  // sign-off are added around it by renderLetterHtml.
-  body: string;
-  subject: string;
 }
 
-// Values the app already knows - never asked for in the form.
+// A letter the workspace can render: a template's content + placeholders,
+// under the letter type it belongs to.
+export interface LetterTemplate {
+  // acc_portal_kyc id for a DB letter type, the standard key for the code
+  // fallback set.
+  key: string;
+  // acc_portal_kyc id the generated letter is filed under in the employee's
+  // registry record - null for the code fallback set (nothing to file under).
+  documentId?: string | null;
+  title: string;
+  description: string;
+  content: string;
+  placeholders: Placeholder[];
+}
+
+// Values the app already knows from the selected employee and company.
 export interface LetterContext {
   employee_name: string;
   employee_number: string;
@@ -53,10 +92,34 @@ export interface LetterContext {
   signatory_name: string;
 }
 
+export const LETTER_CONTEXT_LABELS: Record<keyof LetterContext, string> = {
+  employee_name: 'Employee Name',
+  employee_number: 'Employee No.',
+  national_id: 'National ID',
+  job_title: 'Job Title',
+  department: 'Department',
+  start_date: 'Start Date',
+  company_name: 'Company',
+  signatory_name: 'Signatory',
+};
+
+const CONTEXT_ENTITY: Record<keyof LetterContext, 'employee' | 'company'> = {
+  employee_name: 'employee',
+  employee_number: 'employee',
+  national_id: 'employee',
+  job_title: 'employee',
+  department: 'employee',
+  start_date: 'employee',
+  company_name: 'company',
+  signatory_name: 'company',
+};
+
+export const isLetterContextKey = (key: string): key is keyof LetterContext => key in LETTER_CONTEXT_LABELS;
+
 const DATE_FIELD = (key: string, label: string): LetterField => ({ key, label, type: 'date' });
 const LETTER_DATE: LetterField = { ...DATE_FIELD('letter_date', 'Letter date'), defaultValue: 'today' };
 
-export const LETTER_TEMPLATES: LetterTemplate[] = [
+const STANDARD_LETTER_DEFS: StandardLetterDef[] = [
   {
     key: 'resignation',
     title: 'Resignation Letter',
@@ -220,94 +283,229 @@ export const LETTER_TEMPLATES: LetterTemplate[] = [
   },
 ];
 
-export function getLetterTemplate(key: LetterTypeKey): LetterTemplate {
-  return LETTER_TEMPLATES.find((t) => t.key === key) || LETTER_TEMPLATES[0];
+const humanize = (key: string) =>
+  key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+const TOKEN_RE = /\{\{\s*(\w+)\s*\}\}/g;
+
+// Every token in a piece of content, in order of first appearance, with
+// {{x_paragraph}} counted as x.
+function tokensIn(content: string): string[] {
+  return Array.from(new Set(Array.from(content.matchAll(TOKEN_RE), (m) => m[1].replace(/_paragraph$/, ''))));
 }
 
-// Optional-paragraph tokens: {{x_paragraph}} renders <p>{{x}}</p> only when x
-// has a value, so an optional field left blank doesn't leave an empty gap.
+// RE: lines are upper-cased in the document, but not the {{tokens}} inside them.
+const upperOutsideTokens = (s: string) =>
+  s.split(/(\{\{\s*\w+\s*\}\})/).map((part, i) => (i % 2 ? part : part.toUpperCase())).join('');
+
+// Full template content for a letter's parts - addressee/date header, RE:
+// line, body, sign-off. Used to seed standard letters and to convert letter
+// templates saved before templates held the whole document.
+export function buildLetterDocument({ author, subject, body }: LetterParts): string {
+  const re = subject.trim() ? `<p><strong>RE: ${upperOutsideTokens(subject)}</strong></p>` : '';
+  if (author === 'employee') {
+    return [
+      '<p>{{employee_name}}<br>{{job_title}}</p>',
+      '<p>{{letter_date}}</p>',
+      '<p>The Human Resources Manager<br><strong>{{company_name}}</strong></p>',
+      re,
+      body.trim(),
+      '<p>Yours faithfully,</p>',
+      '<p></p>',
+      '<p><strong>{{employee_name}}</strong></p>',
+    ].filter(Boolean).join('\n');
+  }
+  return [
+    '<p>{{letter_date}}</p>',
+    '<p>{{employee_name}}<br>Employee No: {{employee_number}}<br>{{job_title}}, {{department}}</p>',
+    re,
+    body.trim(),
+    '<p>Yours sincerely,</p>',
+    '<p></p>',
+    '<p><strong>{{signatory_name}}</strong><br>For and on behalf of {{company_name}}</p>',
+    '<p>Acknowledgement of receipt:</p>',
+    '<p>Name: {{employee_name}} &nbsp;&nbsp; Signature: ____________________ &nbsp;&nbsp; Date: ______________</p>',
+  ].filter(Boolean).join('\n');
+}
+
+// Placeholders for a letter's content, in the shape the PlaceholderPanel's
+// Re-scan produces - labelled/typed from the letter's field definitions,
+// scoped to the employee or company, none linked to master fields yet
+// (employee/company basics come from LetterContext; anything else can be
+// linked from the Placeholders panel). A long-text field keeps a
+// letter_input marker so the workspace still offers a multi-line box.
+export function lettersFieldsToPlaceholders(fields: LetterField[], content: string, existing: Placeholder[] = []): Placeholder[] {
+  const fieldByKey = new Map(fields.map((f) => [f.key, f]));
+  const existingByName = new Map(existing.map((p) => [p.name, p]));
+  return tokensIn(content).map((name) => {
+    const prior = existingByName.get(name);
+    if (prior) return prior;
+    const field = fieldByKey.get(name) || (name === 'letter_date' ? LETTER_DATE : undefined);
+    const ctxKey = name as keyof LetterContext;
+    const type = field?.type === 'date' || name.endsWith('_date') ? 'date' : field?.type === 'number' ? 'number' : 'text';
+    return {
+      id: `letter_${name}`,
+      name,
+      type,
+      display_value: field?.label || LETTER_CONTEXT_LABELS[ctxKey] || humanize(name),
+      description: field?.placeholder,
+      required: true,
+      entity_type: [CONTEXT_ENTITY[ctxKey] || 'employee'],
+      master_field_ids: [],
+      linked_job_question_ids: [],
+      linked_requirement_ids: [],
+      default_value: field?.defaultValue || '',
+      ...(field?.type === 'textarea' && { letter_input: 'textarea' }),
+    } as Placeholder;
+  });
+}
+
+export const STANDARD_LETTERS: LetterTemplate[] = STANDARD_LETTER_DEFS.map((def) => {
+  const content = buildLetterDocument(def);
+  return {
+    key: def.key,
+    documentId: null,
+    title: def.title,
+    description: def.description,
+    content,
+    placeholders: lettersFieldsToPlaceholders(def.fields, content),
+  };
+});
+
+// What the workspace renders before any letter type exists in the DB.
+export const LETTER_TEMPLATES = STANDARD_LETTERS;
+
+// The standard letter a DB letter type corresponds to, matched on its name -
+// supplies seed content and the description.
+export function findStandardLetter(name: string | null | undefined): LetterTemplate | null {
+  const n = (name || '').trim().toLowerCase();
+  return STANDARD_LETTERS.find((t) => t.title.toLowerCase() === n) || null;
+}
+
+// Placeholders with a master field link - resolved from the employee/company
+// records in the workspace (useEmploymentLetters).
+export function linkedLetterPlaceholders(template: Pick<LetterTemplate, 'placeholders'>): Placeholder[] {
+  return (template.placeholders || []).filter((p) => (p.master_field_ids || []).length > 0);
+}
+
+// Every token the letter uses - what the Letters tab scopes the Contract
+// Fields panel to.
+export function letterTokenKeys(template: Pick<LetterTemplate, 'content'>): string[] {
+  return tokensIn(template.content || '');
+}
+
+// The letter fields (Letters tab "Letter" group): every token that isn't a
+// LetterContext value and isn't resolved by the contract value map
+// (`resolvedElsewhere` - EC placeholders + standard values). Label/type/
+// default come from the template's placeholder of the same name; a token the
+// template has no placeholder for (not re-scanned yet) is a plain text field.
+// letter_date first since the header uses it.
+export function letterFieldsFor(
+  template: Pick<LetterTemplate, 'content' | 'placeholders'>,
+  resolvedElsewhere: Set<string> = new Set()
+): LetterField[] {
+  const byName = new Map((template.placeholders || []).map((p) => [p.name, p]));
+  const keys = tokensIn(template.content || '').filter((k) => !isLetterContextKey(k) && !resolvedElsewhere.has(k));
+  keys.sort((a, b) => (a === 'letter_date' ? -1 : b === 'letter_date' ? 1 : 0));
+  return keys.map((key): LetterField => {
+    const p = byName.get(key);
+    if (!p) return key === 'letter_date' ? LETTER_DATE : { key, label: humanize(key), type: key.endsWith('_date') ? 'date' : 'text' };
+    const type: LetterFieldType = (p as any).letter_input === 'textarea' ? 'textarea'
+      : p.type === 'date' ? 'date'
+      : p.type === 'number' ? 'number'
+      : 'text';
+    return {
+      key,
+      label: p.display_value || humanize(key),
+      type,
+      placeholder: p.description || undefined,
+      defaultValue: p.default_value || (key === 'letter_date' ? 'today' : undefined),
+      linked: (p.master_field_ids || []).length > 0,
+    };
+  });
+}
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 export function formatLetterDate(iso: string): string {
-  if (!iso) return '';
+  if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return iso;
   const d = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-function formatValue(field: LetterField | undefined, raw: string): string {
+function formatValue(field: LetterField, raw: string): string {
   if (!raw) return '';
-  if (field?.type === 'date') return formatLetterDate(raw);
+  if (field.type === 'date') return formatLetterDate(raw);
   const safe = escapeHtml(raw);
-  return field?.type === 'textarea' ? safe.replace(/\n/g, '<br/>') : safe;
+  return field.type === 'textarea' ? safe.replace(/\n/g, '<br/>') : safe;
 }
 
 export interface RenderLetterOptions {
-  // Preview shows "[Label]" for a missing required fact so it's visible what
+  // Preview shows "[Label]" for an empty letter field so it's visible what
   // still needs filling in; the exported document shows a blank line instead,
   // never an internal field name (same split as ContractPreview).
   forExport: boolean;
 }
 
+// The template content with only the letter `fields` filled in. Every other
+// {{token}} (employee, company, signatory, any EC placeholder) is left for
+// ContractPreview to resolve with the contract's value map, after the theme
+// is applied - so the theme's letterhead tokens resolve too.
+// {{x_paragraph}} renders <p>x</p> only when field x has a value.
 export function renderLetterHtml(
-  template: LetterTemplate,
+  template: Pick<LetterTemplate, 'content'>,
   values: Record<string, string>,
-  ctx: LetterContext,
+  fields: LetterField[],
   { forExport }: RenderLetterOptions
 ): string {
-  const labels: Record<string, string> = {
-    employee_name: 'Employee Name', job_title: 'Job Title', start_date: 'Start Date',
-    company_name: 'Company', employee_number: 'Employee No.', national_id: 'National ID',
-    department: 'Department', signatory_name: 'Signatory',
-  };
-  const fieldByKey = new Map(template.fields.map((f) => [f.key, f]));
-  for (const f of template.fields) labels[f.key] = f.label;
+  const fieldByKey = new Map(fields.map((f) => [f.key, f]));
+  const missing = (f: LetterField) =>
+    `<span class="ph-entity-missing">${forExport ? '_________________' : `[${escapeHtml(f.label)}]`}</span>`;
 
-  const missing = (key: string) =>
-    `<span class="ph-entity-missing">${forExport ? '_________________' : `[${escapeHtml(labels[key] || key)}]`}</span>`;
+  const html = (template.content || '')
+    .replace(/\{\{\s*(\w+?)_paragraph\s*\}\}/g, (m, key) => {
+      const f = fieldByKey.get(key);
+      if (!f) return m;
+      const v = formatValue(f, values[key] || '');
+      return v ? `<p>${v}</p>` : '';
+    })
+    .replace(TOKEN_RE, (m, key) => {
+      const f = fieldByKey.get(key);
+      return f ? formatValue(f, values[key] || '') || missing(f) : m;
+    });
+  return `<section id="section-letter">\n${html}\n</section>`;
+}
 
-  const resolve = (key: string): string => {
-    if (key in ctx) {
-      const raw = (ctx as any)[key] as string;
-      const v = key === 'start_date' ? formatLetterDate(raw) : escapeHtml(raw || '');
-      return v || missing(key);
-    }
-    const v = formatValue(fieldByKey.get(key), values[key] || '');
-    return v || missing(key);
-  };
+// Employee/company basics, straight from the selected employee and company -
+// only applied where the contract value map has nothing for the key.
+export function letterContextValues(ctx: LetterContext): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(ctx)) {
+    if (!value) continue;
+    out[key] = key === 'start_date' ? formatLetterDate(value) : escapeHtml(value);
+  }
+  return out;
+}
 
-  const fill = (html: string) =>
-    html
-      .replace(/\{\{(\w+?)_paragraph\}\}/g, (_m, key) => {
-        const v = formatValue(fieldByKey.get(key), values[key] || '');
-        return v ? `<p>${v}</p>` : '';
-      })
-      .replace(/\{\{(\w+)\}\}/g, (_m, key) => resolve(key));
+// A template saved before templates held the whole letter: body-only content
+// plus classification.letter { author, subject, fields }. Converted to a full
+// document + placeholders (in memory by the store, and persisted when its
+// letter type is opened in the Letter Templates tab).
+export function isLegacyLetterRow(row: { classification?: Record<string, any> | null }): boolean {
+  return !!row.classification?.letter;
+}
 
-  const letterDate = fill('{{letter_date}}');
-  const subject = fill(template.subject);
-  const isEmployeeAuthor = template.author === 'employee';
-
-  const header = isEmployeeAuthor
-    ? `<p>${resolve('employee_name')}<br/>${resolve('job_title')}</p>
-       <p>${letterDate}</p>
-       <p>The Human Resources Manager<br/><strong>${resolve('company_name')}</strong></p>`
-    : `<p><strong>${resolve('company_name')}</strong></p>
-       <p>${letterDate}</p>
-       <p>${resolve('employee_name')}<br/>${ctx.employee_number ? `Employee No: ${escapeHtml(ctx.employee_number)}<br/>` : ''}${resolve('job_title')}${ctx.department ? `, ${escapeHtml(ctx.department)}` : ''}</p>`;
-
-  const signOff = isEmployeeAuthor
-    ? `<p>Yours faithfully,</p><br/><br/><p><strong>${resolve('employee_name')}</strong></p>`
-    : `<p>Yours sincerely,</p><br/><br/><p><strong>${resolve('signatory_name')}</strong><br/>For and on behalf of ${resolve('company_name')}</p>
-       <p style="margin-top:2em">Acknowledgement of receipt:<br/><br/>Name: ${resolve('employee_name')}&nbsp;&nbsp;&nbsp; Signature: ____________________&nbsp;&nbsp;&nbsp; Date: ______________</p>`;
-
-  return `<section id="section-letter">
-${header}
-<p><strong style="text-transform:uppercase">RE: ${subject}</strong></p>
-${fill(template.body)}
-${signOff}
-</section>`;
+export function convertLegacyLetter(row: { content?: string | null; placeholders?: Placeholder[] | null; classification?: Record<string, any> | null }) {
+  const letter = row.classification?.letter || {};
+  const content = buildLetterDocument({
+    author: letter.author === 'employee' ? 'employee' : 'employer',
+    subject: letter.subject || '',
+    body: row.content || '',
+  });
+  const placeholders = lettersFieldsToPlaceholders(Array.isArray(letter.fields) ? letter.fields : [], content, row.placeholders || []);
+  const { letter: _drop, ...classification } = row.classification || {};
+  return { content, placeholders, classification };
 }

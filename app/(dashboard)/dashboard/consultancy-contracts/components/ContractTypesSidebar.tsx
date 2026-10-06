@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,9 +16,23 @@ interface ContractTypesSidebarProps {
   onSelect: (documentId: string) => void;
   onCreate: (name: string) => Promise<void>;
   creating: boolean;
+  // Wording overrides so employment-contracts' letter settings can reuse this
+  // sidebar for letter types.
+  labels?: Partial<typeof DEFAULT_LABELS>;
+  footer?: ReactNode;
 }
 
-export function ContractTypesSidebar({ documentTypes, selectedDocumentId, onSelect, onCreate, creating }: ContractTypesSidebarProps) {
+const DEFAULT_LABELS = {
+  title: 'Contract Types',
+  addTooltip: 'Add a new contract type',
+  empty: 'No contract types yet - add one to get started.',
+  dialogTitle: 'New Contract Type',
+  dialogDescription: 'Creates a new document type (e.g. "Service Agreement", "Lease Agreement") with its own standard template, separate from every other contract type.',
+  namePlaceholder: 'e.g. Service Agreement',
+};
+
+export function ContractTypesSidebar({ documentTypes, selectedDocumentId, onSelect, onCreate, creating, labels: labelOverrides, footer }: ContractTypesSidebarProps) {
+  const labels = { ...DEFAULT_LABELS, ...labelOverrides };
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newName, setNewName] = useState('');
 
@@ -31,18 +45,18 @@ export function ContractTypesSidebar({ documentTypes, selectedDocumentId, onSele
 
   return (
     <div className="flex flex-col h-full border-r border-slate-200 dark:border-slate-800">
-      <div className="p-4 border-b border-slate-200 dark:border-slate-800 shrink-0 bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-900/50">
+      <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 shrink-0 bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-900/50">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+          <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
             <FileStack className="w-4 h-4 text-custom-blue" />
-            Contract Types
+            {labels.title}
           </h2>
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7 text-slate-400 hover:text-slate-700"
             onClick={() => setDialogOpen(true)}
-            title="Add a new contract type"
+            title={labels.addTooltip}
           >
             <Plus className="h-4 w-4" />
           </Button>
@@ -50,7 +64,7 @@ export function ContractTypesSidebar({ documentTypes, selectedDocumentId, onSele
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="p-2 space-y-1">
+        <div className="px-3 py-3 space-y-0.5">
           {documentTypes.map((doc) => {
             const isSelected = selectedDocumentId === doc.id;
             return (
@@ -58,7 +72,7 @@ export function ContractTypesSidebar({ documentTypes, selectedDocumentId, onSele
                 key={doc.id}
                 onClick={() => onSelect(doc.id)}
                 className={cn(
-                  "flex items-center w-full p-2.5 text-sm rounded-lg transition-colors text-left",
+                  "flex items-center w-full px-3 py-2.5 text-base font-medium rounded-lg transition-colors text-left",
                   isSelected
                     ? "bg-custom-blue text-white font-medium shadow-sm"
                     : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -69,18 +83,18 @@ export function ContractTypesSidebar({ documentTypes, selectedDocumentId, onSele
             );
           })}
           {documentTypes.length === 0 && (
-            <p className="text-xs text-slate-400 px-2.5 py-4 text-center">No contract types yet - add one to get started.</p>
+            <p className="text-sm text-slate-400 px-2.5 py-4 text-center">{labels.empty}</p>
           )}
         </div>
       </ScrollArea>
 
+      {footer && <div className="p-3 border-t border-slate-200 dark:border-slate-800 shrink-0">{footer}</div>}
+
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>New Contract Type</DialogTitle>
-            <DialogDescription>
-              Creates a new document type (e.g. "Service Agreement", "Lease Agreement") with its own standard template, separate from every other contract type.
-            </DialogDescription>
+            <DialogTitle>{labels.dialogTitle}</DialogTitle>
+            <DialogDescription>{labels.dialogDescription}</DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">
             <Label htmlFor="new-contract-type-name">Name</Label>
@@ -88,7 +102,7 @@ export function ContractTypesSidebar({ documentTypes, selectedDocumentId, onSele
               id="new-contract-type-name"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="e.g. Service Agreement"
+              placeholder={labels.namePlaceholder}
               onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
               autoFocus
             />

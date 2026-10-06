@@ -19,7 +19,8 @@ import {
 import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
 import { EcJobProfile } from '../utils/jobProfileData';
 import { EmploymentOffer, createEmploymentOffer, updateEmploymentOffer } from '../utils/employmentOfferData';
-import { saveContractToIndividual } from '../utils/registryDocumentUpload';
+import { saveContractToIndividual, saveDocumentToIndividual } from '../utils/registryDocumentUpload';
+import { letterFieldsFor, letterContextValues, renderLetterHtml, type LetterTemplate } from '../utils/letterTemplates';
 import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
@@ -121,9 +122,12 @@ interface ContractPreviewProps {
   // per-contract override, so the design editor stays in sync with the EC
   // module's (same sidebar panel, same persistence path).
   onThemeChange?: (settings: ContractThemeSettings) => void;
+  // When set, the preview renders this letter (ContractEditor's Letters tab)
+  // instead of the contract - same employee, value map, theme and export.
+  letter?: { template: LetterTemplate; values: Record<string, string> } | null;
 }
 
-export function ContractPreview({ contractData, setContractData, selectedJobProfile, previewOnly, className, defaultTheme, onThemeChange }: ContractPreviewProps) {
+export function ContractPreview({ contractData, setContractData, selectedJobProfile, previewOnly, className, defaultTheme, onThemeChange, letter }: ContractPreviewProps) {
   const employee = contractData?.employee;
   const offer: Partial<EmploymentOffer> | undefined = contractData?.offer;
   const companyId = employee?.companyId;
@@ -245,8 +249,8 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     [employee, company, offer, effectiveSettings, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName, payrollStatutoryLine]
   );
 
-  const bodyHtml = useMemo(() => {
-    if (!employee) return '';
+  const contractBodyHtml = useMemo(() => {
+    if (!employee || letter) return '';
     return assembleContractHtml({
       sectionKeys: CONTRACT_SECTIONS.map((s) => s.key),
       clausesById,
@@ -255,7 +259,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
       employeePlaceholderValues: employeeValues,
       includeToc: showToc,
     });
-  }, [clausesById, effectiveClauses, effectiveSettings, employeeValues, employee, showToc]);
+  }, [clausesById, effectiveClauses, effectiveSettings, employeeValues, employee, showToc, letter]);
 
   // Same assembly, but for the actual submitted document (PDF/Word/the copy
   // saved to storage) rather than the on-screen editing preview -
@@ -265,8 +269,8 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   // what the employee actually receives. includeToc still follows the same
   // showToc toggle, so hiding the ToC in the preview hides it from the
   // export too.
-  const exportBodyHtml = useMemo(() => {
-    if (!employee) return '';
+  const contractExportBodyHtml = useMemo(() => {
+    if (!employee || letter) return '';
     return assembleContractHtml({
       sectionKeys: CONTRACT_SECTIONS.map((s) => s.key),
       clausesById,
@@ -276,7 +280,53 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
       includeToc: showToc,
       hideMissingClauses: true,
     });
-  }, [clausesById, effectiveClauses, effectiveSettings, exportEmployeeValues, employee, showToc]);
+  }, [clausesById, effectiveClauses, effectiveSettings, exportEmployeeValues, employee, showToc, letter]);
+
+  // Letters (ContractEditor's Letters tab) render from the SAME value map as
+  // the contract - every EC placeholder, master field and Contract Fields
+  // override applies to a letter too. renderLetterHtml only fills the
+  // letter-only fields nothing else resolves (keys absent from employeeValues),
+  // leaving every other {{token}} for replacePlaceholders below.
+  const letterFields = useMemo(
+    () => (letter ? letterFieldsFor(letter.template, new Set(Object.keys(employeeValues))) : []),
+    [letter, employeeValues]
+  );
+  const letterBodyHtml = useMemo(
+    () => (letter && employee ? renderLetterHtml(letter.template, letter.values, letterFields, { forExport: false }) : ''),
+    [letter, employee, letterFields]
+  );
+  const letterExportBodyHtml = useMemo(
+    () => (letter && employee ? renderLetterHtml(letter.template, letter.values, letterFields, { forExport: true }) : ''),
+    [letter, employee, letterFields]
+  );
+  const bodyHtml = letter ? letterBodyHtml : contractBodyHtml;
+  const exportBodyHtml = letter ? letterExportBodyHtml : contractExportBodyHtml;
+
+  // Employee/company basics a letter header uses (employee_name, job_title,
+  // company_name, ...) - only where the contract value map has nothing of its
+  // own for that key (absent, or still the missing-value marker).
+  const withLetterContext = (values: Record<string, string>): Record<string, string> => {
+    if (!letter || !employee) return values;
+    const ctx = letterContextValues({
+      employee_name: employee.fullName,
+      employee_number: employee.employeeNumber,
+      national_id: employee.nationalId,
+      job_title: employee.jobTitle,
+      department: employee.department,
+      start_date: employee.startDate,
+      company_name: company?.company_name || '',
+      signatory_name: signatoryName,
+    });
+    const out = { ...values };
+    for (const [key, value] of Object.entries(ctx)) {
+      if (!out[key] || out[key].includes('ph-entity-missing')) out[key] = value;
+    }
+    return out;
+  };
+
+  // What the generated file is called.
+  const documentTitle = letter ? letter.template.title : 'Employment Contract';
+  const fileSuffix = documentTitle.replace(/[^\w]+/g, '_');
 
   const themeSettings: ContractThemeSettings = themeOverride || defaultTheme || { ...DEFAULT_CONTRACT_THEME, ...(selectedJobProfile?.theme_settings || {}) };
 
@@ -287,8 +337,8 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const contentSignature = JSON.stringify({ employeeId: employee?.individualId, offer, jobProfileId: selectedJobProfile?.id, themeSettings });
   const isSaved = savedSignatureRef.current !== null && savedSignatureRef.current === contentSignature;
 
-  const mergedValues = { ...effectiveSettings, ...employeeValues };
-  const exportMergedValues = { ...effectiveSettings, ...exportEmployeeValues };
+  const mergedValues = withLetterContext({ ...effectiveSettings, ...employeeValues });
+  const exportMergedValues = withLetterContext({ ...effectiveSettings, ...exportEmployeeValues });
 
   const themedHtml = bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings), mergedValues) : '';
 
@@ -394,14 +444,14 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     // would double it on the first page.
     return {
       blob: buildWordDocBlob({
-        title: `${baseName} Employment Contract`,
+        title: `${baseName} ${documentTitle}`,
         html: bodyContent,
         css: `${themeCss}
   [class^="contract-theme-"] { padding: 0 !important; max-width: 100% !important; margin: 0 !important; }`,
         pageSize: '8.5in 11.7in',
         pageMargin: '0.5in',
       }),
-      fileName: `${baseName}_Employment_Contract.doc`,
+      fileName: `${baseName}_${fileSuffix}.doc`,
     };
   };
 
@@ -426,7 +476,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     const baseName = employee.fullName.replace(/\s+/g, '_');
     printElementAsPdf({
       element: viewerRef.current?.getPrintArea() ?? null,
-      fileName: `${baseName}_Employment_Contract`,
+      fileName: `${baseName}_${fileSuffix}`,
     }).catch((err) => {
       console.error('PDF generation failed', err);
     });
@@ -457,14 +507,43 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     }
   };
 
-  if (!employee || !selectedJobProfile) {
+  // A letter only needs the employee to be filed against; the contract also
+  // files/persists the employment offer, so they save differently. Letter
+  // types still only in code (no letter types in Letter Templates yet) have
+  // no registry document type to file under.
+  const letterDocumentId = letter?.template.documentId || null;
+  const letterSignature = letter
+    ? JSON.stringify({ employeeId: employee?.individualId, key: letter.template.key, values: letter.values, overrides: offer?.placeholder_overrides, themeSettings })
+    : null;
+  const isLetterSaved = !!letterSignature && savedSignatureRef.current === letterSignature;
+
+  const handleSaveLetter = async () => {
+    if (!letter || !letterDocumentId || isLetterSaved) return;
+    const output = buildOutput();
+    if (!output || !employee) return;
+    setIsSaving(true);
+    try {
+      const result = await saveDocumentToIndividual(employee.individualId, letterDocumentId, output.blob, `${employee.fullName.replace(/\s+/g, '_')}_${fileSuffix}`);
+      if (!result.success) throw new Error(result.error || 'Failed to file the letter');
+      savedSignatureRef.current = letterSignature;
+      toast.success(`${documentTitle} saved to ${employee.fullName}'s documents`);
+    } catch (err: any) {
+      toast.error(err.message || 'Error saving letter');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const saved = letter ? isLetterSaved : isSaved;
+
+  if (!employee || (!letter && !selectedJobProfile)) {
     return (
       <div className={className || "flex flex-col items-center justify-center h-full w-full min-w-0 text-slate-500 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm"}>
         <FileWarning className="w-12 h-12 mb-4 text-slate-300 dark:text-slate-700" />
         <h3 className="text-base font-medium text-slate-700 dark:text-slate-300">
           {!employee ? 'No Employee Selected' : 'No Job Profile Selected'}
         </h3>
-        <p className="text-sm mt-1 text-slate-500">Configure the basic terms to preview the document.</p>
+        <p className="text-base mt-1 text-slate-500">Configure the basic terms to preview the document.</p>
       </div>
     );
   }
@@ -477,17 +556,20 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
         ref={viewerRef}
         html={themedHtml}
         printHtml={exportThemedHtml}
-        contentKey={`${employee?.individualId}:${showToc}`}
+        contentKey={`${employee?.individualId}:${letter ? letter.template.key : showToc}`}
+        leading={letter ? <span className="text-sm font-medium text-slate-600 dark:text-slate-300 truncate">{documentTitle}</span> : undefined}
         className={className || "bg-slate-100/50 dark:bg-slate-900 shadow-inner"}
         loading={loadingContext}
         empty={
           <div className="flex flex-col items-center justify-center h-full text-slate-400">
             <FileWarning className="w-10 h-10 mb-3" />
-            <p className="text-sm">Nothing to preview yet.</p>
+            <p className="text-base">Nothing to preview yet.</p>
           </div>
         }
         actions={
           <>
+            {/* Contract-only toggles - a letter has no ToC or statutory table. */}
+            {!letter && (<>
             <button
               onClick={() => setShowToc((v) => !v)}
               title="Toggle table of contents"
@@ -512,6 +594,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
             >
               <Receipt className="w-4 h-4" />
             </button>
+            </>)}
             {/* Theme sidebar panel - shared by both modules so profile design
                 and per-contract customization stay synchronized. */}
             <button
@@ -537,19 +620,19 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
               <DropdownMenuTrigger asChild>
                 <button
                   disabled={!hasOutput || loadingContext}
-                  className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-xs font-medium bg-slate-50 border border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors shrink-0"
+                  className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-sm font-medium bg-slate-50 border border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors shrink-0"
                 >
-                  <Download className="w-3.5 h-3.5" />
+                  <Download className="w-4 h-4" />
                   Export
-                  <ChevronDown className="w-3 h-3 ml-0.5" />
+                  <ChevronDown className="w-3.5 h-3.5 ml-0.5" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-40 rounded-xl">
                 <DropdownMenuItem onClick={handleDownloadPdf} disabled={!hasOutput || loadingContext}>
-                  <FileDown className="w-3.5 h-3.5 mr-2 text-slate-400" /> PDF Document
+                  <FileDown className="w-4 h-4 mr-2 text-slate-400" /> PDF Document
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleDownloadWord} disabled={!hasOutput || loadingContext}>
-                  <FileText className="w-3.5 h-3.5 mr-2 text-slate-400" /> Word Document
+                  <FileText className="w-4 h-4 mr-2 text-slate-400" /> Word Document
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -564,23 +647,27 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
               <Button
                 size="sm"
                 className={cn(
-                  "h-8 px-4 text-xs font-medium shadow-md rounded-lg shrink-0",
-                  isSaved
+                  "h-8 px-4 text-sm font-medium shadow-md rounded-lg shrink-0",
+                  saved
                     ? "bg-emerald-600 hover:bg-emerald-600 text-white cursor-default"
                     : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white"
                 )}
-                onClick={handleSaveToDb}
-                disabled={!hasOutput || loadingContext || isSaving || isSaved}
-                title={isSaved ? 'Already generated for the current contract details' : undefined}
+                onClick={letter ? handleSaveLetter : handleSaveToDb}
+                disabled={!hasOutput || loadingContext || isSaving || saved || (!!letter && !letterDocumentId)}
+                title={
+                  saved ? `Already generated for the current ${letter ? 'letter' : 'contract'} details`
+                  : letter && !letterDocumentId ? 'Add this letter type in Letter Templates to file it to the employee\'s documents'
+                  : undefined
+                }
               >
                 {isSaving ? (
-                  <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
-                ) : isSaved ? (
-                  <CheckCircle2 className="w-3.5 h-3.5 mr-2" />
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : saved ? (
+                  <CheckCircle2 className="w-4 h-4 mr-2" />
                 ) : (
-                  <Save className="w-3.5 h-3.5 mr-2" />
+                  <Save className="w-4 h-4 mr-2" />
                 )}
-                {isSaved ? 'Saved' : 'Generate'}
+                {saved ? 'Saved' : 'Generate'}
               </Button>
             )}
           </>

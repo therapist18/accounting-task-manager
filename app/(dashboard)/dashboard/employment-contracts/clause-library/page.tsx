@@ -55,11 +55,11 @@ function ClauseCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className={cn("font-semibold text-slate-800 dark:text-slate-100 truncate flex items-center gap-1.5", compact ? "text-sm" : "text-base")}>
+          <p className={cn("font-semibold text-slate-800 dark:text-slate-100 truncate flex items-center gap-1.5", compact ? "text-base" : "text-lg")}>
             {clause.is_default && <Star className="h-4 w-4 text-amber-500 shrink-0" fill="currentColor" />}
             {clause.label}
           </p>
-          <p className="text-sm text-slate-400 truncate">{clause.clause_key}</p>
+          <p className="text-base text-slate-400 truncate">{clause.clause_key}</p>
         </div>
         <div className="flex gap-1 shrink-0">
           <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-700" onClick={(e) => { e.stopPropagation(); onEdit(); }}>
@@ -72,13 +72,13 @@ function ClauseCard({
       </div>
       <div className="flex flex-wrap gap-1.5 mt-3">
         {clause.is_default && (
-          <Badge className="text-xs font-semibold bg-amber-50 text-amber-700 border-amber-200 rounded-full px-2 py-0.5" variant="outline">Default</Badge>
+          <Badge className="text-sm font-semibold bg-amber-50 text-amber-700 border-amber-200 rounded-full px-2 py-0.5" variant="outline">Default</Badge>
         )}
-        <Badge className="text-xs font-semibold bg-slate-50 text-slate-600 border-slate-200 rounded-full px-2 py-0.5" variant="outline">
+        <Badge className="text-sm font-semibold bg-slate-50 text-slate-600 border-slate-200 rounded-full px-2 py-0.5" variant="outline">
           {clause.company_id ? (companies.find((c) => String(c.id) === clause.company_id)?.company_name || 'Company') : 'Global'}
         </Badge>
         {clause.suggest_conditions?.length > 0 && (
-          <Badge className="text-xs font-semibold bg-purple-50 text-purple-700 border-purple-200 rounded-full px-2 py-0.5" variant="outline">
+          <Badge className="text-sm font-semibold bg-purple-50 text-purple-700 border-purple-200 rounded-full px-2 py-0.5" variant="outline">
             Rule-suggested
           </Badge>
         )}
@@ -236,7 +236,7 @@ export default function ClauseLibraryPage() {
       {/* HEADER */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Clause Library</h1>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">Clause Library</h1>
           <div className="hidden md:flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-full border border-slate-200 dark:border-slate-800/80 ml-3">
             <button
               onClick={() => togglePanel('sidebar')}
@@ -287,11 +287,11 @@ export default function ClauseLibraryPage() {
         >
           <div className="flex flex-col h-full border-r border-slate-200 dark:border-slate-800">
             <div className="p-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
-              <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+              <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                 <List className="w-4 h-4 text-custom-blue" />
                 Sections
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">21 standard contract sections</p>
+              <p className="text-sm text-slate-500 mt-0.5">21 standard contract sections</p>
             </div>
             <ScrollArea className="flex-1">
               <div className="p-2 space-y-1">
@@ -300,7 +300,7 @@ export default function ClauseLibraryPage() {
                     key={section.key}
                     onClick={() => { setSelectedSectionKey(section.key); setSelectedClause(null); }}
                     className={cn(
-                      "flex items-center w-full p-2.5 text-sm rounded-md transition-colors",
+                      "flex items-center w-full p-2.5 text-base rounded-md transition-colors",
                       selectedSectionKey === section.key
                         ? "bg-custom-blue text-white font-medium shadow-sm"
                         : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -308,7 +308,7 @@ export default function ClauseLibraryPage() {
                   >
                     <BookText className="w-4 h-4 mr-2 shrink-0" />
                     <span className="truncate flex-1 text-left">{section.title}</span>
-                    <Badge variant="outline" className="text-[10px] font-semibold rounded-full px-1.5 py-0 ml-1 tabular-nums">
+                    <Badge variant="outline" className="text-sm font-semibold rounded-full px-1.5 py-0 ml-1 tabular-nums">
                       {items.length}
                     </Badge>
                   </button>
@@ -339,9 +339,9 @@ export default function ClauseLibraryPage() {
                     <BookText className="w-5 h-5 text-custom-blue" />
                     {CONTRACT_SECTIONS.find(s => s.key === selectedSectionKey)?.title || 'Select a section'}
                   </h2>
-                  <p className="text-sm text-slate-500 mt-0.5">Reusable wording — authored once, reused by every Job Profile</p>
+                  <p className="text-base text-slate-500 mt-0.5">Reusable wording — authored once, reused by every Job Profile</p>
                 </div>
-                <Button size="sm" className="h-9 text-sm" onClick={() => openNew()}>
+                <Button size="sm" className="h-10 text-base" onClick={() => openNew()}>
                   <PlusCircle className="h-4 w-4 mr-1.5" /> New Clause
                 </Button>
               </div>
@@ -356,7 +356,7 @@ export default function ClauseLibraryPage() {
                 <div className="flex flex-col items-center justify-center h-64 text-center border-2 border-dashed rounded-2xl border-slate-200 dark:border-slate-800">
                   <BookText className="h-12 w-12 text-slate-300 mb-3" />
                   <h3 className="text-base font-semibold text-slate-700 dark:text-slate-200">No clauses for this section</h3>
-                  <p className="text-sm text-slate-500 mt-1">Add a clause to get started.</p>
+                  <p className="text-base text-slate-500 mt-1">Add a clause to get started.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -375,8 +375,8 @@ export default function ClauseLibraryPage() {
                       <div key={entry.key} className="xl:col-span-2 border border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-3 bg-slate-100/60 dark:bg-slate-900/40">
                         <div className="flex items-center gap-2 px-1.5 pb-2">
                           <Layers className="h-4 w-4 text-custom-blue" />
-                          <p className="text-sm font-bold text-slate-700 dark:text-slate-200">{entry.key}</p>
-                          <Badge variant="outline" className="text-xs font-semibold rounded-full px-2 py-0 tabular-nums">
+                          <p className="text-base font-semibold text-slate-700 dark:text-slate-200">{entry.key}</p>
+                          <Badge variant="outline" className="text-sm font-semibold rounded-full px-2 py-0 tabular-nums">
                             {entry.clauses.length} variant{entry.clauses.length !== 1 ? 's' : ''}
                           </Badge>
                         </div>
@@ -418,11 +418,11 @@ export default function ClauseLibraryPage() {
         >
           <div className="flex flex-col h-full">
             <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
-              <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+              <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                 <FileText className="w-4 h-4 text-custom-blue" />
                 Clause Preview
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">Select a clause to preview its content</p>
+              <p className="text-sm text-slate-500 mt-0.5">Select a clause to preview its content</p>
             </div>
             <div className="flex-1 overflow-auto p-4">
               {selectedClause ? (
@@ -430,9 +430,9 @@ export default function ClauseLibraryPage() {
                   <div className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-4 space-y-2">
                     <div className="flex items-center gap-2">
                       {selectedClause.is_default && <Star className="h-4 w-4 text-amber-500 shrink-0" fill="currentColor" />}
-                      <p className="text-base font-bold text-slate-800 dark:text-slate-100">{selectedClause.label}</p>
+                      <p className="text-base font-semibold text-slate-800 dark:text-slate-100">{selectedClause.label}</p>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="grid grid-cols-2 gap-2 text-base">
                       <div><span className="text-slate-500">Key:</span> <span className="font-mono text-slate-700 dark:text-slate-200">{selectedClause.clause_key}</span></div>
                       <div><span className="text-slate-500">Scope:</span> <span className="font-medium text-slate-700 dark:text-slate-200">{selectedClause.company_id ? 'Company' : 'Global'}</span></div>
                       {selectedClause.variant_group && (
@@ -451,8 +451,8 @@ export default function ClauseLibraryPage() {
 
                   {selectedClause.variant_group && (
                     <div className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-4">
-                      <p className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-2 flex items-center gap-1.5">
-                        <Layers className="h-3.5 w-3.5 text-custom-blue" /> Other variants in &ldquo;{selectedClause.variant_group}&rdquo;
+                      <p className="text-base font-semibold text-slate-600 dark:text-slate-300 mb-2 flex items-center gap-1.5">
+                        <Layers className="h-4 w-4 text-custom-blue" /> Other variants in &ldquo;{selectedClause.variant_group}&rdquo;
                       </p>
                       <div className="flex flex-wrap gap-1.5">
                         {clauses
@@ -462,7 +462,7 @@ export default function ClauseLibraryPage() {
                               key={c.id}
                               onClick={() => setSelectedClause(c)}
                               className={cn(
-                                "text-sm rounded-full px-3 py-1 border transition-colors",
+                                "text-base rounded-full px-3 py-1 border transition-colors",
                                 c.id === selectedClause.id
                                   ? "bg-custom-blue text-white border-custom-blue font-medium"
                                   : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -476,7 +476,7 @@ export default function ClauseLibraryPage() {
                   )}
 
                   <div className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-4">
-                    <p className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-2">Content</p>
+                    <p className="text-base font-semibold text-slate-600 dark:text-slate-300 mb-2">Content</p>
                     <div
                       className="prose prose-sm max-w-none text-slate-700 dark:text-slate-200 [&_strong]:text-slate-800 [&_strong]:dark:text-slate-100"
                       dangerouslySetInnerHTML={{ __html: selectedClause.content }}
@@ -488,7 +488,7 @@ export default function ClauseLibraryPage() {
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center">
                   <FileText className="w-12 h-12 text-slate-300 mb-3" />
-                  <p className="text-sm text-slate-500">Select a clause to preview its rendered content</p>
+                  <p className="text-base text-slate-500">Select a clause to preview its rendered content</p>
                 </div>
               )}
             </div>
@@ -515,16 +515,16 @@ export default function ClauseLibraryPage() {
       <AlertDialog open={!!deletingId} onOpenChange={(open) => !open && setDeletingId(null)}>
         <AlertDialogContent className="rounded-2xl max-w-sm">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-lg font-bold text-slate-800">Delete this clause?</AlertDialogTitle>
-            <AlertDialogDescription className="text-sm text-slate-500">
+            <AlertDialogTitle className="text-lg font-semibold text-slate-800">Delete this clause?</AlertDialogTitle>
+            <AlertDialogDescription className="text-base text-slate-500">
               Job Profiles referencing this clause will fall back to the section's default clause. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2 mt-4">
-            <AlertDialogCancel className="h-9 px-4 rounded-full text-sm font-semibold">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="h-10 px-4 rounded-full text-base font-semibold">Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => { if (deletingId) handleDelete(deletingId); setDeletingId(null); }}
-              className="h-9 px-4 rounded-full bg-red-600 hover:bg-red-700 text-white text-sm font-semibold shadow-md shadow-red-500/10 border-0"
+              className="h-10 px-4 rounded-full bg-red-600 hover:bg-red-700 text-white text-base font-semibold shadow-md shadow-red-500/10 border-0"
             >
               Delete
             </AlertDialogAction>

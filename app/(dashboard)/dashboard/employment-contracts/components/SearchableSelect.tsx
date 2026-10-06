@@ -53,7 +53,7 @@ export function SearchableSelect({
           aria-expanded={open}
           disabled={disabled}
           className={cn(
-            "h-10 w-full justify-between text-sm font-normal bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-sm hover:bg-white dark:hover:bg-slate-900 rounded-xl px-3",
+            "h-10 w-full justify-between text-base font-normal bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-sm hover:bg-white dark:hover:bg-slate-900 rounded-xl px-3",
             !selected && "text-slate-400",
             className
           )}
@@ -64,7 +64,7 @@ export function SearchableSelect({
       </PopoverTrigger>
       <PopoverContent className="w-[max(280px,var(--radix-popover-trigger-width))] p-0 rounded-xl shadow-xl" align="start">
         <Command>
-          <CommandInput placeholder={searchPlaceholder} className="h-10 text-sm" />
+          <CommandInput placeholder={searchPlaceholder} className="h-10 text-base" />
           <CommandList>
             <CommandEmpty>{emptyText}</CommandEmpty>
             {Array.from(groups.entries()).map(([group, opts]) => (
@@ -74,7 +74,7 @@ export function SearchableSelect({
                     key={opt.value}
                     value={opt.label}
                     onSelect={() => { onChange(opt.value); setOpen(false); }}
-                    className="text-sm font-medium"
+                    className="text-base font-medium"
                   >
                     <Check className={cn("mr-2 h-4 w-4 text-blue-600 shrink-0", opt.value === value ? "opacity-100" : "opacity-0")} />
                     <span className="truncate">{opt.label}</span>

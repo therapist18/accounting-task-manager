@@ -73,10 +73,10 @@ type SortDir = 'asc' | 'desc';
 const ALL_SOURCE_KINDS: PlaceholderSourceKind[] = ['master_field', 'settings_cascade', 'job_profile', 'offer'];
 
 const SOURCE_KIND_OPTIONS: { value: PlaceholderSourceKind; label: string; icon: ReactNode }[] = [
-  { value: 'master_field', label: 'Master field', icon: <Database className="w-3 h-3 inline mr-1.5" /> },
-  { value: 'settings_cascade', label: 'Settings cascade', icon: <Sliders className="w-3 h-3 inline mr-1.5" /> },
-  { value: 'job_profile', label: 'Job profile field', icon: <ClipboardList className="w-3 h-3 inline mr-1.5" /> },
-  { value: 'offer', label: 'Offer field', icon: <FileStack className="w-3 h-3 inline mr-1.5" /> },
+  { value: 'master_field', label: 'Master field', icon: <Database className="w-3.5 h-3.5 inline mr-1.5" /> },
+  { value: 'settings_cascade', label: 'Settings cascade', icon: <Sliders className="w-3.5 h-3.5 inline mr-1.5" /> },
+  { value: 'job_profile', label: 'Job profile field', icon: <ClipboardList className="w-3.5 h-3.5 inline mr-1.5" /> },
+  { value: 'offer', label: 'Offer field', icon: <FileStack className="w-3.5 h-3.5 inline mr-1.5" /> },
 ];
 
 const SOURCE_KIND_LABELS: Record<PlaceholderSourceKind, string> = Object.fromEntries(
@@ -117,7 +117,7 @@ const EC_HIDDEN_SECTIONS = {
 const entityTypeLabel = (type: string) => ENTITY_TYPES.find((t) => t.value === type)?.label || type;
 const strategyLabel = (s: string) => s === 'merge' ? 'Merge' : 'Fallback';
 const StrategyIcon = ({ strategy }: { strategy: string }) =>
-  strategy === 'merge' ? <Shuffle className="w-3 h-3" /> : <ListOrdered className="w-3 h-3" />;
+  strategy === 'merge' ? <Shuffle className="w-3.5 h-3.5" /> : <ListOrdered className="w-3.5 h-3.5" />;
 
 export function PlaceholderSources({
   highlightKeys, filterByKeys, refreshKey = 0, fillHeight = false,
@@ -218,10 +218,10 @@ export function PlaceholderSources({
   };
 
   const SortIcon = ({ col }: { col: SortColumn }) => {
-    if (sortColumn !== col) return <ArrowUpDown className="w-3 h-3 ml-1 text-slate-300" />;
+    if (sortColumn !== col) return <ArrowUpDown className="w-3.5 h-3.5 ml-1 text-slate-300" />;
     return sortDir === 'asc'
-      ? <ArrowUp className="w-3 h-3 ml-1 text-custom-blue" />
-      : <ArrowDown className="w-3 h-3 ml-1 text-custom-blue" />;
+      ? <ArrowUp className="w-3.5 h-3.5 ml-1 text-custom-blue" />
+      : <ArrowDown className="w-3.5 h-3.5 ml-1 text-custom-blue" />;
   };
 
   const getLinkedLabels = (p: EcPlaceholder) => {
@@ -451,10 +451,10 @@ export function PlaceholderSources({
   return (
     <div ref={sectionRef} className={cn("bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800", fillHeight ? "h-full flex flex-col overflow-hidden p-4" : "p-4")}>
       <div className="flex items-center justify-between mb-3 shrink-0">
-        <p className="text-sm font-bold text-slate-600 dark:text-slate-300">{title}</p>
+        <p className="text-base font-semibold text-slate-600 dark:text-slate-300">{title}</p>
         <div className="flex items-center gap-2 shrink-0">
           {toolbar}
-          <p className="text-xs text-slate-400">
+          <p className="text-sm text-slate-400">
             {filterByKeys
               ? `${sortedPlaceholders.length} / ${placeholders.length} total`
               : `${placeholders.length} total`}
@@ -469,7 +469,7 @@ export function PlaceholderSources({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           disabled={placeholders.length === 0}
-          className="pl-9 h-9 rounded-full text-sm"
+          className="pl-9 h-10 rounded-full text-base"
         />
       </div>
 
@@ -478,7 +478,7 @@ export function PlaceholderSources({
           <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
         </div>
       ) : sortedPlaceholders.length === 0 ? (
-        <p className={cn("text-sm text-slate-500 text-center", fillHeight ? "flex-1 flex items-center justify-center" : "py-6")}>
+        <p className={cn("text-base text-slate-500 text-center", fillHeight ? "flex-1 flex items-center justify-center" : "py-6")}>
           {filterByKeys && filterByKeys.length === 0
             ? (emptyMessage ?? 'No placeholders specified for this item.')
             : placeholders.length === 0
@@ -490,54 +490,54 @@ export function PlaceholderSources({
           <Table>
             <TableHeader className="bg-slate-50 dark:bg-slate-900">
               <TableRow>
-                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2 w-10">
+                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-sm border border-slate-200 dark:border-slate-700 px-2 py-2 w-10">
                   <button onClick={() => toggleSort('#')} className="flex items-center gap-0">
                     # <SortIcon col="#" />
                   </button>
                 </TableHead>
-                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">
+                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-sm border border-slate-200 dark:border-slate-700 px-2 py-2">
                   <button onClick={() => toggleSort('token')} className="flex items-center gap-0">
                     Token <SortIcon col="token" />
                   </button>
                 </TableHead>
-                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">
+                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-sm border border-slate-200 dark:border-slate-700 px-2 py-2">
                   <button onClick={() => toggleSort('group')} className="flex items-center gap-0">
                     Group <SortIcon col="group" />
                   </button>
                 </TableHead>
-                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">
+                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-sm border border-slate-200 dark:border-slate-700 px-2 py-2">
                   <button onClick={() => toggleSort('type')} className="flex items-center gap-0">
                     Type <SortIcon col="type" />
                   </button>
                 </TableHead>
-                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">
+                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-sm border border-slate-200 dark:border-slate-700 px-2 py-2">
                   <button onClick={() => toggleSort('source')} className="flex items-center gap-0">
                     Source <SortIcon col="source" />
                   </button>
                 </TableHead>
-                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">
+                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-sm border border-slate-200 dark:border-slate-700 px-2 py-2">
                   <button onClick={() => toggleSort('entity')} className="flex items-center gap-0">
                     Entity Type <SortIcon col="entity" />
                   </button>
                 </TableHead>
-                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">
+                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-sm border border-slate-200 dark:border-slate-700 px-2 py-2">
                   <button onClick={() => toggleSort('linked')} className="flex items-center gap-0">
                     Linked Master Field <SortIcon col="linked" />
                   </button>
                 </TableHead>
-                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">
+                <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-sm border border-slate-200 dark:border-slate-700 px-2 py-2">
                   <button onClick={() => toggleSort('default')} className="flex items-center gap-0">
                     Default Value <SortIcon col="default" />
                   </button>
                 </TableHead>
                 {clausesEnabled && (
-                  <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">
+                  <TableHead className="font-bold text-slate-600 dark:text-slate-300 text-sm border border-slate-200 dark:border-slate-700 px-2 py-2">
                     <button onClick={() => toggleSort('clauses')} className="flex items-center gap-0">
                       Clause Usage <SortIcon col="clauses" />
                     </button>
                   </TableHead>
                 )}
-                <TableHead className="text-right font-bold text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700 px-2 py-2">Actions</TableHead>
+                <TableHead className="text-right font-bold text-slate-600 dark:text-slate-300 text-sm border border-slate-200 dark:border-slate-700 px-2 py-2">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -572,19 +572,19 @@ export function PlaceholderSources({
                   key={p.id}
                   className={rowClassName}
                 >
-                  <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2 text-xs text-slate-400 text-center">{idx + 1}</TableCell>
+                  <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2 text-sm text-slate-400 text-center">{idx + 1}</TableCell>
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
-                    <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{p.label}</p>
+                    <p className="text-base font-medium text-slate-700 dark:text-slate-200">{p.label}</p>
                     <div className="flex items-center gap-1 mt-0.5">
                       <div className={cn(
-                        "flex items-center gap-1 font-mono text-xs",
+                        "flex items-center gap-1 font-mono text-sm",
                         isChild && "pl-6 border-l-2 border-sky-200 dark:border-sky-800 ml-1"
                       )}>
                         {isBlock && (
-                          <Badge className="bg-sky-600 hover:bg-sky-700 h-4 px-1.5 text-[10px]">ARRAY</Badge>
+                          <Badge className="bg-sky-600 hover:bg-sky-700 h-4 px-1.5 text-sm">ARRAY</Badge>
                         )}
                         {isChild && !isBlock && (
-                          <svg className="h-3 w-3 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <svg className="h-3.5 w-3.5 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                             <circle cx="9" cy="7" r="4" />
                             <line x1="23" y1="21" x2="17" y2="17" />
@@ -600,16 +600,16 @@ export function PlaceholderSources({
                     </div>
                   </TableCell>
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
-                    <Badge variant="secondary" className="text-[10px]">{p.group_label}</Badge>
+                    <Badge variant="secondary" className="text-sm">{p.group_label}</Badge>
                   </TableCell>
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
-                    <Badge variant="outline" className={`text-[10px] font-medium ${EC_TYPE_STYLES[effectiveType]}`}>
+                    <Badge variant="outline" className={`text-sm font-medium ${EC_TYPE_STYLES[effectiveType]}`}>
                       {EC_TYPE_LABELS[effectiveType]}
                     </Badge>
                   </TableCell>
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
                     {allowedSourceKinds.length <= 1 ? (
-                      <Badge variant="outline" className="text-[10px] font-medium bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
+                      <Badge variant="outline" className="text-sm font-medium bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
                         {SOURCE_KIND_LABELS[p.source_kind] || p.source_kind}
                       </Badge>
                     ) : (
@@ -619,7 +619,7 @@ export function PlaceholderSources({
                         disabled={changingKindId === p.id}
                       >
                         <SelectTrigger className={cn(
-                          "h-7 text-xs font-medium rounded-full border px-2.5 gap-1.5 w-auto",
+                          "h-7 text-sm font-medium rounded-full border px-2.5 gap-1.5 w-auto",
                           p.source_kind === 'master_field' && "bg-slate-50 text-slate-600 border-slate-200",
                           p.source_kind === 'settings_cascade' && "bg-blue-50 text-blue-700 border-blue-200",
                           p.source_kind === 'job_profile' && "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -637,7 +637,7 @@ export function PlaceholderSources({
                         </SelectContent>
                       </Select>
                     )}
-                    <p className="text-[10px] font-mono text-slate-400 mt-1">
+                    <p className="text-sm font-mono text-slate-400 mt-1">
                       {getPlaceholderSourceText(p) || <span className="italic text-red-400">not set - edit to set</span>}
                     </p>
                   </TableCell>
@@ -646,7 +646,7 @@ export function PlaceholderSources({
                       <div className="flex flex-wrap gap-1">
                         {entityLabels.map((label) => (
                           <Badge key={label} variant="secondary" className={cn(
-                            "text-[10px]",
+                            "text-sm",
                             isChild ? "bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-300 dark:border-sky-800" :
                               "bg-indigo-50 text-indigo-700 border-indigo-200"
                           )}>
@@ -655,7 +655,7 @@ export function PlaceholderSources({
                         ))}
                       </div>
                     ) : (
-                      <span className="text-xs text-slate-300">—</span>
+                      <span className="text-sm text-slate-300">—</span>
                     )}
                   </TableCell>
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
@@ -663,25 +663,25 @@ export function PlaceholderSources({
                       linkedLabels.length > 0 ? (
                         <div className="flex flex-wrap gap-1">
                           {linkedLabels.map((item, li) => (
-                            <Badge key={item.label} variant="outline" className="text-xs bg-white dark:bg-slate-800 flex items-center gap-1">
+                            <Badge key={item.label} variant="outline" className="text-sm bg-white dark:bg-slate-800 flex items-center gap-1">
                               <StrategyIcon strategy={item.strategy} />
                               <span>{item.label}</span>
                               {linkedLabels.length > 1 && (
-                                <span className="text-[10px] text-slate-400 font-bold">#{item.priority}</span>
+                                <span className="text-sm text-slate-400 font-bold">#{item.priority}</span>
                               )}
                             </Badge>
                           ))}
                         </div>
                       ) : (
-                        <span className="text-xs text-red-500 italic">Not linked</span>
+                        <span className="text-sm text-red-500 italic">Not linked</span>
                       )
                     ) : (
-                      <span className="text-xs text-slate-300">—</span>
+                      <span className="text-sm text-slate-300">—</span>
                     )}
                   </TableCell>
                   <TableCell className="border border-slate-200 dark:border-slate-700 px-2 py-2">
                     <Badge variant="secondary" className={cn(
-                      "text-[10px] capitalize",
+                      "text-sm capitalize",
                       isChild ? "bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-300 dark:border-sky-800" : ""
                     )}>
                       {p.default_value || '—'}
@@ -692,13 +692,13 @@ export function PlaceholderSources({
                       {usedByClauses.length > 0 ? (
                         <Badge
                           variant="outline"
-                          className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200"
+                          className="text-sm bg-emerald-50 text-emerald-700 border-emerald-200"
                           title={usedByClauses.map((c) => c.label).join(', ')}
                         >
                           Linked · {usedByClauses.length} clause{usedByClauses.length === 1 ? '' : 's'}
                         </Badge>
                       ) : (
-                        <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
+                        <Badge variant="outline" className="text-sm bg-amber-50 text-amber-700 border-amber-200">
                           Not linked
                         </Badge>
                       )}
@@ -712,10 +712,10 @@ export function PlaceholderSources({
                       onClick={() => openEdit(p)}
                       title="Edit placeholder"
                     >
-                      <Pencil className="w-3.5 h-3.5" />
+                      <Pencil className="w-4 h-4" />
                     </Button>
                     {deletableGroup && p.group_label !== deletableGroup ? (
-                      <span className="text-[10px] text-slate-300" title="Shared with another module - delete it from its owning module instead">—</span>
+                      <span className="text-sm text-slate-300" title="Shared with another module - delete it from its owning module instead">—</span>
                     ) : (
                       <Button
                         variant="ghost"
@@ -724,7 +724,7 @@ export function PlaceholderSources({
                         onClick={() => setDeletingP(p)}
                         title="Delete placeholder"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-4 h-4" />
                       </Button>
                     )}
                   </TableCell>
@@ -759,8 +759,8 @@ export function PlaceholderSources({
       <AlertDialog open={!!deletingP} onOpenChange={(open) => !open && setDeletingP(null)}>
         <AlertDialogContent className="rounded-2xl max-w-sm">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-lg font-bold text-slate-800">Delete this placeholder?</AlertDialogTitle>
-            <AlertDialogDescription className="text-sm text-slate-500">
+            <AlertDialogTitle className="text-lg font-semibold text-slate-800">Delete this placeholder?</AlertDialogTitle>
+            <AlertDialogDescription className="text-base text-slate-500">
               {deletingP && (() => {
                 const usedBy = clauseUsage.get(deletingP.key) || [];
                 return (
@@ -780,13 +780,13 @@ export function PlaceholderSources({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2 mt-4">
-            <AlertDialogCancel className="h-9 px-4 rounded-full text-sm font-semibold">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="h-10 px-4 rounded-full text-base font-semibold">Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
               disabled={deleting}
-              className="h-9 px-4 rounded-full bg-red-600 hover:bg-red-700 text-white text-sm font-semibold shadow-md shadow-red-500/10 border-0"
+              className="h-10 px-4 rounded-full bg-red-600 hover:bg-red-700 text-white text-base font-semibold shadow-md shadow-red-500/10 border-0"
             >
-              {deleting && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin inline" />}
+              {deleting && <Loader2 className="h-4 w-4 mr-1.5 animate-spin inline" />}
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

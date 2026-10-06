@@ -8,12 +8,17 @@ import { ContractsSidebar } from './components/ContractsSidebar';
 import { ContractEditor } from './components/ContractEditor';
 import { ContractPreview } from './components/ContractPreview';
 import { EcJobProfile } from './utils/jobProfileData';
+import { useEmploymentLetters, type DocumentTab } from './hooks/useEmploymentLetters';
 
 export default function EmploymentContractsPage() {
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [contractData, setContractData] = useState<any>({});
   const [selectedJobProfile, setSelectedJobProfile] = useState<EcJobProfile | null>(null);
+  // Contract vs Letters - one workspace generates both off the same employee,
+  // values and theme (see ContractEditor's tabs).
+  const [documentTab, setDocumentTab] = useState<DocumentTab>('contract');
+  const letters = useEmploymentLetters(selectedEmployeeId ? Number(selectedEmployeeId) : null, selectedCompanyId);
 
   const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
   const editorPanelRef = useRef<ImperativePanelHandle>(null);
@@ -32,6 +37,7 @@ export default function EmploymentContractsPage() {
     setSelectedEmployeeId(employeeId);
     setContractData({});
     setSelectedJobProfile(null);
+    letters.reset();
   };
 
   return (
@@ -39,7 +45,7 @@ export default function EmploymentContractsPage() {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shrink-0 z-10 shadow-sm relative">
         <div className="flex items-center gap-6">
-          <h1 className="text-xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
             Employment Contracts
           </h1>
 
@@ -135,6 +141,9 @@ export default function EmploymentContractsPage() {
               setContractData={setContractData}
               selectedJobProfile={selectedJobProfile}
               setSelectedJobProfile={setSelectedJobProfile}
+              documentTab={documentTab}
+              onDocumentTabChange={setDocumentTab}
+              letters={letters}
             />
           </Panel>
 
@@ -160,6 +169,7 @@ export default function EmploymentContractsPage() {
               contractData={contractData}
               setContractData={setContractData}
               selectedJobProfile={selectedJobProfile}
+              letter={documentTab === 'letters' ? { template: letters.letter, values: letters.values } : null}
             />
           </Panel>
         </PanelGroup>

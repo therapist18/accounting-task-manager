@@ -11,7 +11,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Loader2, RotateCcw, Database, PenLine, Building2, FileText, AlertCircle, ImageIcon, UploadCloud, Plus, X, AlignLeft, AlignCenter, AlignRight, Expand } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Placeholder } from '../../templates/document-template-manager/types';
-import { MasterFieldEditControl } from '../../employment-contracts/components/MasterFieldEditControl';
+import { MasterFieldEditControl, SourceValueEditor, linkedMasterFieldIds } from '../../employment-contracts/components/MasterFieldEditControl';
 import type { JobField } from '../../master-fields/components/types/database';
 import { UploadModal } from '@/app/generic-components/UploadModal';
 import { resolveCompanyRole } from '../utils/ccResolver';
@@ -278,6 +278,8 @@ function PlaceholderRow({
   const sourceLabel = linked ? (masterFields.get(Number(p.master_field_id))?.label || 'Master field') : 'Manual';
 
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  // Save-to-source editing (pencil) takes over the value control.
+  const [editingFieldId, setEditingFieldId] = useState<number | null>(null);
   const uploadTarget = useMemo(() => {
     if (p.type !== 'image' || !p.master_field_id || !masterFields) return null;
     const mf = masterFields.get(Number(p.master_field_id));
@@ -340,7 +342,20 @@ function PlaceholderRow({
 
       {/* Column 3: Value Control */}
       <div className="flex items-center gap-2">
-        {p.type === 'image' ? (
+        {editingFieldId != null ? (
+          <div className="flex-1 min-w-0">
+            <SourceValueEditor
+              placeholder={p}
+              masterFieldId={editingFieldId}
+              masterFields={masterFields}
+              individualId={null}
+              companyId={companyId}
+              initialValue={linkedMasterFieldIds(p).length === 1 ? resolvedValue : undefined}
+              onDone={() => setEditingFieldId(null)}
+              onSaved={onRefresh}
+            />
+          </div>
+        ) : p.type === 'image' ? (
           <div className="flex-1">
             {effectiveVal ? (
               <>
@@ -432,14 +447,13 @@ function PlaceholderRow({
         )}
 
         <div className="flex items-center justify-end shrink-0 gap-1">
-          {linked && (
+          {linked && editingFieldId == null && (
             <MasterFieldEditControl
               placeholder={p}
               masterFields={masterFields}
               individualId={null}
               companyId={companyId}
-              currentValue={resolvedValue}
-              onSaved={onRefresh}
+              onStartEdit={setEditingFieldId}
             />
           )}
           {isOverridden && (
