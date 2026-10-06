@@ -344,6 +344,17 @@ export function EmailsTable({
                                 <option key={d} value={d}>{DISPOSITION_LABEL[d]}</option>
                               ))}
                           </select>
+                          {rules && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0 rounded-md text-slate-400 hover:text-custom-blue hover:bg-slate-100"
+                              onClick={() => setTesterSeed({ subject: e.subject, sender: e.sender_email, company: e.company_id ? { id: String(e.company_id), name: e.company_name ?? "This email's company" } : null })}
+                              title="Test this mail's subject/sender against every rule"
+                            >
+                              <FlaskConical className="h-4 w-4" />
+                            </Button>
+                          )}
                           {onDeleteRow && (
                             <Button
                               size="sm"
@@ -377,6 +388,17 @@ export function EmailsTable({
                               title="Test this mail's subject/sender against every rule"
                             >
                               <FlaskConical className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {onDeleteRow && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0 rounded-md text-red-600 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => onDeleteRow(e)}
+                              title="Delete this email from the app (it stays in Gmail)"
+                            >
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           )}
                         </div>

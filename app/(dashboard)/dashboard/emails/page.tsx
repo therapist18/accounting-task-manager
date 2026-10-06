@@ -25,7 +25,8 @@ import { RulesPanel } from "./components/RulesPanel"
 import { SyncDialog } from "./components/SyncDialog"
 import { CompanyPanels, matchesCompanySelection, UNASSIGNED } from "./components/CompanyPanels"
 import { CompanyMultiSelect } from "./components/CompanyMultiSelect"
-import { EmailsTable, TOGGLEABLE_COLUMNS as EMAIL_COLUMNS } from "./components/NeedsReview"
+import { TOGGLEABLE_COLUMNS as EMAIL_COLUMNS } from "./components/NeedsReview"
+import { ReviewPanel } from "./components/ReviewPanel"
 import { ColumnVisibilityButton, useColumnVisibility } from "./components/table"
 import { exportCasesToExcel } from "./components/exportCases"
 import { exportEmailsToExcel } from "./components/exportEmails"
@@ -773,11 +774,13 @@ export default function EmailCenterPage() {
       )
     }
     return (
-      <EmailsTable
+      <ReviewPanel
         emails={reviewEmails}
         categories={categories}
         onOpen={(e) => setOpenEmailSeed(e)}
         onQuickClassify={quickClassify}
+        onMove={moveEmails}
+        onDelete={deleteEmails}
         showTime={showTime}
         loading={loading}
         emptyMessage={emptyMessage}

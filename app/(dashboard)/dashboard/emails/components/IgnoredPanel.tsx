@@ -402,6 +402,7 @@ export function IgnoredPanel({
             selection={{ selected, onToggle: toggle, onToggleAll: toggleAll }}
             onAllocate={(e, d) => { if (e.disposition !== d) onMove([e], d) }}
             ignoreRules={ignoreRules}
+            rules={rules}
             allocateTargets={BULK_MOVE_TARGETS}
             onDeleteRow={(e) => setConfirmDelete([e])}
           />

@@ -91,7 +91,10 @@
       "Bash(awk -F: '$1>3900')",
       "Bash(awk -F: '{print $1}')",
       "Bash(grep -n \"CompanyOnboardingProcess\" -B3 -A8 company-categories/page.tsx | head -60; ls add; grep -rn \"companies/add\\\\|/add/\" --include=*.tsx -l .. | head -5; ls add/../ | head -30)",
-      "Read(//e/bcl-registry/app/companies/**)"
+      "Read(//e/bcl-registry/app/companies/**)",
+      "Bash(grep -rnoE \"[a-z:-]+-[a-z]+\\(/[0-9]+\\){2,}\" .)",
+      "Bash(sed -i 's#hover:bg-primary/10/50#hover:bg-primary/5#' components/banks.tsx)",
+      "PowerShell(Get-ChildItem -Recurse -File \"e:\\\\GitHub\\\\accounting-task-manager\\\\app\\\\\\(dashboard\\)\\\\dashboard\\\\employment-contracts\" | ForEach-Object { $_.FullName.Replace\\(\"e:\\\\GitHub\\\\accounting-task-manager\\\\\",\"\"\\) + \"  \" + $_.Length })"
     ],
     "additionalDirectories": [
       "\\tmp",
