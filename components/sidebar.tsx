@@ -73,6 +73,7 @@ const navItems = [
         icon: FileText,
         items: [
             { title: "Generate Contracts", href: "/dashboard/employment-contracts" },
+            { title: "Letters", href: "/dashboard/employment-contracts/letters" },
             { title: "Job Profiles", href: "/dashboard/employment-contracts/job-profiles" },
             { title: "Clauses", href: "/dashboard/employment-contracts/clause-library" },
             { title: "Placeholders", href: "/dashboard/employment-contracts/placeholders" },
