@@ -126,13 +126,18 @@ export async function POST(request) {
       file_path: filePath
     });
 
-    // First try to find existing record
+    // First try to find existing record. A person can have several signature rows (a cleaned
+    // signature plus its "original_scan" kept for the record), so update the newest usable one and
+    // never overwrite the original scan.
     const { data: existingRecord, error: findError } = await supabase
       .from('acc_portal_directors_documents')
       .select('*')
       .eq('director_id', signatoryId)
       .eq('document_id', SIGNATURE_DOC_TYPE_ID)
-      .single();
+      .or('metadata->>signature_role.is.null,metadata->>signature_role.neq.original_scan')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     let docData, docError;
 

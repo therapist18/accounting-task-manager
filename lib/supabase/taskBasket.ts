@@ -34,6 +34,24 @@ export interface TaskBasketHistoryEntry {
   auto_resolved?: boolean
 }
 
+// Why the company hasn't delivered, as kra-tools staff recorded it (kra-tools'
+// supabase/migrations/20261006_task_basket_comments.sql): a client's logged response to a
+// request/reminder, or a note on a bank account for the month ("merged statement — not uploaded").
+// The item is still in the basket because nothing has been uploaded/recorded yet.
+export interface TaskBasketComment {
+  source: "client_response" | "account_note"
+  text: string
+  account?: string
+  expected_date?: string | null
+  by?: string | null
+  at?: string | null
+}
+
+export const TASK_BASKET_COMMENT_SOURCE_LABELS: Record<TaskBasketComment["source"], string> = {
+  client_response: "Client response",
+  account_note: "Account note",
+}
+
 export interface TaskBasketItem {
   id: string
   company_id: number
@@ -49,6 +67,8 @@ export interface TaskBasketItem {
   resolved_at: string | null
   resolved_by: string | null
   resolution_note: string | null
+  has_comments: boolean
+  comments: TaskBasketComment[]
 }
 
 export interface TaskBasketFilters {
@@ -85,6 +105,9 @@ export async function getTaskBasketItems(filters: TaskBasketFilters = {}): Promi
     company_name: nameById.get(row.company_id) || `Company #${row.company_id}`,
     contact_summary: row.contact_summary || [],
     history: row.history || [],
+    // Absent until the comments migration has run — treated as "no comments".
+    comments: row.comments || [],
+    has_comments: !!row.has_comments,
   }))
 }
 

@@ -52,6 +52,12 @@ const EXPORT_COLUMNS: ExcelColumn<TaskBasketItem>[] = [
     value: (r) => r.contact_summary.map((c) => `${c.name} (${c.channel}: ${c.value})`).join("\n") || "No contact configured",
   },
   { header: "Reason", width: 40, wrap: true, value: (r) => r.reason },
+  {
+    header: "Comments", width: 40, wrap: true,
+    value: (r) => r.comments
+      .map((c) => `${c.account ? `${c.account}: ` : ""}${c.text}${c.expected_date ? ` (expected ${c.expected_date})` : ""}`)
+      .join("\n"),
+  },
   { header: "Triggered", width: 14, value: (r) => new Date(r.triggered_at).toISOString().slice(0, 10) },
   { header: "Overdue (days)", width: 14, align: "right", value: (r) => (r.status === "open" ? String(daysSince(r.triggered_at)) : "—") },
   { header: "Status", width: 12, value: (r) => (r.status === "open" ? "Open" : "Resolved") },
@@ -63,6 +69,8 @@ export default function TaskBasketPage() {
   const [loading, setLoading] = useState(true)
   const [moduleFilter, setModuleFilter] = useState<TaskBasketModule | "all">("all")
   const [statusFilter, setStatusFilter] = useState<TaskBasketStatus | "all">("open")
+  // Companies that explained the delay (client response / account note) vs. ones that went silent.
+  const [commentFilter, setCommentFilter] = useState<"all" | "with" | "without">("all")
   const [cycleMonth, setCycleMonth] = useState(currentCycleMonth())
   // Full company records (ACC/IMM/Audit/Sheria effective dates + cease details) — the thin row the
   // basket read needs for a company name isn't enough for the category filter to judge a company.
@@ -102,15 +110,18 @@ export default function TaskBasketPage() {
   )
 
   const visibleItems = useMemo(() => {
-    if (!categoryFilters) return items
+    const byComments = commentFilter === "all"
+      ? items
+      : items.filter((item) => item.has_comments === (commentFilter === "with"))
+    if (!categoryFilters) return byComments
     // A basket row whose company isn't in the company list (deleted, or only present under a
     // different id) is kept rather than hidden: an overdue compliance item must never disappear
     // just because it can't be categorised.
-    return items.filter(
+    return byComments.filter(
       (item) => !companyById.has(String(item.company_id)) ||
         companyMatchesCategoryFilters(companyById.get(String(item.company_id)), categoryFilters)
     )
-  }, [items, companyById, categoryFilters])
+  }, [items, companyById, categoryFilters, commentFilter])
 
   const openCount = useMemo(() => items.filter((i) => i.status === "open").length, [items])
   const categoryActive = !!categoryFilters && Object.values(categoryFilters.categories || {}).some(Boolean)
@@ -151,6 +162,7 @@ export default function TaskBasketPage() {
         rows !== visibleItems ? `${rows.length} selected row${rows.length === 1 ? "" : "s"}` : null,
         moduleFilter !== "all" ? `Module: ${TASK_BASKET_MODULE_LABELS[moduleFilter]}` : "All modules",
         `Status: ${statusFilter}`,
+        commentFilter !== "all" ? (commentFilter === "with" ? "With comments only" : "Without comments only") : null,
         `Cycle: ${cycleMonth}`,
         categoryActive ? "Client category filter applied" : "No client category filter",
       ].filter(Boolean).join(" · ")
@@ -211,6 +223,17 @@ export default function TaskBasketPage() {
             <SelectItem value="open">Open</SelectItem>
             <SelectItem value="resolved">Resolved</SelectItem>
             <SelectItem value="all">All</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select value={commentFilter} onValueChange={(v) => setCommentFilter(v as "all" | "with" | "without")}>
+          <SelectTrigger className="w-[190px] h-10 text-base bg-white" title="Companies that explained the delay vs. ones that didn't">
+            <SelectValue placeholder="Comments" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All (comments or not)</SelectItem>
+            <SelectItem value="with">Has comments</SelectItem>
+            <SelectItem value="without">No comments</SelectItem>
           </SelectContent>
         </Select>
 

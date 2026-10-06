@@ -66,7 +66,11 @@ export function useLetterData(tab: 'companies' | 'individuals', companyId: strin
             // If no valid director/shareholder association found, exclude this individual
             if (!validAssociation) return null;
 
-            const sigDoc = signatures.find(s => s.director_id?.toString() === ind.id?.toString());
+            // A person can have several signature rows: a cleaned signature plus its untouched
+            // "original_scan" (kept for the record, not for use). Use the newest usable one.
+            const sigDoc = signatures
+                .filter(s => s.director_id?.toString() === ind.id?.toString() && s.metadata?.signature_role !== 'original_scan')
+                .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())[0];
 
             return {
                 id: ind.id,

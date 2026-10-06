@@ -8,7 +8,9 @@ import { cn } from "@/lib/utils";
 import { differenceInCalendarDays, format } from "date-fns";
 import {
   TaskBasketItem,
+  TaskBasketComment,
   TaskBasketHistoryEntry,
+  TASK_BASKET_COMMENT_SOURCE_LABELS,
   TASK_BASKET_MODULE_LABELS,
 } from "@/lib/supabase/taskBasket";
 // The Email Center's own table building blocks, so this module sorts, stripes, paginates and reports
@@ -107,6 +109,31 @@ function ContactCell({ item }: { item: TaskBasketItem }) {
         </div>
       )}
     </div>
+  );
+}
+
+// One line per comment: the source, the text, and whatever context it carries (account, promised
+// date, who logged it).
+function CommentList({ comments }: { comments: TaskBasketComment[] }) {
+  return (
+    <ul className="space-y-1.5">
+      {comments.map((comment, i) => (
+        <li key={i} className="text-sm">
+          <span className="font-medium text-violet-700">
+            {TASK_BASKET_COMMENT_SOURCE_LABELS[comment.source] ?? "Comment"}
+            {comment.account ? ` · ${comment.account}` : ""}:
+          </span>{" "}
+          <span className="text-slate-700">{comment.text}</span>
+          {(comment.expected_date || comment.by || comment.at) && (
+            <span className="text-slate-400">
+              {comment.expected_date ? ` — expected ${comment.expected_date}` : ""}
+              {comment.by ? ` — ${comment.by}` : ""}
+              {comment.at ? `, ${format(new Date(comment.at), "dd MMM yyyy")}` : ""}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -397,6 +424,22 @@ export default function TaskBasketTable({
                           </td>
                           <td className={cn(TD_CLASS, "max-w-[280px]")}>
                             {item.reason}
+                            {item.has_comments && (
+                              <div
+                                className="mt-1 flex items-start gap-1.5"
+                                title={item.comments.map((c) => c.text).join("\n")}
+                              >
+                                <Badge
+                                  variant="outline"
+                                  className="shrink-0 border-violet-300 bg-violet-50 text-violet-700"
+                                >
+                                  Has comments
+                                </Badge>
+                                <span className="truncate text-xs text-slate-500">
+                                  {item.comments[0]?.text}
+                                </span>
+                              </div>
+                            )}
                           </td>
                           <td className={TD_CLASS}>
                             {format(new Date(item.triggered_at), "dd MMM yyyy")}
@@ -493,6 +536,14 @@ export default function TaskBasketTable({
                                   <p className="text-sm text-slate-700">
                                     {item.reason}
                                   </p>
+                                  {item.has_comments && (
+                                    <>
+                                      <p className="mt-2 mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                                        Comments ({item.comments.length})
+                                      </p>
+                                      <CommentList comments={item.comments} />
+                                    </>
+                                  )}
                                   <p className="mt-2 mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
                                     Contacts ({item.contact_summary.length})
                                   </p>
