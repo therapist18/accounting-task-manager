@@ -6,7 +6,16 @@ import { supabase } from "./client"
 // — the compliance checks themselves live in kra-tools, next to the data they read.
 
 export type TaskBasketModule = "bank_statements" | "file_management" | "tax_receipts"
-export type TaskBasketStatus = "open" | "resolved"
+// open → still outstanding. resolved → closed by hand here. received_late → the client delivered
+// after the item was pushed (statement uploaded / file reception recorded) and kra-tools' daily job
+// closed it (kra-tools' supabase/migrations/20261007_task_basket_received_late.sql).
+export type TaskBasketStatus = "open" | "resolved" | "received_late"
+
+export const TASK_BASKET_STATUS_LABELS: Record<TaskBasketStatus, string> = {
+  open: "Open",
+  resolved: "Resolved",
+  received_late: "Received late",
+}
 
 export const TASK_BASKET_MODULE_LABELS: Record<TaskBasketModule, string> = {
   bank_statements: "Bank Statement Requests",
@@ -27,7 +36,7 @@ export interface TaskBasketContact {
 // with received_accounts/total_accounts and auto_resolved.
 export interface TaskBasketHistoryEntry {
   checked_at: string
-  event?: "late_upload"
+  event?: "late_upload" | "late_reception"
   still_pending?: boolean
   received_accounts?: number
   total_accounts?: number
@@ -52,6 +61,24 @@ export const TASK_BASKET_COMMENT_SOURCE_LABELS: Record<TaskBasketComment["source
   account_note: "Account note",
 }
 
+// Bank statement items only: the accounts still outstanding for the month (kra-tools'
+// supabase/migrations/20261007_task_basket_missing_accounts.sql), kept current as statements are
+// uploaded. 'noted' = nothing uploaded but a note is on file for that account (e.g. merged statement).
+export interface TaskBasketMissingAccount {
+  bank_id: number
+  bank_name: string | null
+  account_number: string | null
+  currency: string | null
+  status: "missing" | "noted"
+  note?: string | null
+}
+
+/** "Equity Bank 0123456789 (KES)" */
+export function formatMissingAccount(account: TaskBasketMissingAccount): string {
+  const name = [account.bank_name, account.account_number].filter(Boolean).join(" ") || `Account #${account.bank_id}`
+  return account.currency ? `${name} (${account.currency})` : name
+}
+
 export interface TaskBasketItem {
   id: string
   company_id: number
@@ -69,6 +96,7 @@ export interface TaskBasketItem {
   resolution_note: string | null
   has_comments: boolean
   comments: TaskBasketComment[]
+  missing_accounts: TaskBasketMissingAccount[]
 }
 
 export interface TaskBasketFilters {
@@ -108,6 +136,7 @@ export async function getTaskBasketItems(filters: TaskBasketFilters = {}): Promi
     // Absent until the comments migration has run — treated as "no comments".
     comments: row.comments || [],
     has_comments: !!row.has_comments,
+    missing_accounts: row.missing_accounts || [],
   }))
 }
 

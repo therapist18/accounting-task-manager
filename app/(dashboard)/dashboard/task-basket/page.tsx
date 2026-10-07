@@ -13,6 +13,8 @@ import {
   TaskBasketModule,
   TaskBasketStatus,
   TASK_BASKET_MODULE_LABELS,
+  TASK_BASKET_STATUS_LABELS,
+  formatMissingAccount,
 } from "@/lib/supabase/taskBasket"
 // The app-wide Client Category Filter (ACC / IMM / Audit / Sheria, by client and operational status)
 // plus its predicate — the same pair the Email Center's company panels and sidebars use, so a
@@ -53,6 +55,12 @@ const EXPORT_COLUMNS: ExcelColumn<TaskBasketItem>[] = [
   },
   { header: "Reason", width: 40, wrap: true, value: (r) => r.reason },
   {
+    header: "Outstanding accounts", width: 40, wrap: true,
+    value: (r) => r.missing_accounts
+      .map((a) => `${formatMissingAccount(a)}${a.status === "noted" ? " — noted" : ""}`)
+      .join("\n"),
+  },
+  {
     header: "Comments", width: 40, wrap: true,
     value: (r) => r.comments
       .map((c) => `${c.account ? `${c.account}: ` : ""}${c.text}${c.expected_date ? ` (expected ${c.expected_date})` : ""}`)
@@ -60,8 +68,8 @@ const EXPORT_COLUMNS: ExcelColumn<TaskBasketItem>[] = [
   },
   { header: "Triggered", width: 14, value: (r) => new Date(r.triggered_at).toISOString().slice(0, 10) },
   { header: "Overdue (days)", width: 14, align: "right", value: (r) => (r.status === "open" ? String(daysSince(r.triggered_at)) : "—") },
-  { header: "Status", width: 12, value: (r) => (r.status === "open" ? "Open" : "Resolved") },
-  { header: "Resolution note", width: 34, wrap: true, value: (r) => r.resolution_note || (r.status === "resolved" ? "Resolved" : "") },
+  { header: "Status", width: 14, value: (r) => TASK_BASKET_STATUS_LABELS[r.status] ?? r.status },
+  { header: "Resolution note", width: 34, wrap: true, value: (r) => r.resolution_note || (r.status !== "open" ? TASK_BASKET_STATUS_LABELS[r.status] : "") },
 ]
 
 export default function TaskBasketPage() {
@@ -156,7 +164,8 @@ export default function TaskBasketPage() {
     if (!rows.length) return
     setExporting(true)
     try {
-      const completed = rows.filter((i) => i.status === "resolved").length
+      const completed = rows.filter((i) => i.status !== "open").length
+      const receivedLate = rows.filter((i) => i.status === "received_late").length
       const missing = rows.length - completed
       const filterNotes = [
         rows !== visibleItems ? `${rows.length} selected row${rows.length === 1 ? "" : "s"}` : null,
@@ -177,6 +186,7 @@ export default function TaskBasketPage() {
           { label: "Total", value: rows.length },
           { label: "Missing", value: missing, color: missing > 0 ? "FFDC2626" : "FF94A3B8" },
           { label: "Completed", value: completed, color: "FF059669" },
+          { label: "Received late", value: receivedLate, color: "FF0369A1" },
         ],
       })
       toast({ title: "Exported", description: `${rows.length} rows written to Excel.` })
@@ -222,6 +232,7 @@ export default function TaskBasketPage() {
           <SelectContent>
             <SelectItem value="open">Open</SelectItem>
             <SelectItem value="resolved">Resolved</SelectItem>
+            <SelectItem value="received_late">Received late</SelectItem>
             <SelectItem value="all">All</SelectItem>
           </SelectContent>
         </Select>

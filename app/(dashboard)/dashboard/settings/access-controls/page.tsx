@@ -1,36 +1,32 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Eraser, RotateCcw, SlidersHorizontal } from "lucide-react";
 import {
-  Save, Info, Lock, Check,
-  RefreshCw, ChevronDown, ChevronRight, Search,
-  CornerDownRight,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
-import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
-
-import { PERMISSIONS, type PermissionDefinition } from "@/lib/auth/permissions";
-import type { PermissionKey } from "@/lib/auth/permissions";
+  AccessMatrix,
+  DataTable,
+  EmptyState,
+  MultiUserPicker,
+  PillTabs,
+  StatusPill,
+  ToolbarButton,
+  USER_SCOPE_TABS,
+  isBclStaff,
+  type CellState,
+  type UserScope,
+  type DTColumn,
+  type MatrixPermission,
+  type MatrixSection,
+} from "@/components/access-matrix";
+import { theme } from "@/components/access-matrix/theme";
+import { PERMISSIONS, type PermissionKey } from "@/lib/auth/permissions";
 import type { ScannerUserRole } from "@/lib/auth/types";
 
+// Access lives entirely in each user's scanner_users.task_manager_access column. A role is the
+// users who have it: editing a role writes into every one of them. Same design as BCL Registry's
+// User Rights module (components/access-matrix).
+
 const ROLES: { key: ScannerUserRole; label: string }[] = [
-  { key: "SuperAdmin", label: "Super Admin" },
   { key: "general_admin", label: "General Admin" },
   { key: "company_admin", label: "Company Admin" },
   { key: "company_staff", label: "Company Staff" },
@@ -39,335 +35,420 @@ const ROLES: { key: ScannerUserRole; label: string }[] = [
   { key: "petty_cash_user", label: "Petty Cash User" },
 ];
 
-// Category (group) -> Page/Component (a permission with no parentKey) -> Action (a permission
-// whose parentKey points at that page) — a real tree instead of one flat list per group, so
-// "Manage Couriers" reads as nested inside "Passport Endorsement Tracking" rather than sitting
-// beside it as an unrelated row.
-interface PageNode {
-  permission: PermissionDefinition;
-  children: PermissionDefinition[];
-}
-interface GroupNode {
-  group: string;
-  pages: PageNode[];
+const ROLE_LABELS: Record<string, string> = {
+  SuperAdmin: "Super Admin",
+  ...Object.fromEntries(ROLES.map((r) => [r.key, r.label])),
+};
+
+// Columns: every permission, grouped by its category. Actions nested under a page say so.
+const MATRIX_PERMISSIONS: MatrixPermission[] = PERMISSIONS.map((p) => {
+  const parent = p.parentKey ? PERMISSIONS.find((q) => q.key === p.parentKey) : null;
+  return { key: p.key, label: parent ? `${parent.label} › ${p.label}` : p.label, group: p.group };
+});
+
+type Section = "users" | "roles" | "user";
+
+interface AccessUser {
+  id: string;
+  displayName: string;
+  email: string | null;
+  role: ScannerUserRole;
+  isActive: boolean;
+  companyIds: number[];
+  hasAllCompanyAccess: boolean;
 }
 
-function buildTree(permissions: PermissionDefinition[]): GroupNode[] {
-  const byKey = new Map(permissions.map((p) => [p.key, p]));
-  const topLevel = permissions.filter((p) => !p.parentKey || !byKey.has(p.parentKey));
-  const childrenByParent = new Map<string, PermissionDefinition[]>();
-  permissions.forEach((p) => {
-    if (p.parentKey && byKey.has(p.parentKey)) {
-      const list = childrenByParent.get(p.parentKey) || [];
-      list.push(p);
-      childrenByParent.set(p.parentKey, list);
-    }
-  });
-
-  const groups = new Map<string, PageNode[]>();
-  topLevel.forEach((p) => {
-    const list = groups.get(p.group) || [];
-    list.push({ permission: p, children: childrenByParent.get(p.key) || [] });
-    groups.set(p.group, list);
-  });
-
-  return Array.from(groups.entries()).map(([group, pages]) => ({ group, pages }));
+interface RoleSummary {
+  role: string;
+  userCount: number;
+  permissions: PermissionKey[];
+  partial: PermissionKey[];
 }
+
+async function requestJson(url: string, init?: RequestInit) {
+  const res = await fetch(url, init);
+  const json = await res.json();
+  if (!res.ok || json?.success === false) throw new Error(json?.error ?? "Request failed");
+  return json;
+}
+
+const errorText = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback);
 
 export default function AccessControlsPage() {
-  const [initialData, setInitialData] = useState<Record<string, PermissionKey[]>>({});
-  const [drafts, setDrafts] = useState<Record<string, PermissionKey[]>>({});
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [section, setSection] = useState<Section>("users");
+  // BCL Staff (company 10) by default, like BCL Registry; "All Users" shows everyone.
+  const [scope, setScope] = useState<UserScope>("bcl");
   const [error, setError] = useState<string | null>(null);
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    loadPermissions();
+  // ── Users ──
+  const [users, setUsers] = useState<AccessUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const loadUsers = useCallback(async () => {
+    setUsersLoading(true);
+    try {
+      setUsers((await requestJson("/api/auth/access-controls/users")).users);
+    } catch (e) {
+      setError(errorText(e, "Failed to load users."));
+    } finally {
+      setUsersLoading(false);
+    }
   }, []);
 
-  async function loadPermissions() {
-    setLoading(true);
+  // ── Roles ──
+  const [summaries, setSummaries] = useState<RoleSummary[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(true);
+  const [roleSaving, setRoleSaving] = useState<Set<string>>(new Set());
+  const loadRoles = useCallback(async (showLoading = true) => {
+    if (showLoading) setRolesLoading(true);
     try {
-      const res = await fetch("/api/auth/access-controls/roles");
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Failed to load permissions.");
-      const data = Object.fromEntries(
-        (json.roles as { role: string; permissions: PermissionKey[] }[]).map((r) => [r.role, r.permissions])
-      );
-      setInitialData(data);
-      setDrafts(data);
-    } catch (err) {
-      setError("Failed to load permissions.");
+      setSummaries((await requestJson("/api/auth/access-controls/roles")).roles);
+    } catch (e) {
+      setError(errorText(e, "Failed to load role permissions."));
     } finally {
-      setLoading(false);
+      if (showLoading) setRolesLoading(false);
     }
-  }
+  }, []);
 
-  const tree = useMemo(() => buildTree(PERMISSIONS), []);
+  useEffect(() => {
+    loadUsers();
+    loadRoles();
+  }, [loadUsers, loadRoles]);
 
-  // A page or action matches on its own label/key/description; a page also counts as a match
-  // if any of its actions match, so searching "courier" still surfaces the Passport Endorsement
-  // Tracking page (with only the matching action shown under it) rather than nothing at all.
-  const filteredTree = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return tree;
+  const summaryByRole = useMemo(() => new Map(summaries.map((s) => [s.role, s])), [summaries]);
 
-    const matches = (p: PermissionDefinition) =>
-      p.label.toLowerCase().includes(q) || p.key.toLowerCase().includes(q) || p.description.toLowerCase().includes(q);
-
-    return tree
-      .map((g) => {
-        const pages = g.pages
-          .map((page) => {
-            const childMatches = page.children.filter(matches);
-            const pageMatches = matches(page.permission);
-            if (!pageMatches && childMatches.length === 0) return null;
-            return { permission: page.permission, children: pageMatches ? page.children : childMatches };
-          })
-          .filter((p): p is PageNode => p !== null);
-        return pages.length > 0 ? { group: g.group, pages } : null;
-      })
-      .filter((g): g is GroupNode => g !== null);
-  }, [tree, searchQuery]);
-
-  const totalRules = useMemo(() => PERMISSIONS.length, []);
-  const visibleRules = useMemo(
-    () => filteredTree.reduce((sum, g) => sum + g.pages.reduce((s, p) => s + 1 + p.children.length, 0), 0),
-    [filteredTree]
+  const roleCell = useCallback(
+    (role: string, key: string): CellState => {
+      const s = summaryByRole.get(role);
+      if (!s) return "none";
+      if (s.permissions.includes(key as PermissionKey)) return "all";
+      if (s.partial.includes(key as PermissionKey)) return "some";
+      return "none";
+    },
+    [summaryByRole]
   );
 
-  const hasChanges = useMemo(() => JSON.stringify(initialData) !== JSON.stringify(drafts), [initialData, drafts]);
-
-  function togglePermission(roleKey: string, permission: PermissionKey) {
-    setDrafts((current) => {
-      const existing = new Set(current[roleKey] ?? []);
-      if (existing.has(permission)) existing.delete(permission);
-      else existing.add(permission);
-      return { ...current, [roleKey]: Array.from(existing) };
-    });
-  }
-
-  function toggleGroupCollapsed(group: string) {
-    setCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(group)) next.delete(group);
-      else next.add(group);
-      return next;
-    });
-  }
-
-  async function saveAllPermissions() {
-    setSaving(true);
-    try {
-      const promises = Object.entries(drafts).map(([roleKey, permissions]) =>
-        fetch("/api/auth/access-controls/roles", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ role: roleKey, permissions }),
+  /** Writes changes into every user of each role, then shows the server's summary. */
+  const saveRoles = useCallback(
+    async (roles: string[], changes: Record<string, boolean>) => {
+      const keys = roles.flatMap((role) => Object.keys(changes).map((key) => `${role}:${key}`));
+      // Optimistic: all users of those roles now have exactly these values.
+      setSummaries((prev) =>
+        prev.map((s) => {
+          if (!roles.includes(s.role)) return s;
+          const permissions = new Set(s.permissions);
+          const partial = new Set(s.partial);
+          for (const [key, value] of Object.entries(changes)) {
+            partial.delete(key as PermissionKey);
+            if (value) permissions.add(key as PermissionKey);
+            else permissions.delete(key as PermissionKey);
+          }
+          return { ...s, permissions: [...permissions], partial: [...partial] };
         })
       );
-      await Promise.all(promises);
-      setInitialData(drafts);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-    } catch (err) {
-      setError("Failed to save changes.");
-    } finally {
-      setSaving(false);
+      setRoleSaving((prev) => new Set([...prev, ...keys]));
+      try {
+        let latest: RoleSummary[] | null = null;
+        for (const role of roles) {
+          latest = (
+            await requestJson("/api/auth/access-controls/roles", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ role, changes }),
+            })
+          ).roles;
+        }
+        if (latest) setSummaries(latest);
+      } catch (e) {
+        setError(errorText(e, "Failed to save role permissions."));
+        await loadRoles(false);
+      } finally {
+        setRoleSaving((prev) => {
+          const next = new Set(prev);
+          keys.forEach((k) => next.delete(k));
+          return next;
+        });
+      }
+    },
+    [loadRoles]
+  );
+
+  const roleSections = useMemo<MatrixSection[]>(
+    () =>
+      ROLES.map((role) => {
+        const count = summaryByRole.get(role.key)?.userCount ?? 0;
+        return { id: role.key, label: role.label, detail: `${count} user${count === 1 ? "" : "s"}`, readOnly: count === 0 };
+      }),
+    [summaryByRole]
+  );
+  const editableRoles = roleSections.filter((s) => !s.readOnly).map((s) => s.id);
+
+  const clearAllRoles = () => {
+    if (!window.confirm("Turn off every permission for every user in these roles? They lose access to Task Manager until switches are turned on again. Super Admins are not affected.")) return;
+    void saveRoles(editableRoles, Object.fromEntries(MATRIX_PERMISSIONS.map((p) => [p.key, false])));
+  };
+
+  // ── Selected users ──
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [accessByUser, setAccessByUser] = useState<Record<string, { role: string; permissions: PermissionKey[] }>>({});
+  const [accessLoading, setAccessLoading] = useState(false);
+  const [userSaving, setUserSaving] = useState<Set<string>>(new Set());
+  const selectedUsers = useMemo(() => users.filter((u) => selectedIds.includes(u.id)), [users, selectedIds]);
+
+  const loadSelectedAccess = useCallback(async () => {
+    if (selectedIds.length === 0) {
+      setAccessByUser({});
+      return;
     }
-  }
+    setAccessLoading(true);
+    try {
+      const json = await requestJson(`/api/auth/access-controls/users?userIds=${encodeURIComponent(selectedIds.join(","))}`);
+      setAccessByUser(json.accessByUser);
+    } catch (e) {
+      setError(errorText(e, "Failed to load user access."));
+    } finally {
+      setAccessLoading(false);
+    }
+  }, [selectedIds]);
+
+  useEffect(() => {
+    loadSelectedAccess();
+  }, [loadSelectedAccess]);
+
+  const userCell = useCallback(
+    (userId: string, key: string): CellState =>
+      accessByUser[userId]?.role === "SuperAdmin" || accessByUser[userId]?.permissions.includes(key as PermissionKey)
+        ? "all"
+        : "none",
+    [accessByUser]
+  );
+
+  const saveUsers = useCallback(
+    async (userIds: string[], changes: Record<string, boolean>) => {
+      const targets = userIds.filter((id) => accessByUser[id] && accessByUser[id].role !== "SuperAdmin");
+      if (targets.length === 0) return;
+      const keys = targets.flatMap((id) => Object.keys(changes).map((key) => `${id}:${key}`));
+      setAccessByUser((prev) => {
+        const next = { ...prev };
+        for (const id of targets) {
+          const perms = new Set(prev[id].permissions);
+          for (const [key, value] of Object.entries(changes)) {
+            if (value) perms.add(key as PermissionKey);
+            else perms.delete(key as PermissionKey);
+          }
+          next[id] = { ...prev[id], permissions: [...perms] };
+        }
+        return next;
+      });
+      setUserSaving((prev) => new Set([...prev, ...keys]));
+      try {
+        await Promise.all(
+          targets.map((userId) =>
+            requestJson("/api/auth/access-controls/users", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId, permissions: changes }),
+            })
+          )
+        );
+      } catch (e) {
+        setError(errorText(e, "Failed to save user access."));
+      } finally {
+        await loadSelectedAccess();
+        setUserSaving((prev) => {
+          const next = new Set(prev);
+          keys.forEach((k) => next.delete(k));
+          return next;
+        });
+      }
+    },
+    [accessByUser, loadSelectedAccess]
+  );
+
+  const resetSelectedToDefaults = async () => {
+    const label = selectedUsers.length === 1 ? selectedUsers[0].displayName : `${selectedUsers.length} users`;
+    if (!window.confirm(`Replace everything set for ${label} with the built-in defaults for their role?`)) return;
+    setAccessLoading(true);
+    try {
+      await Promise.all(
+        selectedIds.map((id) =>
+          requestJson(`/api/auth/access-controls/users?userId=${encodeURIComponent(id)}`, { method: "DELETE" })
+        )
+      );
+    } catch (e) {
+      setError(errorText(e, "Failed to reset user access."));
+    } finally {
+      await loadSelectedAccess();
+    }
+  };
+
+  const userSections = useMemo<MatrixSection[]>(
+    () =>
+      selectedUsers.map((u) => ({
+        id: u.id,
+        label: u.displayName,
+        detail: ROLE_LABELS[u.role] ?? u.role,
+        readOnly: u.role === "SuperAdmin",
+      })),
+    [selectedUsers]
+  );
+
+  // ── Users table ──
+  const userColumns = useMemo<DTColumn<AccessUser>[]>(
+    () => [
+      { id: "name", header: "Name", sticky: true, width: 220, searchable: true, text: (u) => u.displayName, accessor: (u) => <span className="font-medium">{u.displayName}</span> },
+      { id: "id", header: "ID", width: 300, searchable: true, text: (u) => u.id, accessor: (u) => <span className="font-mono text-[11px] text-muted-foreground" title={u.id}>{u.id}</span> },
+      { id: "email", header: "Email", width: 240, searchable: true, text: (u) => u.email ?? "", accessor: (u) => u.email || <span className="font-medium text-red-500">Missing</span> },
+      { id: "role", header: "Role", width: 160, searchable: true, text: (u) => ROLE_LABELS[u.role] ?? u.role, accessor: (u) => ROLE_LABELS[u.role] ?? u.role },
+      { id: "status", header: "Status", width: 110, align: "center", text: (u) => (u.isActive ? "Active" : "Inactive"), accessor: (u) => <StatusPill active={u.isActive} /> },
+      {
+        id: "permissions",
+        header: "Permissions",
+        width: 140,
+        align: "center",
+        text: () => "",
+        accessor: (u) => (
+          <ToolbarButton
+            className={theme.compactButton}
+            onClick={() => {
+              setSelectedIds([u.id]);
+              setSection("user");
+            }}
+          >
+            <SlidersHorizontal />
+            {u.role === "SuperAdmin" ? "Full access" : "Permissions"}
+          </ToolbarButton>
+        ),
+      },
+    ],
+    []
+  );
+
+  const scopedUsers = useMemo(
+    () => (scope === "bcl" ? users.filter((u) => isBclStaff(u.companyIds, u.hasAllCompanyAccess)) : users),
+    [users, scope]
+  );
+  const activeUsers = scopedUsers.filter((u) => u.isActive).length;
+  const scopeTabs = <PillTabs variant="sub" tabs={USER_SCOPE_TABS} value={scope} onValueChange={setScope} />;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-theme(spacing.16))] max-w-[1600px] mx-auto p-6 space-y-6">
-
-      {/* HEADER SECTION */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between shrink-0">
-        <div className="flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-white shadow-xl">
-            <Lock className="h-6 w-6" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Access Control Matrix</h1>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-xs font-medium text-slate-500">Security Management</span>
-              <div className="h-1 w-1 rounded-full bg-slate-300" />
-              <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">{totalRules} Total Rules</span>
-            </div>
-          </div>
+    <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden bg-slate-50/50">
+      {/* Row 1: identity — same hierarchy as the KRA Email Center */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-slate-200/80 bg-white px-4 py-2.5 antialiased">
+        <h1 className="text-2xl font-bold leading-none tracking-tight text-slate-900">User Access</h1>
+        <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-sm font-semibold text-custom-blue">
+          Task Manager
+        </span>
+        <div className="hidden items-center gap-1.5 text-base text-slate-500 md:flex">
+          <span>
+            {scopedUsers.length} user{scopedUsers.length === 1 ? "" : "s"}
+          </span>
+          <span className="text-slate-300">·</span>
+          <span>{activeUsers} active</span>
         </div>
+      </div>
 
-        <div className="flex items-center gap-3">
-          <div className="relative w-64 hidden lg:block">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <Input
-              placeholder="Search permissions..."
-              className="pl-9 bg-white border-slate-200"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+      {/* Row 2: tabs + this tab's controls */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-200/80 bg-slate-50/60 px-4 py-2 antialiased">
+        <PillTabs
+          tabs={[
+            { value: "users", label: "Users", count: scopedUsers.length },
+            { value: "roles", label: "Role Permissions", count: ROLES.length },
+            { value: "user", label: "User Permissions" },
+          ]}
+          value={section}
+          onValueChange={setSection}
+        />
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {section === "users" && scopeTabs}
+          {section === "roles" && (
+            <span className="text-base text-slate-500">
+              Editing a role writes into every user with that role. A dash means only some of them have it.
+            </span>
+          )}
+          {section === "user" && scopeTabs}
+          {section === "user" && (
+            <MultiUserPicker
+              value={selectedIds}
+              onValueChange={setSelectedIds}
+              options={scopedUsers.map((u) => ({ value: u.id, label: `${u.displayName} · ${ROLE_LABELS[u.role] ?? u.role}` }))}
             />
-          </div>
-          <Button
-            onClick={saveAllPermissions}
-            disabled={saving || !hasChanges}
-            className={cn("h-11 px-6 shadow-lg transition-all", hasChanges ? "bg-indigo-600 hover:bg-indigo-700" : "bg-slate-800")}
-          >
-            {saving ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-            Deploy Changes
-          </Button>
+          )}
         </div>
       </div>
 
-      {/* TABLE CONTAINER */}
-      <div className="relative flex-1 min-h-0 rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col overflow-hidden">
-        <div className="overflow-auto flex-1 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
-          <TooltipProvider delayDuration={0}>
-            <Table className="border-separate border-spacing-0">
-              <TableHeader className="sticky top-0 z-30">
-                <TableRow className="bg-slate-50/95 backdrop-blur-sm hover:bg-slate-50/95">
-                  <TableHead className="sticky left-0 z-40 w-14 min-w-14 bg-slate-50 border-r border-b font-bold text-slate-500 py-6 text-center shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
-                    #
-                  </TableHead>
-                  <TableHead className="sticky left-14 z-40 w-[320px] min-w-[320px] bg-slate-50 border-r border-b font-bold text-slate-900 py-6 px-6 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
-                    System Permissions
-                  </TableHead>
-                  {ROLES.map((role) => (
-                    <TableHead key={role.key} className="text-center min-w-[150px] border-b bg-slate-50/50">
-                      <span className="text-xs font-black uppercase tracking-tighter text-slate-600">{role.label}</span>
-                    </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {loading ? (
-                  <TableRow><TableCell colSpan={ROLES.length + 2} className="h-64 text-center">Loading...</TableCell></TableRow>
-                ) : filteredTree.length === 0 ? (
-                  <TableRow><TableCell colSpan={ROLES.length + 2} className="h-40 text-center text-sm text-slate-400">No permissions match "{searchQuery}".</TableCell></TableRow>
-                ) : filteredTree.map((g, groupIdx) => {
-                  const groupIndex = groupIdx + 1;
-                  const isCollapsed = collapsedGroups.has(g.group);
-                  return (
-                    <React.Fragment key={g.group}>
-                      <TableRow className="bg-slate-100/70 hover:bg-slate-100/70">
-                        <TableCell className="sticky left-0 z-20 bg-slate-100/70 border-r border-b py-2.5 text-center">
-                          <span className="text-[10px] font-black text-slate-400">{groupIndex}</span>
-                        </TableCell>
-                        <TableCell colSpan={ROLES.length + 1} className="py-2.5 px-6 border-b sticky left-14 z-10">
-                          <button
-                            type="button"
-                            onClick={() => toggleGroupCollapsed(g.group)}
-                            className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-[0.15em] text-indigo-600 hover:text-indigo-700"
-                          >
-                            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                            {g.group}
-                            <span className="font-semibold text-slate-400 normal-case tracking-normal">
-                              ({g.pages.reduce((s, p) => s + 1 + p.children.length, 0)})
-                            </span>
-                          </button>
-                        </TableCell>
-                      </TableRow>
-
-                      {!isCollapsed && g.pages.map((page, pageIdx) => {
-                        const pageIndex = `${groupIndex}.${pageIdx + 1}`;
-                        return (
-                          <React.Fragment key={page.permission.key}>
-                            <TableRow className="group hover:bg-indigo-50/20 transition-colors">
-                              <TableCell className="sticky left-0 z-20 bg-white group-hover:bg-indigo-50/10 border-r border-b text-center">
-                                <span className="text-[11px] font-bold text-slate-400 tabular-nums">{pageIndex}</span>
-                              </TableCell>
-                              <TableCell className="sticky left-14 z-20 bg-white group-hover:bg-indigo-50/10 py-5 px-6 border-r border-b shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
-                                <div className="flex flex-col gap-0.5">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-sm font-bold text-slate-800">{page.permission.label}</span>
-                                    <Tooltip>
-                                      <TooltipTrigger><Info className="h-3 w-3 text-slate-300" /></TooltipTrigger>
-                                      <TooltipContent className="bg-slate-900 text-[10px]">{page.permission.key}</TooltipContent>
-                                    </Tooltip>
-                                  </div>
-                                  <span className="text-[11px] text-slate-500 line-clamp-1">{page.permission.description}</span>
-                                </div>
-                              </TableCell>
-                              {ROLES.map((role) => (
-                                <TableCell key={`${role.key}-${page.permission.key}`} className="text-center border-b p-0 group-hover:bg-indigo-50/5">
-                                  <div className="flex items-center justify-center">
-                                    <Switch
-                                      checked={(drafts[role.key] ?? []).includes(page.permission.key)}
-                                      onCheckedChange={() => togglePermission(role.key, page.permission.key)}
-                                      className="data-[state=checked]:bg-indigo-600"
-                                    />
-                                  </div>
-                                </TableCell>
-                              ))}
-                            </TableRow>
-
-                            {page.children.map((action, actionIdx) => {
-                              const actionIndex = `${pageIndex}.${actionIdx + 1}`;
-                              return (
-                                <TableRow key={action.key} className="group hover:bg-indigo-50/20 transition-colors">
-                                  <TableCell className="sticky left-0 z-20 bg-white group-hover:bg-indigo-50/10 border-r border-b text-center">
-                                    <span className="text-[11px] font-medium text-slate-300 tabular-nums">{actionIndex}</span>
-                                  </TableCell>
-                                  <TableCell className="sticky left-14 z-20 bg-white group-hover:bg-indigo-50/10 py-4 pl-10 pr-6 border-r border-b shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
-                                    <div className="flex items-start gap-2">
-                                      <CornerDownRight className="h-3.5 w-3.5 text-slate-300 shrink-0 mt-0.5" />
-                                      <div className="flex flex-col gap-0.5 min-w-0">
-                                        <div className="flex items-center gap-2">
-                                          <span className="text-sm font-semibold text-slate-700">{action.label}</span>
-                                          <Tooltip>
-                                            <TooltipTrigger><Info className="h-3 w-3 text-slate-300" /></TooltipTrigger>
-                                            <TooltipContent className="bg-slate-900 text-[10px]">{action.key}</TooltipContent>
-                                          </Tooltip>
-                                        </div>
-                                        <span className="text-[11px] text-slate-500 line-clamp-1">{action.description}</span>
-                                      </div>
-                                    </div>
-                                  </TableCell>
-                                  {ROLES.map((role) => (
-                                    <TableCell key={`${role.key}-${action.key}`} className="text-center border-b p-0 group-hover:bg-indigo-50/5">
-                                      <div className="flex items-center justify-center">
-                                        <Switch
-                                          checked={(drafts[role.key] ?? []).includes(action.key)}
-                                          onCheckedChange={() => togglePermission(role.key, action.key)}
-                                          className="data-[state=checked]:bg-indigo-600"
-                                        />
-                                      </div>
-                                    </TableCell>
-                                  ))}
-                                </TableRow>
-                              );
-                            })}
-                          </React.Fragment>
-                        );
-                      })}
-                    </React.Fragment>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </TooltipProvider>
-        </div>
-
-        {/* FOOTER */}
-        <div className="shrink-0 border-t bg-slate-50/50 px-6 py-3 flex items-center justify-between">
-          <p className="text-xs font-medium text-slate-500">
-            Showing <span className="text-slate-900">{visibleRules}</span> of <span className="text-slate-900">{totalRules}</span> permissions across <span className="text-slate-900">{filteredTree.length}</span> categories
-          </p>
-        </div>
-      </div>
-
-      {/* SUCCESS/ERROR TOASTS */}
-      {saved && (
-        <div className="fixed bottom-10 right-10 bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-right-10">
-          <div className="h-8 w-8 rounded-full bg-emerald-500 flex items-center justify-center">
-            <Check className="h-5 w-5 text-white" />
-          </div>
-          <p className="text-sm font-bold">Permissions Updated Successfully</p>
+      <div className="min-h-0 flex-1 overflow-auto p-4">
+      {error && (
+        <div className="mb-3 flex items-center justify-between rounded-md border border-red-200 bg-red-50 px-3 py-2 text-base text-red-700">
+          {error}
+          <button type="button" className="font-semibold hover:underline" onClick={() => setError(null)}>
+            Dismiss
+          </button>
         </div>
       )}
+
+      {section === "users" && (
+        <DataTable
+          title="Task Manager Users"
+          showRowNumber
+          columns={userColumns}
+          data={scopedUsers}
+          getRowId={(u) => u.id}
+          loading={usersLoading}
+          searchPlaceholder="Search users..."
+          onRefresh={loadUsers}
+          pageSize={50}
+        />
+      )}
+
+      {section === "roles" && (
+        <AccessMatrix
+          title="Task Manager Role Permissions"
+          sectionHeader="Role"
+          sections={roleSections}
+          permissions={MATRIX_PERMISSIONS}
+          getCell={roleCell}
+          isSaving={(role, key) => roleSaving.has(`${role}:${key}`)}
+          onChange={(role, key, value) => saveRoles([role], { [key]: value })}
+          onSelectColumn={(key, value) => saveRoles(editableRoles, { [key]: value })}
+          loading={rolesLoading}
+          onRefresh={() => loadRoles()}
+          actions={
+            <ToolbarButton tone="danger" onClick={clearAllRoles} disabled={rolesLoading || editableRoles.length === 0}>
+              <Eraser />
+              <span className="hidden sm:inline">Clear all</span>
+            </ToolbarButton>
+          }
+        />
+      )}
+
+      {section === "user" &&
+        (selectedUsers.length > 0 ? (
+          <AccessMatrix
+            title="Task Manager User Permissions"
+            sectionHeader="User"
+            sections={userSections}
+            permissions={MATRIX_PERMISSIONS}
+            getCell={userCell}
+            isSaving={(id, key) => userSaving.has(`${id}:${key}`)}
+            onChange={(id, key, value) => saveUsers([id], { [key]: value })}
+            onSelectColumn={(key, value) => saveUsers(selectedIds, { [key]: value })}
+            loading={accessLoading && Object.keys(accessByUser).length === 0}
+            onRefresh={loadSelectedAccess}
+            actions={
+              <ToolbarButton onClick={resetSelectedToDefaults} disabled={accessLoading}>
+                <RotateCcw />
+                <span className="hidden sm:inline">Reset to role defaults</span>
+              </ToolbarButton>
+            }
+          />
+        ) : (
+          <EmptyState>
+            Pick one or more users above (or <span className="font-semibold text-foreground">Select all</span>), or use{" "}
+            <span className="font-semibold text-foreground">Permissions</span> on the Users tab, to set exactly what each
+            person can do.
+          </EmptyState>
+        ))}
+      </div>
     </div>
   );
 }

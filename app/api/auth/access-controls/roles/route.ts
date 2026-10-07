@@ -1,29 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ensurePermission, getRolePermissions, setRolePermissions } from "@/lib/auth/access-controls";
+import {
+  PERMISSION_KEYS,
+  ensurePermission,
+  getRoleSummaries,
+  setRolePermissionChanges,
+} from "@/lib/auth/access-controls";
 import { requireAppSession } from "@/lib/auth/session";
 import { toAuthErrorResponse } from "@/lib/auth/errors";
-import { DEFAULT_ROLE_PERMISSIONS } from "@/lib/auth/permissions";
+import type { PermissionKey } from "@/lib/auth/permissions";
 import type { ScannerUserRole } from "@/lib/auth/types";
 
-const ALLOWED_ROLES = new Set<ScannerUserRole>(["SuperAdmin", "general_admin", "company_admin", "company_staff", "bcl_staff", "officer", "petty_cash_user"]);
+// Roles have no storage of their own: a role is the users who have it. GET summarises their
+// scanner_users.task_manager_access columns; PUT writes into every one of those users.
+
+const ALLOWED_ROLES: ScannerUserRole[] = ["SuperAdmin", "general_admin", "company_admin", "company_staff", "bcl_staff", "officer", "petty_cash_user"];
+const KEYS = new Set<string>(PERMISSION_KEYS);
 
 export async function GET(request: NextRequest) {
   try {
     const session = await requireAppSession(request);
     await ensurePermission(session.user, "settings.access_controls.view");
 
-    const roles = await Promise.all(
-      [...ALLOWED_ROLES].map(async (role) => {
-        const saved = await getRolePermissions(role);
-        return {
-          role,
-          permissions: saved ?? DEFAULT_ROLE_PERMISSIONS[role] ?? [],
-          hasOverride: Boolean(saved),
-        };
-      })
-    );
-
-    return NextResponse.json({ success: true, roles });
+    return NextResponse.json({ success: true, roles: await getRoleSummaries(ALLOWED_ROLES) });
   } catch (error) {
     const authResponse = toAuthErrorResponse(error);
     if (authResponse) return authResponse;
@@ -32,19 +30,31 @@ export async function GET(request: NextRequest) {
   }
 }
 
+/** Body: { role, changes: { [key]: boolean } } — only the keys that changed. */
 export async function PUT(request: NextRequest) {
   try {
     const session = await requireAppSession(request);
     await ensurePermission(session.user, "settings.access_controls.manage");
 
-    const body = (await request.json()) as { role?: string; permissions?: string[] };
+    const body = (await request.json()) as { role?: string; changes?: Record<string, unknown> };
 
-    if (!body.role || !ALLOWED_ROLES.has(body.role as ScannerUserRole)) {
+    if (!body.role || !ALLOWED_ROLES.includes(body.role as ScannerUserRole)) {
       return NextResponse.json({ success: false, error: "Invalid or missing role." }, { status: 400 });
     }
+    if (body.role === "SuperAdmin") {
+      return NextResponse.json({ success: false, error: "Super Admin always has every permission." }, { status: 400 });
+    }
 
-    const permissions = await setRolePermissions(body.role, body.permissions ?? []);
-    return NextResponse.json({ success: true, data: { role: body.role, permissions } });
+    const changes: Partial<Record<PermissionKey, boolean>> = {};
+    for (const [key, value] of Object.entries(body.changes ?? {})) {
+      if (!KEYS.has(key) || typeof value !== "boolean") {
+        return NextResponse.json({ success: false, error: `Invalid permission change: ${key}` }, { status: 400 });
+      }
+      changes[key as PermissionKey] = value;
+    }
+
+    await setRolePermissionChanges(body.role as ScannerUserRole, changes);
+    return NextResponse.json({ success: true, roles: await getRoleSummaries(ALLOWED_ROLES) });
   } catch (error) {
     const authResponse = toAuthErrorResponse(error);
     if (authResponse) return authResponse;

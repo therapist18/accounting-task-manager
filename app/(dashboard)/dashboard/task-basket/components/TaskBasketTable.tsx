@@ -12,6 +12,8 @@ import {
   TaskBasketHistoryEntry,
   TASK_BASKET_COMMENT_SOURCE_LABELS,
   TASK_BASKET_MODULE_LABELS,
+  TASK_BASKET_STATUS_LABELS,
+  formatMissingAccount,
 } from "@/lib/supabase/taskBasket";
 // The Email Center's own table building blocks, so this module sorts, stripes, paginates and reports
 // its Total / Completed / Missing exactly like the cases / emails / rules tables instead of growing a
@@ -84,7 +86,7 @@ const STATS_COLUMNS: StatsColumn<TaskBasketItem>[] = [
   {
     id: "status",
     getValue: (i: TaskBasketItem) =>
-      i.status === "resolved" ? "resolved" : "",
+      i.status !== "open" ? i.status : "",
   },
   { id: "action" },
 ];
@@ -149,8 +151,10 @@ function HistoryList({ history }: { history: TaskBasketHistoryEntry[] }) {
             {format(new Date(entry.checked_at), "dd MMM yyyy, HH:mm")}
           </span>
           {entry.still_pending === false ? (
-            <span className="text-emerald-700">
-              Uploaded — item closed automatically
+            <span className="text-sky-700">
+              {entry.event === "late_reception"
+                ? "Files recorded after the deadline — received late"
+                : "Uploaded after the deadline — received late"}
               {typeof entry.received_accounts === "number" &&
               typeof entry.total_accounts === "number"
                 ? ` (${entry.received_accounts}/${entry.total_accounts} statements received)`
@@ -424,6 +428,22 @@ export default function TaskBasketTable({
                           </td>
                           <td className={cn(TD_CLASS, "max-w-[280px]")}>
                             {item.reason}
+                            {item.missing_accounts.length > 0 && (
+                              <ul className="mt-1 space-y-0.5">
+                                {item.missing_accounts.map((account) => (
+                                  <li
+                                    key={account.bank_id}
+                                    className="text-xs text-slate-600"
+                                    title={account.note || undefined}
+                                  >
+                                    <span className="font-mono">{formatMissingAccount(account)}</span>
+                                    {account.status === "noted" && (
+                                      <span className="ml-1 text-violet-700">· noted</span>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
                             {item.has_comments && (
                               <div
                                 className="mt-1 flex items-start gap-1.5"
@@ -468,10 +488,17 @@ export default function TaskBasketTable({
                               className={
                                 isOpen
                                   ? "border-amber-300 bg-amber-50 text-amber-700"
-                                  : "border-emerald-300 bg-emerald-50 text-emerald-700"
+                                  : item.status === "received_late"
+                                    ? "border-sky-300 bg-sky-50 text-sky-700"
+                                    : "border-emerald-300 bg-emerald-50 text-emerald-700"
+                              }
+                              title={
+                                item.status === "received_late"
+                                  ? "The client delivered after this was pushed to the basket — closed automatically"
+                                  : undefined
                               }
                             >
-                              {isOpen ? "Open" : "Resolved"}
+                              {TASK_BASKET_STATUS_LABELS[item.status] ?? item.status}
                             </Badge>
                           </td>
                           <td
@@ -536,6 +563,27 @@ export default function TaskBasketTable({
                                   <p className="text-sm text-slate-700">
                                     {item.reason}
                                   </p>
+                                  {item.missing_accounts.length > 0 && (
+                                    <>
+                                      <p className="mt-2 mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                                        Outstanding accounts ({item.missing_accounts.length})
+                                      </p>
+                                      <ul className="space-y-0.5">
+                                        {item.missing_accounts.map((account) => (
+                                          <li key={account.bank_id} className="text-sm text-slate-700">
+                                            <span className="font-mono">{formatMissingAccount(account)}</span>
+                                            {account.status === "noted" ? (
+                                              <span className="text-violet-700">
+                                                {" "}— noted{account.note ? `: ${account.note}` : ""}
+                                              </span>
+                                            ) : (
+                                              <span className="text-red-600"> — missing</span>
+                                            )}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </>
+                                  )}
                                   {item.has_comments && (
                                     <>
                                       <p className="mt-2 mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
@@ -584,9 +632,16 @@ export default function TaskBasketTable({
                                     Check history
                                   </p>
                                   <HistoryList history={item.history} />
-                                  {item.status === "resolved" && (
-                                    <p className="mt-2 text-sm text-emerald-700">
-                                      Resolved{" "}
+                                  {item.status !== "open" && (
+                                    <p
+                                      className={cn(
+                                        "mt-2 text-sm",
+                                        item.status === "received_late"
+                                          ? "text-sky-700"
+                                          : "text-emerald-700",
+                                      )}
+                                    >
+                                      {TASK_BASKET_STATUS_LABELS[item.status]}{" "}
                                       {item.resolved_at
                                         ? format(
                                             new Date(item.resolved_at),
