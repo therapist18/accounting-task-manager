@@ -204,6 +204,7 @@ export function ContractTemplateList({ documentId, documentDisplayName, noun = '
 
       {editingTemplateId && (
         <ContractTemplateDialog
+          documentDisplayName={documentDisplayName}
           isOpen={!!editingTemplateId}
           onClose={() => setEditingTemplateId(null)}
           templateId={editingTemplateId}

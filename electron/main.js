@@ -30,6 +30,27 @@ let isQuitting = false;
 let blockPowerSaveId = null;
 let activeJobCount = 0;
 
+// Windows starts the app at login with this flag (see configureLaunchAtLogin): it then stays in the
+// tray instead of opening the window, so notifications arrive without anyone opening the app.
+const LAUNCH_AT_LOGIN_ARGS = ["--hidden"];
+const launchedHidden = process.argv.includes("--hidden");
+
+// One running copy only. Starting at login means a copy is usually already in the tray, so opening
+// the app again from the Start menu must show that window rather than boot a second Next server.
+const hasInstanceLock = app.requestSingleInstanceLock();
+if (!hasInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => showMainWindow());
+}
+
+function showMainWindow() {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
 // ---------------------------------------------------------------- logging
 
 function appendLog(message) {
@@ -556,6 +577,31 @@ function createTray() {
   updateTrayBadge();
 }
 
+// ------------------------------------------------------- launch at login
+
+function isLaunchAtLoginEnabled() {
+  return app.getLoginItemSettings({ args: LAUNCH_AT_LOGIN_ARGS }).openAtLogin;
+}
+
+function setLaunchAtLogin(enabled) {
+  app.setLoginItemSettings({ openAtLogin: enabled, args: LAUNCH_AT_LOGIN_ARGS });
+  appendLog(`Start with Windows ${enabled ? "enabled" : "disabled"}`);
+}
+
+// Turned on once by default (installed builds only); after that the tray's "Start with Windows"
+// checkbox is the user's choice and is never overridden.
+function configureLaunchAtLogin() {
+  if (!app.isPackaged) return;
+  const marker = path.join(app.getPath("userData"), "launch-at-login-initialized");
+  if (fs.existsSync(marker)) return;
+  setLaunchAtLogin(true);
+  try {
+    fs.writeFileSync(marker, new Date().toISOString());
+  } catch (error) {
+    appendLog(`Could not record launch-at-login default: ${error.message}`);
+  }
+}
+
 function buildTrayMenu() {
   return Menu.buildFromTemplate([
     {
@@ -563,7 +609,14 @@ function buildTrayMenu() {
       enabled: false,
     },
     { type: "separator" },
-    { label: "Open Task Manager", click: () => mainWindow?.show() },
+    { label: "Open Task Manager", click: () => showMainWindow() },
+    {
+      label: "Start with Windows",
+      type: "checkbox",
+      visible: app.isPackaged,
+      checked: app.isPackaged && isLaunchAtLoginEnabled(),
+      click: (item) => setLaunchAtLogin(item.checked),
+    },
     { type: "separator" },
     {
       label: "Quit",
@@ -593,7 +646,11 @@ function createWindow(startUrl) {
     },
   });
 
-  mainWindow.once("ready-to-show", () => mainWindow.show());
+  mainWindow.once("ready-to-show", () => {
+    // Without a tray icon there'd be no way to open a hidden window, so only stay hidden with one.
+    if (launchedHidden && tray) appendLog("Started at login - staying in the tray");
+    else mainWindow.show();
+  });
 
   // Electron's BrowserWindow has no browser chrome, so Ctrl+scroll and
   // Ctrl+Plus/Minus/0 don't zoom on their own - Electron only emits
@@ -679,10 +736,13 @@ const shouldStartAutomationServer = app.isPackaged
   : process.env.ELECTRON_ENABLE_AUTOMATION_SERVER === "true";
 
 app.whenReady().then(async () => {
+  // A second copy just hands over to the running one (see requestSingleInstanceLock above).
+  if (!hasInstanceLock) return;
   app.setAppUserModelId("com.bcl.task-manager");
   loadEnvironmentVariables();
 
   logFilePath = path.join(app.getPath("userData"), "logs", "desktop.log");
+  configureLaunchAtLogin();
   iconPath = isDev
     ? path.join(app.getAppPath(), "public", "electron-icon.png")
     : path.join(process.resourcesPath, "next-server", "public", "electron-icon.png");
@@ -737,6 +797,8 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  // A second copy that's handing over owns nothing - and must not delete the running copy's lock file.
+  if (!hasInstanceLock) return;
   isQuitting = true;
   releasePowerSaveBlocker();
   if (eventBridgeServer) eventBridgeServer.close();

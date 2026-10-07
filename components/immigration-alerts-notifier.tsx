@@ -4,33 +4,34 @@ import { useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/lib/hooks/use-toast"
 import { ToastAction } from "@/components/ui/toast"
-import { getOpenImmigrationAlerts, IMMIGRATION_ALERTS_PATH, type ImmigrationAlert } from "@/lib/supabase/immigrationAlerts"
+import { getImmigrationAlerts, IMMIGRATION_ALERTS_PATH, type ImmigrationAlert } from "@/lib/immigrationAlerts"
 
 // Tells everyone when someone's Current Immigration Status enters its grace period or expires,
 // wherever they are in the app — same shape as TaskBasketNotifier.
 //
-// bcl-registry's daily job (7am EAT) opens a row in immigration_status_alerts for each person who
-// newly lands in the Imm Status Manager's Grace or Expired tab. This polls for open rows it hasn't
-// announced on this install and reports them as ONE notification. In the desktop app it keeps
+// bcl-registry works out who's in the Imm Status Manager's Grace and Expired tabs on request (cached
+// ~10 minutes). This polls that list and announces anyone it hasn't announced on this install —
+// keyed by person + document + status, so moving from Grace to Expired is announced again — as ONE
+// notification. In the desktop app it keeps
 // running with the window closed (tray) and the app starts with Windows, so alerts arrive without
 // anyone opening the window.
 
 const POLL_MS = 2 * 60 * 1000
-const SEEN_KEY = "immigrationAlerts.notifiedIds.v1"
+const SEEN_KEY = "immigrationAlerts.notifiedKeys.v2"
 const ASKED_PERMISSION_KEY = "taskBasket.askedNotificationPermission.v1" // shared: one prompt for both notifiers
 
-function readSeen(userId: string): Set<number> | null {
+function readSeen(userId: string): Set<string> | null {
   try {
     const raw = window.localStorage.getItem(`${SEEN_KEY}:${userId}`)
-    return raw ? new Set<number>(JSON.parse(raw)) : null
+    return raw ? new Set<string>(JSON.parse(raw)) : null
   } catch {
     return null
   }
 }
 
-function writeSeen(userId: string, ids: Set<number>) {
+function writeSeen(userId: string, keys: Set<string>) {
   try {
-    window.localStorage.setItem(`${SEEN_KEY}:${userId}`, JSON.stringify([...ids]))
+    window.localStorage.setItem(`${SEEN_KEY}:${userId}`, JSON.stringify([...keys]))
   } catch {
     /* storage unavailable (private mode / quota) - worst case we notify again next load */
   }
@@ -96,17 +97,17 @@ export default function ImmigrationAlertsNotifier({ userId }: { userId: string }
       if (busyRef.current || cancelled) return
       busyRef.current = true
       try {
-        const alerts = await getOpenImmigrationAlerts()
+        const { alerts } = await getImmigrationAlerts()
         if (cancelled) return
         const seen = readSeen(userId)
         // The first run on an install only records what's already open: announcing every person
         // already in Grace/Expired the first time someone opens the app would be noise, not news.
         if (seen) {
-          const fresh = alerts.filter((a) => !seen.has(a.id))
+          const fresh = alerts.filter((a) => !seen.has(a.key))
           if (fresh.length) deliver(fresh)
         }
-        // Only ids still open are kept, so storage can't grow without bound.
-        writeSeen(userId, new Set(alerts.map((a) => a.id)))
+        // Only keys still listed are kept, so storage can't grow without bound.
+        writeSeen(userId, new Set(alerts.map((a) => a.key)))
       } catch (error) {
         // A failed poll is silent: the next one retries, and a flaky connection shouldn't toast.
         console.warn("[immigration-alerts-notifier] check failed:", error)

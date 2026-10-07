@@ -4,6 +4,7 @@ import { CheckCircle, FileText, Users, Sparkles, LayoutDashboard, ArrowRight, Us
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { createServerSupabaseClient } from "@/lib/supabase"
+import ImmigrationStatusCard from "@/components/immigration-status-card"
 
 const quickLinks = [
   { label: "CV Generator", href: "/dashboard/cv-generator", icon: FileText, desc: "Generate professional CVs" },
@@ -129,6 +130,8 @@ export default async function DashboardPage() {
               </CardContent>
             </Card>
           </div>
+
+          <ImmigrationStatusCard />
 
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
             <Card className="col-span-4 border border-slate-200 shadow-sm rounded-lg bg-white">

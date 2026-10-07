@@ -24,6 +24,9 @@ interface ContractTemplateDialogProps {
   onClose: () => void;
   templateId: string;
   documentId: string;
+  // The document type this template belongs to (e.g. "Termination Letter",
+  // "Consultancy Agreement") - shown in the header before the template name.
+  documentDisplayName?: string;
   // Bumped by the caller after close so its own template list refetches -
   // mirrors LettersPage's templateVersion/onTemplateUpdate pattern.
   onSaved: () => void;
@@ -48,7 +51,7 @@ const consultancyBelongsTo = (p: Placeholder) => {
 // DocumentTemplateManager is a dialog LettersPage opens per template rather
 // than an always-visible full-page editor.
 export function ContractTemplateDialog({
-  isOpen, onClose, templateId, documentId, onSaved,
+  isOpen, onClose, templateId, documentId, documentDisplayName, onSaved,
   belongsToLabel = consultancyBelongsTo, showCompanyRoleField = true, defaultEntityType = ['company'],
 }: ContractTemplateDialogProps) {
   const { masterFields } = useTemplateData(true, null);
@@ -187,7 +190,12 @@ export function ContractTemplateDialog({
             <FileText className="w-5 h-5 text-custom-blue shrink-0" />
             <div className="min-w-0">
               <DialogTitle className="text-2xl font-bold tracking-tight text-slate-800 dark:text-slate-100 truncate flex items-center gap-2">
-                {template?.file_name || 'Template'}
+                {documentDisplayName && (
+                  <span className="truncate">{documentDisplayName}</span>
+                )}
+                <span className={cn('truncate', documentDisplayName && 'font-medium text-slate-400 dark:text-slate-500')}>
+                  {documentDisplayName ? '· ' : ''}{template?.file_name || 'Template'}
+                </span>
                 {template?.is_default && (
                   <Badge variant="outline" className="text-sm bg-amber-50 text-amber-700 border-amber-200 gap-1">
                     <Star className="w-2.5 h-2.5 fill-amber-500 text-amber-500" /> Default

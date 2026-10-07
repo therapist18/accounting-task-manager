@@ -8,6 +8,7 @@ import { canAccessPath } from "@/lib/auth/access-controls"
 import { getServerAppSession } from "@/lib/auth/session"
 import AppSidebar from "@/components/sidebar"
 import TaskBasketNotifier from "@/components/task-basket-notifier"
+import ImmigrationAlertsNotifier from "@/components/immigration-alerts-notifier"
 
 export default async function DashboardLayout({
   children,
@@ -59,6 +60,8 @@ export default async function DashboardLayout({
       </div>
       <Toaster />
       {canSeeTaskBasket && session && <TaskBasketNotifier userId={String(session.user.id)} />}
+      {/* Immigration status alerts go to everyone signed in. */}
+      {session && <ImmigrationAlertsNotifier userId={String(session.user.id)} />}
     </SidebarProvider>
   )
 }

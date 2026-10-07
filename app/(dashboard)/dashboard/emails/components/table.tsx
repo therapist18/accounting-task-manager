@@ -306,20 +306,23 @@ export function useColumnVisibility(columns: { id: string; label: string }[], in
   return { visible, isVisible, toggle, showAll }
 }
 
+// Also usable for any other show/hide checklist (e.g. which stats rows to show): pass `label` and `icon`.
 export function ColumnVisibilityButton({
-  columns, visible, onToggle, onShowAll,
+  columns, visible, onToggle, onShowAll, label = "Columns", icon: Icon = Columns3,
 }: {
   columns: { id: string; label: string }[]
   visible: Record<string, boolean>
   onToggle: (id: string) => void
   onShowAll: () => void
+  label?: string
+  icon?: React.ComponentType<{ className?: string }>
 }) {
   const hiddenCount = columns.filter((c) => visible[c.id] === false).length
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm" className="h-9 px-3 gap-1.5 rounded-full border-slate-200 text-base font-medium">
-          <Columns3 className="h-4 w-4" /> Columns{hiddenCount > 0 ? ` (${hiddenCount} hidden)` : ""}
+          <Icon className="h-4 w-4" /> {label}{hiddenCount > 0 ? ` (${hiddenCount} hidden)` : ""}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-64 p-0" align="end">
