@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
 import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Columns2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -8,6 +8,8 @@ import { ContractsSidebar } from './components/ContractsSidebar';
 import { ContractEditor } from './components/ContractEditor';
 import { ContractPreview } from './components/ContractPreview';
 import { EcJobProfile } from './utils/jobProfileData';
+import { EMPTY_GUEST_DRAFT, type GuestPersonDraft } from './utils/guestPerson';
+import { loadLatestProgress, saveProgress, isEmptyProgress } from './utils/sessionProgress';
 import { useEmploymentLetters, type DocumentTab } from './hooks/useEmploymentLetters';
 
 export default function EmploymentContractsPage() {
@@ -18,7 +20,23 @@ export default function EmploymentContractsPage() {
   // Contract vs Letters - one workspace generates both off the same employee,
   // values and theme (see ContractEditor's tabs).
   const [documentTab, setDocumentTab] = useState<DocumentTab>('contract');
-  const letters = useEmploymentLetters(selectedEmployeeId ? Number(selectedEmployeeId) : null, selectedCompanyId);
+  // Guest mode: a one-off person typed in on this page instead of picked from
+  // the registry (see utils/guestPerson.ts). The draft persists across
+  // selections within the session and - like all unsaved progress here - is
+  // staged to localStorage (utils/sessionProgress.ts) so a reload picks it
+  // back up; once saved to the registry it also gets a real individual id,
+  // which is what letters/field resolution and document filing key off.
+  const [guestMode, setGuestMode] = useState(false);
+  const [guestDraft, setGuestDraft] = useState<GuestPersonDraft>(EMPTY_GUEST_DRAFT);
+  // Bumped after saving a guest to the registry so the sidebar re-lists them.
+  const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
+
+  const lettersIndividualId = guestMode
+    ? guestDraft.individualId
+    : selectedEmployeeId
+      ? Number(selectedEmployeeId)
+      : null;
+  const letters = useEmploymentLetters(lettersIndividualId, selectedCompanyId);
 
   const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
   const editorPanelRef = useRef<ImperativePanelHandle>(null);
@@ -33,12 +51,86 @@ export default function EmploymentContractsPage() {
   };
 
   const handleEmployeeSelect = (companyId: string, employeeId: string) => {
+    setGuestMode(false);
     setSelectedCompanyId(companyId);
     setSelectedEmployeeId(employeeId);
     setContractData({});
     setSelectedJobProfile(null);
     letters.reset();
   };
+
+  const handleSelectGuest = () => {
+    if (!selectedCompanyId || guestMode) return;
+    setGuestMode(true);
+    setSelectedEmployeeId(null);
+    setContractData({});
+    setSelectedJobProfile(null);
+    letters.reset();
+  };
+
+  const handleGuestSaved = (individualId: number) => {
+    setGuestDraft(prev => ({ ...prev, individualId }));
+    setSidebarRefreshKey(k => k + 1);
+  };
+
+  // Restore the last unsaved session (see utils/sessionProgress.ts).
+  // Runs post-hydration so server and client agree on the first render,
+  // then applies everything in one batch - selection first, so the editor's
+  // own data effects wake up with a person to load. `hydrated` gates the
+  // staging effect below, otherwise the initial empty render would be
+  // written back over the stored snapshot before this runs.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    const progress = loadLatestProgress();
+    if (progress) {
+      setSelectedCompanyId(progress.companyId);
+      setSelectedEmployeeId(progress.employeeId);
+      // Only restore the document content when a person actually comes with
+      // it - a cleared external-person draft or a company-only selection has
+      // no person, and reviving the previous person's offer/employee there
+      // would show content for someone the workspace isn't pointed at.
+      const hasPerson = progress.guestMode
+        ? !!(progress.guestDraft?.individualId || progress.guestDraft?.fullName?.trim())
+        : !!progress.employeeId;
+      setContractData(hasPerson ? progress.contractData || {} : {});
+      setSelectedJobProfile(progress.jobProfile ?? null);
+      setDocumentTab(progress.documentTab ?? 'contract');
+      setGuestMode(!!progress.guestMode);
+      setGuestDraft(progress.guestDraft ?? EMPTY_GUEST_DRAFT);
+      letters.restore({ letterKey: progress.letterKey, valuesByType: progress.letterValuesByType });
+    }
+    setHydrated(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Stage every unsaved change of this session into localStorage,
+  // debounced (guest keystrokes and offer edits change state on every
+  // keystroke). Nothing here touches the database - Generate in
+  // ContractPreview remains the single point where document + content are
+  // written to ec_employment_offers / acc_portal_directors_documents.
+  useEffect(() => {
+    if (!hydrated) return;
+    const timer = setTimeout(() => {
+      const progress = {
+        companyId: selectedCompanyId,
+        employeeId: selectedEmployeeId,
+        guestMode,
+        guestDraft,
+        documentTab,
+        contractData,
+        jobProfile: selectedJobProfile,
+        letterKey: letters.letterKey,
+        letterValuesByType: letters.valuesByType,
+        savedAt: Date.now(),
+      };
+      if (isEmptyProgress(progress)) return;
+      saveProgress(progress);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [
+    hydrated, selectedCompanyId, selectedEmployeeId, guestMode, guestDraft,
+    documentTab, contractData, selectedJobProfile, letters.letterKey, letters.valuesByType,
+  ]);
 
   return (
     <div className="h-screen w-full overflow-hidden bg-[#f3f4f6] dark:bg-[#0a0a0a] flex flex-col shadow-sm">
@@ -113,6 +205,9 @@ export default function EmploymentContractsPage() {
               selectedEmployeeId={selectedEmployeeId}
               onSelectEmployee={handleEmployeeSelect}
               onCompanySelect={setSelectedCompanyId}
+              guestActive={guestMode}
+              onSelectGuest={handleSelectGuest}
+              refreshKey={sidebarRefreshKey}
             />
           </Panel>
 
@@ -144,6 +239,10 @@ export default function EmploymentContractsPage() {
               documentTab={documentTab}
               onDocumentTabChange={setDocumentTab}
               letters={letters}
+              guestMode={guestMode}
+              guestDraft={guestDraft}
+              setGuestDraft={setGuestDraft}
+              onGuestSaved={handleGuestSaved}
             />
           </Panel>
 

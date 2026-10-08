@@ -36,10 +36,14 @@ export function useEmploymentLetters(individualId: number | null, companyId: str
   const letter = catalog.find((t) => t.key === letterKey) || catalog[0];
 
   // Master-field-linked placeholders, resolved for the selected employee
-  // (individual-scoped) and company (company-scoped).
+  // (individual-scoped) and company (company-scoped). The company half
+  // resolves from the selected company alone - an external person (guest
+  // mode) has no individual id until they're saved to the registry, and a
+  // letter's company details (address, KRA, signatory) don't depend on the
+  // person anyway - so only bail when neither id is available to scope to.
   useEffect(() => {
     const linked = linkedLetterPlaceholders(letter);
-    if (linked.length === 0 || individualId == null) { setResolvedValues({}); return; }
+    if (linked.length === 0 || (individualId == null && companyId == null)) { setResolvedValues({}); return; }
     let cancelled = false;
     const entityIds = [individualId, companyId].filter((v) => v != null) as (string | number)[];
     fetchCcData(linked, entityIds).then(({ combinedCache, masterFields }) => {
@@ -47,13 +51,19 @@ export function useEmploymentLetters(individualId: number | null, companyId: str
       const relationshipData = {
         company: companyId ? { id: companyId } : null,
         directors: [],
-        employees: [{ id: individualId }],
+        employees: individualId != null ? [{ id: individualId }] : [],
         principal: null, dependants: [], understudy: null, sponsor: null,
       };
+      // Individual-specific resolution inputs only when there is an
+      // individual - String(null) would leak "null" into lookups.
       const values = resolveCcPlaceholders(
         linked, relationshipData, combinedCache, masterFields,
-        { employee: String(individualId), individual: String(individualId), director: String(individualId) },
-        [{ id: individualId, associations: [{ individual_type: 'employee' }] }],
+        individualId != null
+          ? { employee: String(individualId), individual: String(individualId), director: String(individualId) }
+          : null,
+        individualId != null
+          ? [{ id: individualId, associations: [{ individual_type: 'employee' }] }]
+          : null,
       );
       setResolvedValues(values);
     }).catch((err) => {
@@ -78,7 +88,16 @@ export function useEmploymentLetters(individualId: number | null, companyId: str
   // Typed values belong to one employee's letter - cleared on switching employee.
   const reset = useCallback(() => setValuesByType({}), []);
 
-  return { catalog, letter, letterKey, setLetterKey, values, setValue, reset };
+  // Re-apply a staged session snapshot (utils/sessionProgress.ts) - page.tsx
+  // calls this once after hydration so a reload lands back on the same
+  // letter type with everything that was typed into it.
+  const restore = useCallback((init: { letterKey?: string; valuesByType?: Record<string, Record<string, string>> } | null | undefined) => {
+    if (!init) return;
+    if (init.letterKey) setLetterKey(init.letterKey);
+    if (init.valuesByType) setValuesByType(init.valuesByType);
+  }, []);
+
+  return { catalog, letter, letterKey, setLetterKey, values, setValue, valuesByType, reset, restore };
 }
 
 export type EmploymentLetters = ReturnType<typeof useEmploymentLetters>;

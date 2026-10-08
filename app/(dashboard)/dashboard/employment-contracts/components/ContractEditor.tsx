@@ -1,9 +1,17 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { fetchCompanyEmployees, ContractEmployeeInfo } from '../utils/data';
 import { EcJobProfile, fetchJobProfiles, fetchGlobalJobProfiles, matchJobProfile } from '../utils/jobProfileData';
-import { EmploymentOffer, fetchLatestOffer } from '../utils/employmentOfferData';
+import { EmploymentOffer, fetchLatestOffer, fetchCompanyOffers, copyOfferToIndividual } from '../utils/employmentOfferData';
 import { resolveEffectiveSettings } from '../utils/clauseEngine';
 import { buildStandardPlaceholderValues } from '../utils/standardPlaceholders';
+import {
+  buildGuestEmployee,
+  makeGuestDraftOffer,
+  insertGuestIndividual,
+  EMPTY_GUEST_DRAFT,
+  type GuestPersonDraft,
+} from '../utils/guestPerson';
+import { readProgress } from '../utils/sessionProgress';
 import { useMasterFieldValues } from '../hooks/useMasterFieldValues';
 import type { EcPlaceholder } from '../utils/ecPlaceholders';
 import type { JobField } from '../../master-fields/components/types/database';
@@ -16,16 +24,17 @@ import { detectTokens } from '../utils/placeholderDetection';
 import { SearchableSelect } from './SearchableSelect';
 import { MasterFieldEditControl, MultiSourceValueControl, SourceValueEditor, linkedMasterFieldIds } from './MasterFieldEditControl';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { SettingsTable, SettingsGroupRow, SettingsRow } from './SettingsTable';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, UserRound, RotateCcw, RefreshCw, AlertCircle, FileText, CheckCircle2, Search, X, Wallet, FileSpreadsheet, Upload, Mail, Settings } from 'lucide-react';
+import { Loader2, UserRound, UserPlus, RotateCcw, RefreshCw, AlertCircle, FileText, CheckCircle2, Search, X, Wallet, FileSpreadsheet, Upload, Mail, Settings } from 'lucide-react';
 import { generateEcContractExcel, EC_SHEET_NAME } from '../utils/ecExcelExport';
 import { importEcContractExcel } from '../utils/ecExcelImport';
 import { cn } from '@/lib/utils';
 import { ENTITY_TYPES } from '@/lib/constants/entity-types';
 import { useToast } from '@/components/ui/use-toast';
 import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { letterFieldsFor, letterTokenKeys, type LetterField } from '../utils/letterTemplates';
 import type { DocumentTab, EmploymentLetters } from '../hooks/useEmploymentLetters';
@@ -43,6 +52,14 @@ interface ContractEditorProps {
   documentTab: DocumentTab;
   onDocumentTabChange: (tab: DocumentTab) => void;
   letters: EmploymentLetters;
+  // Guest mode - a one-off external person typed in on this page instead of
+  // picked from the registry (see utils/guestPerson.ts). The draft lives in
+  // page state so it survives editor remounts; onGuestSaved fires with the
+  // new registry_individuals id once "Save person to registry" succeeds.
+  guestMode?: boolean;
+  guestDraft?: GuestPersonDraft;
+  setGuestDraft?: Dispatch<SetStateAction<GuestPersonDraft>>;
+  onGuestSaved?: (individualId: number) => void;
 }
 
 const getSourceLabel = (
@@ -76,10 +93,17 @@ export function ContractEditor({
   documentTab,
   onDocumentTabChange,
   letters,
+  guestMode = false,
+  guestDraft,
+  setGuestDraft,
+  onGuestSaved,
 }: ContractEditorProps) {
   const isLetters = documentTab === 'letters';
   const [employee, setEmployee] = useState<ContractEmployeeInfo | null>(null);
   const [profiles, setProfiles] = useState<EcJobProfile[]>([]);
+  // Copy-from sources: everyone in the company with a saved contract.
+  const [companyEmployees, setCompanyEmployees] = useState<ContractEmployeeInfo[]>([]);
+  const [companyOffers, setCompanyOffers] = useState<EmploymentOffer[]>([]);
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(false);
   const [signatoryName, setSignatoryName] = useState('');
@@ -140,28 +164,51 @@ export function ContractEditor({
       }
       setLoading(true);
 
-      const [emps, companyProfiles, globalProfiles, companies] = await Promise.all([
+      const [emps, companyProfiles, globalProfiles, companies, offers] = await Promise.all([
         fetchCompanyEmployees(companyId),
         fetchJobProfiles(companyId),
         fetchGlobalJobProfiles(),
         fetchCompanies(),
+        fetchCompanyOffers(companyId),
       ]);
       const target = emps.find(e => String(e.individualId) === employeeId) || null;
       setEmployee(target);
+      setCompanyEmployees(emps);
+      setCompanyOffers(offers);
       
       const hasOwnPositionProfiles = companyProfiles.some((p) => p.scope === 'position' && p.is_active);
       const jobProfiles = hasOwnPositionProfiles ? companyProfiles : [...companyProfiles, ...globalProfiles];
       setProfiles(jobProfiles);
       setCompany(companies.find((c) => String(c.id) === String(companyId)) || null);
 
-      const matched = target ? matchJobProfile(jobProfiles, target) : null;
-      setSelectedJobProfile(matched);
-
       const individualId = target ? target.individualId : Number(employeeId);
+
+      // Staged session progress (utils/sessionProgress.ts) for this person -
+      // the offer edits/profile choice typed in on the last visit. Staged
+      // content wins over whatever is already in ec_employment_offers: the
+      // DB is only written by Generate, so the local copy is the newer one.
+      const staged = readProgress({ companyId, employeeId, guestMode: false });
+      const stagedOffer = staged?.contractData?.offer &&
+        String(staged.contractData.offer.individual_id) === String(individualId)
+        ? staged.contractData.offer
+        : null;
+
+      const matched = target ? matchJobProfile(jobProfiles, target) : null;
+      // Profile preference: whatever page.tsx restored into props for this
+      // exact switch (kept only if the profile still exists), else the
+      // staged choice, else the auto-match. selectedJobProfile is read from
+      // the render this effect was created for - not a dependency - so a
+      // later profile change never re-runs the whole load.
+      const propProfile = selectedJobProfile && jobProfiles.some((p) => p.id === selectedJobProfile.id) ? selectedJobProfile : null;
+      const stagedProfileRaw = staged?.jobProfile ?? null;
+      const stagedProfile = stagedProfileRaw && jobProfiles.some((p) => p.id === stagedProfileRaw.id) ? stagedProfileRaw : null;
+      const chosenProfile = propProfile || stagedProfile || matched;
+      setSelectedJobProfile(chosenProfile);
+
       const existingOffer = target ? await fetchLatestOffer(companyId, individualId) : null;
 
-      const nextOffer: Partial<EmploymentOffer> = existingOffer || {
-        job_profile_id: matched?.id,
+      const freshOffer: Partial<EmploymentOffer> = {
+        job_profile_id: chosenProfile?.id,
         company_id: String(companyId),
         individual_id: individualId,
         basic_salary: target?.basicSalary || null,
@@ -174,22 +221,153 @@ export function ContractEditor({
         status: 'draft',
       };
 
-      setContractData((prev: any) => ({
-        ...prev,
-        employee: target,
-        offer: nextOffer,
-      }));
+      setContractData((prev: any) => {
+        // prev.offer holds the same staged snapshot when page.tsx restored
+        // it directly into state before this load ran - second choice
+        // behind the store read so either restore path yields the unsaved
+        // edits, never a stale copy of the DB offer.
+        const prevOffer = prev?.offer && String(prev.offer.individual_id) === String(individualId) ? prev.offer : null;
+        return {
+          ...prev,
+          employee: target,
+          offer: stagedOffer || prevOffer || existingOffer || freshOffer,
+        };
+      });
 
       setLoading(false);
     }
     loadData();
+    // selectedJobProfile is intentionally read from the switch render, not
+    // listed as a dependency - a profile change must not re-run the load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, employeeId]);
+
+  // ---------------------------------------------------------------------
+  // Guest mode (external person) - two effects instead of loadData above:
+  //
+  // A) Infrastructure load - profiles + the issuing company, mirroring
+  //    loadData minus the employee lookup (there is no registry row to look
+  //    up) and the offer fetch (a brand-new person has no offers). Deps
+  //    exclude the draft so typing never refetches.
+  // B) Draft sync - the typed draft IS the employee record in guest mode, so
+  //    it is mirrored into employee state and contractData on every keystroke
+  //    (no fetching) - that's what the preview, placeholder values and
+  //    letters all read, exactly like a registry employee.
+  // ---------------------------------------------------------------------
+  const guestDraftRef = useRef(guestDraft);
+  useEffect(() => { guestDraftRef.current = guestDraft; }, [guestDraft]);
+
+  useEffect(() => {
+    if (!guestMode || !companyId) return;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const [companyProfiles, globalProfiles, companies] = await Promise.all([
+        fetchJobProfiles(companyId),
+        fetchGlobalJobProfiles(),
+        fetchCompanies(),
+      ]);
+      if (cancelled) return;
+
+      const hasOwnPositionProfiles = companyProfiles.some((p) => p.scope === 'position' && p.is_active);
+      const jobProfiles = hasOwnPositionProfiles ? companyProfiles : [...companyProfiles, ...globalProfiles];
+      setProfiles(jobProfiles);
+      setCompany(companies.find((c) => String(c.id) === String(companyId)) || null);
+
+      const draft = guestDraftRef.current;
+      if (draft) {
+        // A restored session (page.tsx's staged snapshot) may carry an
+        // explicit profile choice and unsaved offer edits for this exact
+        // external person - keep them, with the auto-match only as the
+        // fallback for a fresh one. An empty draft never pulls staged
+        // content, so starting a new person can't inherit the previous
+        // person's offer.
+        const canRestore = !!(draft.individualId || draft.fullName.trim());
+        const staged = canRestore ? readProgress({ companyId, employeeId: null, guestMode: true, guestDraft: draft }) : undefined;
+        const stagedOffer = staged?.contractData?.offer || null;
+        const propProfile = selectedJobProfile && jobProfiles.some((p) => p.id === selectedJobProfile.id) ? selectedJobProfile : null;
+        const stagedProfileRaw = staged?.jobProfile ?? null;
+        const stagedProfile = stagedProfileRaw && jobProfiles.some((p) => p.id === stagedProfileRaw.id) ? stagedProfileRaw : null;
+        const matched = matchJobProfile(jobProfiles, buildGuestEmployee(draft, companyId));
+        const chosenProfile = propProfile || stagedProfile || matched;
+        setSelectedJobProfile(chosenProfile);
+        setContractData((prev: any) => ({
+          ...prev,
+          offer: stagedOffer
+            ? { ...stagedOffer, company_id: String(companyId) }
+            : prev.offer
+              ? { ...prev.offer, job_profile_id: prev.offer.job_profile_id ?? chosenProfile?.id }
+              : makeGuestDraftOffer(draft, companyId, chosenProfile?.id),
+        }));
+      }
+
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guestMode, companyId]);
+
+  useEffect(() => {
+    if (!guestMode || !guestDraft || !companyId) return;
+    const synthetic = buildGuestEmployee(guestDraft, companyId);
+    setEmployee(synthetic);
+    setContractData((prev: any) => ({
+      ...prev,
+      employee: synthetic,
+      // Only the guest-owned fields are patched; salary/allowances/overrides
+      // typed in the panels above survive untouched. individual_id flips from
+      // 0 to the real registry id once the person is saved.
+      offer: prev.offer
+        ? {
+            ...prev.offer,
+            company_id: String(companyId),
+            individual_id: synthetic.individualId,
+            start_date: guestDraft.startDate || prev.offer.start_date,
+          }
+        : makeGuestDraftOffer(guestDraft, companyId),
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guestDraft, guestMode, companyId]);
 
   const handleProfileChange = (profileId: string) => {
     const profile = profiles.find(p => p.id === profileId) || null;
     setSelectedJobProfile(profile);
     updateOffer({ job_profile_id: profile?.id });
   };
+
+  // Replaces this person's draft with another person's saved contract terms
+  // (see copyOfferToIndividual for what is and isn't carried over). Local
+  // only, like every other edit here - nothing is written until Generate.
+  const handleCopyFromOffer = (sourceOfferId: string) => {
+    const source = companyOffers.find((o) => o.id === sourceOfferId);
+    if (!source || !employee || !companyId) return;
+    const settingsPlaceholderKeys = new Set(
+      ecPlaceholders.filter((p) => p.source_kind === 'settings_cascade').map((p) => p.key)
+    );
+    const copied = copyOfferToIndividual(
+      source,
+      { individualId: employee.individualId, companyId, basicSalary: employee.basicSalary },
+      settingsPlaceholderKeys
+    );
+    // Keep this person's own saved offer id (if any) so Generate updates
+    // their existing contract rather than adding a second live one.
+    const ownOfferId = offer.id && String(offer.individual_id) === String(employee.individualId) ? offer.id : undefined;
+    setContractData((prev: any) => ({ ...prev, offer: { ...copied, ...(ownOfferId ? { id: ownOfferId } : {}) } }));
+    setSelectedJobProfile(profiles.find((p) => p.id === source.job_profile_id) || null);
+    const sourceName = companyEmployees.find((e) => e.individualId === source.individual_id)?.fullName || 'the selected employee';
+    toast({ title: 'Contract copied', description: `Terms copied from ${sourceName}. Review the fields, then Generate to save.` });
+  };
+
+  const copySourceOptions = useMemo(() => {
+    const profileNames = new Map(profiles.map((p) => [p.id, p.name]));
+    return companyOffers
+      .filter((o) => String(o.individual_id) !== String(employee?.individualId))
+      .map((o) => {
+        const name = companyEmployees.find((e) => e.individualId === o.individual_id)?.fullName || `Individual #${o.individual_id}`;
+        const profileName = profileNames.get(o.job_profile_id);
+        return { value: o.id, label: profileName ? `${name} - ${profileName}` : name };
+      });
+  }, [companyOffers, companyEmployees, profiles, employee?.individualId]);
 
   const handlePlaceholderOverride = (key: string, value: string | undefined) => {
     const next = { ...(offer.placeholder_overrides || {}) };
@@ -264,7 +442,10 @@ export function ContractEditor({
     selectedJobProfile, offer.settings_overrides ? { settings: offer.settings_overrides } : null,
   ]), [selectedJobProfile, offer]);
 
-  const { ecPlaceholders, masterFieldValues, masterFields, isResolving, refresh: refreshMasterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
+  // || null (not just undefined) so an unsaved guest's placeholder id of 0
+  // never reaches the master-field machinery as if it were a real person -
+  // until they're saved, field resolution/editing stays company-scoped only.
+  const { ecPlaceholders, masterFieldValues, masterFields, isResolving, refresh: refreshMasterFieldValues } = useMasterFieldValues(employee?.individualId || null, companyId);
 
   const placeholderValues = useMemo(
     () => (employee ? buildStandardPlaceholderValues(employee, company, offer as EmploymentOffer, effectiveSettings, offer.placeholder_overrides, masterFieldValues, selectedJobProfile, ecPlaceholders, signatoryName, payrollStatutoryLine) : {}),
@@ -337,14 +518,16 @@ export function ContractEditor({
     return result;
   }, [profileScopedPlaceholders, dataFilter, placeholderIsMissing, fieldSearch]);
 
-  if (!companyId || !employeeId) {
+  if (!companyId || (!employeeId && !guestMode)) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-slate-400 bg-slate-50 dark:bg-slate-950/50">
         <div className="p-4 bg-white dark:bg-slate-900 rounded-full shadow-sm mb-4">
           <UserRound className="w-10 h-10 text-slate-300 dark:text-slate-700" />
         </div>
-        <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300">No Employee Selected</h3>
-        <p className="text-base mt-1 max-w-sm text-center">Please select an employee from the sidebar to begin reviewing or generating a contract.</p>
+        <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300">No Person Selected</h3>
+        <p className="text-base mt-1 max-w-sm text-center">
+          Please select an employee from the sidebar &mdash; or use the <span className="font-medium">External person</span> button to draft for someone who isn&apos;t in the registry &mdash; to begin reviewing or generating a contract.
+        </p>
       </div>
     );
   }
@@ -446,7 +629,12 @@ export function ContractEditor({
           <div className="min-w-0">
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 truncate leading-tight">{employee?.fullName}</h2>
             <p className="text-sm text-slate-500 dark:text-slate-400 truncate">
-              EMP-{employee?.employeeNumber || '000000'} · {employee?.jobTitle || 'No Title'} · {employee?.department || 'No Dept'}
+              {employee?.isGuest
+                ? employee.individualId
+                  ? `External person · Registry #${employee.individualId}`
+                  : 'External person · Not in registry'
+                : `EMP-${employee?.employeeNumber || '000000'}`}
+              {' · '}{employee?.jobTitle || 'No Title'} · {employee?.department || 'No Dept'}
             </p>
           </div>
         </div>
@@ -508,6 +696,18 @@ export function ContractEditor({
 
       <ScrollArea className="flex-1 [&>[data-radix-scroll-area-viewport]>div]:!block">
         <div className="px-4 pt-0 pb-8">
+
+          {/* Guest mode: the person's details, typed in here. Sits above the
+              sticky toolbar so it scrolls away and leaves the full field
+              list its height; the toolbar sticks underneath it as usual. */}
+          {guestMode && companyId && guestDraft && setGuestDraft && (
+            <GuestPersonCard
+              draft={guestDraft}
+              setDraft={setGuestDraft}
+              companyId={companyId}
+              onSaved={onGuestSaved}
+            />
+          )}
 
           {/* Sticky toolbar + column header block - pinned to the top of the
               ScrollArea's own scrollport while reviewing a long field list.
@@ -573,10 +773,24 @@ export function ContractEditor({
                 })}
               </div>
 
+              {!isLetters && !guestMode && employee && (
+                <div className="ml-auto w-[220px]" title="Copy another employee's saved contract terms into this draft">
+                  <SearchableSelect
+                    value={null}
+                    onChange={handleCopyFromOffer}
+                    placeholder="Copy contract from..."
+                    searchPlaceholder="Search employees..."
+                    emptyText="No other saved contracts in this company."
+                    options={copySourceOptions}
+                    className="h-9 rounded-lg"
+                  />
+                </div>
+              )}
+
               <button
                 onClick={handleRefreshMasterFieldValues}
                 disabled={isResolving}
-                className="ml-auto w-9 h-9 flex items-center justify-center rounded-lg text-slate-600 bg-white dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all shadow-sm disabled:opacity-50"
+                className={cn(!isLetters && !guestMode && employee ? '' : 'ml-auto', "w-9 h-9 flex items-center justify-center rounded-lg text-slate-600 bg-white dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all shadow-sm disabled:opacity-50")}
                 title="Refresh master field values"
               >
                 <RefreshCw className={cn("w-4 h-4", isResolving && "animate-spin text-indigo-500")} />
@@ -887,6 +1101,9 @@ function PlaceholderRow({
 }) {
   const effectiveVal = overrideValue ?? value;
   const sourceLabel = getSourceLabel(p, masterFields);
+  // 0 = unsaved external person (guestPerson.ts) - behaves as "no person"
+  // for master-field scoping/editing until they're saved to the registry.
+  const individualId = employee?.individualId || null;
   // Linked to more than one master field - the value cell becomes the
   // source picker (TemplateGenerationDialog's multi-source design).
   const linkedIds = linkedMasterFieldIds(p);
@@ -923,7 +1140,7 @@ function PlaceholderRow({
             placeholder={p}
             masterFieldId={editingFieldId}
             masterFields={masterFields}
-            individualId={employee?.individualId}
+            individualId={individualId}
             companyId={companyId}
             // A single-link placeholder's resolved value IS that field's
             // value; otherwise SourceValueEditor fetches the field's own.
@@ -935,7 +1152,7 @@ function PlaceholderRow({
           <MultiSourceValueControl
             placeholder={p}
             masterFields={masterFields}
-            individualId={employee?.individualId}
+            individualId={individualId}
             companyId={companyId}
             value={value}
             overrideValue={overrideValue}
@@ -967,7 +1184,7 @@ function PlaceholderRow({
             <MasterFieldEditControl
               placeholder={p}
               masterFields={masterFields}
-              individualId={employee?.individualId}
+              individualId={individualId}
               companyId={companyId}
               onStartEdit={setEditingFieldId}
             />
@@ -985,5 +1202,140 @@ function PlaceholderRow({
         </div>
       </td>
     </tr>
+  );
+}
+
+// ----------------------------------------------------------------------
+// Guest mode's person card - the identity fields typed in for a one-off
+// external person (see utils/guestPerson.ts). Same two-column
+// label | value table design as the workspace's placeholder/settings
+// tables (SettingsTable): one bordered card, group header row, thin
+// gridlines - not a decorated card of its own. Everything else in the
+// workspace reads the resulting ContractEmployeeInfo exactly like a
+// registry employee; "Save person to registry" is what makes them a real
+// registry_individuals row, unlocking document filing and letter/master
+// field resolution for them. Inputs lock after saving - further edits to
+// the person belong in the Individuals module.
+// ----------------------------------------------------------------------
+
+const GUEST_FIELDS: {
+  key: Exclude<keyof GuestPersonDraft, 'individualId'>;
+  label: string;
+  placeholder?: string;
+  type?: string;
+  required?: boolean;
+}[] = [
+  { key: 'fullName', label: 'Full name', placeholder: 'e.g. Jane Wanjiku', required: true },
+  { key: 'nationalId', label: 'National ID', placeholder: 'e.g. 12345678' },
+  { key: 'kraPin', label: 'KRA PIN', placeholder: 'e.g. A000000000X' },
+  { key: 'nssfNumber', label: 'NSSF No.', placeholder: 'Optional' },
+  { key: 'shifNumber', label: 'SHIF No.', placeholder: 'Optional' },
+  { key: 'contactEmail', label: 'Email', type: 'email', placeholder: 'name@example.com' },
+  { key: 'contactPhone', label: 'Phone', placeholder: 'e.g. 0712 345 678' },
+  { key: 'jobTitle', label: 'Job title', placeholder: 'e.g. Consultant' },
+  { key: 'department', label: 'Department', placeholder: 'e.g. Audit' },
+  { key: 'startDate', label: 'Start date', type: 'date' },
+];
+
+function GuestPersonCard({ draft, setDraft, companyId, onSaved }: {
+  draft: GuestPersonDraft;
+  setDraft: Dispatch<SetStateAction<GuestPersonDraft>>;
+  companyId: string;
+  onSaved?: (individualId: number) => void;
+}) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const isSaved = draft.individualId != null;
+  const canSave = !isSaved && !saving && draft.fullName.trim().length > 0;
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    try {
+      const result = await insertGuestIndividual(draft, companyId);
+      if ('error' in result) {
+        toast({ title: 'Could not save the person', description: result.error, variant: 'destructive' });
+        return;
+      }
+      onSaved?.(result.id);
+      toast({
+        title: 'Saved to registry',
+        description: `${draft.fullName.trim()} is now an individual - you can file the finished document against their record and start a new external person.`,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-3">
+      <SettingsTable>
+        <SettingsGroupRow
+          icon={UserPlus}
+          accent="indigo"
+          label="External Person"
+          description={
+            isSaved
+              ? 'Filed under their registry record - edits to the person belong in the Individuals module.'
+              : 'Type their details to draft now; save to the registry to file the finished document against their record.'
+          }
+          action={
+            <div className="flex items-center gap-2">
+              {isSaved ? (
+                <Badge variant="outline" className="text-xs font-semibold bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800 whitespace-nowrap">
+                  In registry · #{draft.individualId}
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-xs font-semibold bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800 whitespace-nowrap">
+                  Not in registry yet
+                </Badge>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-3 text-sm text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                onClick={() => setDraft({ ...EMPTY_GUEST_DRAFT })}
+                title={isSaved ? 'Start a new external person - this one stays listed under the company' : 'Discard this draft'}
+              >
+                {isSaved ? 'New person' : 'Clear'}
+              </Button>
+              {!isSaved && (
+                <Button
+                  size="sm"
+                  className="h-8 px-3.5 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+                  onClick={handleSave}
+                  disabled={!canSave}
+                  title={draft.fullName.trim() ? undefined : 'Enter the full name first'}
+                >
+                  {saving ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <UserPlus className="w-4 h-4 mr-1.5" />}
+                  Save person to registry
+                </Button>
+              )}
+            </div>
+          }
+        />
+        {GUEST_FIELDS.map((f) => (
+          <SettingsRow
+            key={f.key}
+            title={f.placeholder}
+            label={
+              <>
+                {f.label}
+                {f.required && <span className="text-rose-500 ml-0.5">*</span>}
+              </>
+            }
+          >
+            <Input
+              type={f.type || 'text'}
+              value={draft[f.key]}
+              placeholder={f.placeholder}
+              disabled={isSaved || saving}
+              onChange={(e) => setDraft((prev) => ({ ...prev, [f.key]: e.target.value }))}
+              className="h-9 text-base px-3 rounded-md border-slate-200 bg-white dark:bg-slate-950 dark:border-slate-700 disabled:opacity-60"
+            />
+          </SettingsRow>
+        ))}
+      </SettingsTable>
+    </div>
   );
 }

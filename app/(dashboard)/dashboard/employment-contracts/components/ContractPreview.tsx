@@ -131,6 +131,12 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const employee = contractData?.employee;
   const offer: Partial<EmploymentOffer> | undefined = contractData?.offer;
   const companyId = employee?.companyId;
+  // A guest (external person) not yet saved to the registry has no real
+  // individual record - ec_employment_offers.individual_id and
+  // acc_portal_directors_documents.director_id both need one, so only
+  // export (PDF/Word) is available until "Save person to registry" runs in
+  // the editor. See utils/guestPerson.ts.
+  const isUnsavedGuest = !!employee?.isGuest && !employee?.individualId;
 
   const [clauses, setClauses] = useState<EcClause[]>([]);
   const [company, setCompany] = useState<Company | null>(null);
@@ -211,7 +217,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
     selectedJobProfile, offer ? { section_clauses: offer.section_clauses_overrides } : null,
   ]), [selectedJobProfile, offer]);
 
-  const { ecPlaceholders, masterFieldValues, isResolving: isResolvingMasterFields, refresh: refreshMasterFieldValues } = useMasterFieldValues(employee?.individualId, companyId);
+  const { ecPlaceholders, masterFieldValues, isResolving: isResolvingMasterFields, refresh: refreshMasterFieldValues } = useMasterFieldValues(employee?.individualId || null, companyId);
 
   // The toolbar's refresh button used to only re-run refreshMasterFieldValues,
   // leaving clauses/company/signatory/payroll figures stale until the next
@@ -361,6 +367,15 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const updateThemeSettings = (settings: ContractThemeSettings) => {
     setThemeOverride(settings);
     onThemeChange?.(settings);
+    // Mirror the design into contractData.metadata as well - page.tsx
+    // stages contractData into localStorage (utils/sessionProgress.ts), so
+    // the theme rides along with the rest of the unsaved session and a
+    // reload restores it. Without this the override lived only in this
+    // component's local state and died with the page.
+    setContractData?.((prev: any) => ({
+      ...prev,
+      metadata: { ...(prev?.metadata || {}), themeSettings: settings },
+    }));
   };
 
   // Persisted per-contract (offer.settings_overrides), not local UI state
@@ -485,7 +500,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const handleSaveToDb = async () => {
     if (isSaved) return; // already generated for this exact content - the button reads "Saved"
     const output = buildOutput();
-    if (!output || !employee || !offer || !selectedJobProfile) return;
+    if (!output || !employee || isUnsavedGuest || !offer || !selectedJobProfile) return;
     setIsSaving(true);
     try {
       const offerPayload = { ...offer, job_profile_id: selectedJobProfile.id, status: 'active' as const };
@@ -520,7 +535,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const handleSaveLetter = async () => {
     if (!letter || !letterDocumentId || isLetterSaved) return;
     const output = buildOutput();
-    if (!output || !employee) return;
+    if (!output || !employee || isUnsavedGuest) return;
     setIsSaving(true);
     try {
       const result = await saveDocumentToIndividual(employee.individualId, letterDocumentId, output.blob, `${employee.fullName.replace(/\s+/g, '_')}_${fileSuffix}`);
@@ -653,9 +668,10 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
                     : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white"
                 )}
                 onClick={letter ? handleSaveLetter : handleSaveToDb}
-                disabled={!hasOutput || loadingContext || isSaving || saved || (!!letter && !letterDocumentId)}
+                disabled={!hasOutput || loadingContext || isSaving || saved || isUnsavedGuest || (!!letter && !letterDocumentId)}
                 title={
-                  saved ? `Already generated for the current ${letter ? 'letter' : 'contract'} details`
+                  isUnsavedGuest ? 'Save the person to the registry first (External Person card in the editor), then generate'
+                  : saved ? `Already generated for the current ${letter ? 'letter' : 'contract'} details`
                   : letter && !letterDocumentId ? 'Add this letter type in Letter Templates to file it to the employee\'s documents'
                   : undefined
                 }

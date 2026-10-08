@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchCompanies, Company } from '../../companies/database';
 import { fetchAllEmployeesGrouped, ContractEmployeeInfo } from '../utils/data';
-import { Search, Building2, UserCircle, Loader2, ChevronDown, ChevronRight, Filter } from 'lucide-react';
+import { Search, Building2, UserCircle, UserPlus, Loader2, ChevronDown, ChevronRight, Filter } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -19,13 +19,23 @@ interface ContractsSidebarProps {
   selectedEmployeeId: string | null;
   onCompanySelect: (id: string) => void;
   onSelectEmployee: (companyId: string, employeeId: string) => void;
+  // Draft a contract/letter for someone who isn't in the registry (the
+  // workspace's guest mode - see utils/guestPerson.ts).
+  guestActive?: boolean;
+  onSelectGuest?: () => void;
+  // Bumped (e.g. after saving an external person to the registry) to re-fetch
+  // the employee list so they show up without a page refresh.
+  refreshKey?: number;
 }
 
 export function ContractsSidebar({ 
   selectedCompanyId, 
   selectedEmployeeId, 
   onCompanySelect,
-  onSelectEmployee 
+  onSelectEmployee,
+  guestActive = false,
+  onSelectGuest,
+  refreshKey = 0,
 }: ContractsSidebarProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [employeesByCompany, setEmployeesByCompany] = useState<Record<string, ContractEmployeeInfo[]>>({});
@@ -46,8 +56,12 @@ export function ContractsSidebar({
       setLoadingCompanies(false);
     }
     loadCompanies();
+  }, []);
 
-    // Load employees for every company up front instead of per company click.
+  // Load employees for every company up front instead of per company click.
+  // Re-runs when refreshKey changes so a person saved to the registry from
+  // the workspace appears under their company immediately.
+  useEffect(() => {
     async function loadAllEmployees() {
       setLoadingEmployees(true);
       const grouped = await fetchAllEmployeesGrouped();
@@ -55,7 +69,7 @@ export function ContractsSidebar({
       setLoadingEmployees(false);
     }
     loadAllEmployees();
-  }, []);
+  }, [refreshKey]);
 
   const handleToggleCompany = (companyId: string) => {
     const newOpen = new Set(openCompanies);
@@ -114,6 +128,27 @@ export function ContractsSidebar({
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
+
+        {/* Guest mode entry - a contract/letter for someone who isn't in the
+            registry at all. Needs an issuing company, so it stays disabled
+            until one is picked. */}
+        <Button
+          variant="outline"
+          onClick={onSelectGuest}
+          disabled={!selectedCompanyId || !onSelectGuest}
+          title={selectedCompanyId
+            ? 'Draft a contract or letter for someone outside the registry'
+            : 'Select the issuing company first'}
+          className={cn(
+            'w-full mt-4 h-10 justify-center gap-2 text-sm font-semibold rounded-lg transition-colors',
+            guestActive
+              ? 'bg-custom-blue hover:bg-custom-blue text-white shadow-sm border-transparent'
+              : 'border-dashed text-slate-600 dark:text-slate-300 hover:text-custom-blue hover:border-custom-blue/50 hover:bg-slate-50 dark:hover:bg-slate-800'
+          )}
+        >
+          <UserPlus className="w-4 h-4" />
+          External person
+        </Button>
       </div>
 
       <ScrollArea className="flex-1">
@@ -199,7 +234,7 @@ export function ContractsSidebar({
                                 "block text-sm truncate mt-0.5",
                                 isSelected ? "text-blue-100" : "text-slate-400"
                               )}>
-                                {emp.jobTitle || 'Employee'}
+                                {emp.isGuest ? 'External person' : emp.jobTitle || 'Employee'}
                               </span>
                             </div>
                           </div>

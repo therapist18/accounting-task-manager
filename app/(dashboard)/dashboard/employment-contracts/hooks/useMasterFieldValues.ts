@@ -43,7 +43,15 @@ export function useMasterFieldValues(
     if (requestId !== requestIdRef.current) return;
     setEcPlaceholders(placeholders);
 
-    if (individualId == null) {
+    // Company-scoped placeholders need nothing but the company id, so only
+    // bail when there's no scope at all: an external person (guest mode -
+    // utils/guestPerson.ts) has no individual id until "Save person to
+    // registry", but the company selected for them must still populate every
+    // company-dependent placeholder. fetchEcData/resolveEcPlaceholders both
+    // handle a null individual as long as a company id is present -
+    // individual-scoped links simply resolve to nothing until the person
+    // exists.
+    if (individualId == null && companyId == null) {
       setMasterFieldValues({});
       setMasterFields(new Map());
       return;

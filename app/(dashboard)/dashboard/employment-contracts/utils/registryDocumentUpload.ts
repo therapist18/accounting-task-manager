@@ -52,19 +52,49 @@ export async function saveDocumentToIndividual(
       .upload(filePath, fileBlob, { contentType: fileBlob.type });
     if (uploadError) return { success: false, error: uploadError.message };
 
-    // Matches cv-generator/page.tsx's upsert shape/onConflict for this same
-    // table - one row per (director_id, file_path), so re-generating with
-    // an identical path (it won't be, Date.now() varies, but kept for
-    // parity) updates rather than duplicates.
-    const { error: upsertError } = await supabase.from('acc_portal_directors_documents').upsert({
-      director_id: individualId,
-      document_id: documentId,
-      file_path: filePath,
-      status: 'active',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'director_id,file_path' });
-    if (upsertError) return { success: false, error: upsertError.message };
+    // One row per (document_id, director_id): the table is read everywhere
+    // as "this person's <document type>", so the write is keyed the same
+    // way - if a row already exists for this person + document type,
+    // re-generating updates that row to point at the new file (latest
+    // content wins) instead of appending another copy. Select-then-write
+    // rather than an ON CONFLICT upsert because this table is owned by the
+    // external registry app: there's no guarantee a unique constraint on
+    // (director_id, document_id) exists there for upsert to target.
+    //
+    // Every existing row for the pair is repointed (they can only be past
+    // generations of this same generated document - historical rows from
+    // before this one-row-per-doc behaviour), so no reader can still pick
+    // up a stale file. The old blobs stay in the bucket untouched.
+    //
+    // acc_portal_directors_documents has no status column - selecting or
+    // writing one fails the whole request with a 400.
+    const now = new Date().toISOString();
+    const { data: existingRows, error: selectError } = await supabase
+      .from('acc_portal_directors_documents')
+      .select('id')
+      .eq('director_id', individualId)
+      .eq('document_id', documentId);
+    if (selectError) return { success: false, error: selectError.message };
+
+    if (existingRows && existingRows.length > 0) {
+      const { error: updateError } = await supabase
+        .from('acc_portal_directors_documents')
+        .update({
+          file_path: filePath,
+          updated_at: now,
+        })
+        .in('id', existingRows.map((r: any) => r.id));
+      if (updateError) return { success: false, error: updateError.message };
+    } else {
+      const { error: insertError } = await supabase.from('acc_portal_directors_documents').insert({
+        director_id: individualId,
+        document_id: documentId,
+        file_path: filePath,
+        created_at: now,
+        updated_at: now,
+      });
+      if (insertError) return { success: false, error: insertError.message };
+    }
 
     return { success: true };
   } catch (err: any) {
