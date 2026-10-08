@@ -1,6 +1,7 @@
-import { FileText, Download } from 'lucide-react';
+import { FileText, Download, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
+import { downloadPdf } from '@/lib/documentExport';
 import type { Individual } from '../../individuals/database';
 import type { Placeholder } from '../../templates/document-template-manager/types';
 
@@ -14,6 +15,7 @@ interface BiodataPreviewProps {
 
 export function BiodataPreview({ selectedIndividual, placeholders, values, theme, images }: BiodataPreviewProps) {
   const printRef = useRef<HTMLIFrameElement>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   if (!selectedIndividual) {
     return (
@@ -27,9 +29,22 @@ export function BiodataPreview({ selectedIndividual, placeholders, values, theme
   const fullName = values.full_name || selectedIndividual.full_name;
   const v = (key: string) => values[key] || '-';
 
-  const handlePrint = () => {
-    if (printRef.current) {
-      printRef.current.contentWindow?.print();
+  // The theme HTML is already a complete document with its own @page and
+  // fonts, so it goes to the server render as-is (downloadPdf passes full
+  // documents through). Falls back to printing the preview iframe if the
+  // render fails.
+  const handlePrint = async () => {
+    setIsDownloading(true);
+    try {
+      await downloadPdf({
+        html: htmlContent,
+        fileName: `${(fullName || 'Biodata').replace(/\s+/g, '_')}_Biodata`,
+      });
+    } catch (err) {
+      console.error('Server PDF render failed, falling back to the print dialog', err);
+      printRef.current?.contentWindow?.print();
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -527,8 +542,9 @@ export function BiodataPreview({ selectedIndividual, placeholders, values, theme
             size="sm"
             className="h-8 bg-custom-blue hover:bg-blue-700 text-white shadow-sm flex items-center gap-2"
             onClick={handlePrint}
+            disabled={isDownloading}
           >
-            <Download className="w-3.5 h-3.5" />
+            {isDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
             <span>Download PDF</span>
           </Button>
         </div>

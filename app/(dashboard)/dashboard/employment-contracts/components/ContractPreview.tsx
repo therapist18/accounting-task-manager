@@ -6,7 +6,7 @@ import {
   ChevronDown, List, RefreshCw, Receipt, CheckCircle2,
 } from 'lucide-react';
 import { DocumentViewer, type DocumentViewerHandle } from '@/components/contracts/DocumentViewer';
-import { downloadBlob, buildWordDocBlob, printElementAsPdf } from '@/lib/documentExport';
+import { downloadBlob, buildWordDocBlob, downloadPdf, renderPdfBlob } from '@/lib/documentExport';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -486,23 +486,51 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   // printElementAsPdf handles waiting for fonts/images, the Save-as-PDF file
   // name (document.title) and cleanup; the portaled print area's own
   // @media print CSS hides the rest of the page.
-  const handleDownloadPdf = () => {
+  //
+  // Now the fallback only: the primary path renders the same export HTML on
+  // the server with headless Chromium (/api/render-pdf) and downloads a real
+  // PDF file directly, no print dialog. The print dialog is kept for when the
+  // server render fails (e.g. Chromium unavailable in local dev).
+  const handleDownloadPdf = async () => {
     if (!hasOutput || !employee) return;
     const baseName = employee.fullName.replace(/\s+/g, '_');
-    printElementAsPdf({
-      element: viewerRef.current?.getPrintArea() ?? null,
+    await downloadPdf({
+      html: exportThemedHtml,
       fileName: `${baseName}_${fileSuffix}`,
+      element: viewerRef.current?.getPrintArea() ?? null,
     }).catch((err) => {
       console.error('PDF generation failed', err);
     });
   };
 
+  // The file Generate files against the employee: a server-rendered PDF
+  // (same layout as Chrome's Save as PDF). Falls back to the Word .doc only
+  // if the PDF render fails, with a warning, so saving never gets blocked.
+  const buildSaveFile = async (): Promise<{ blob: Blob; extension: 'pdf' | 'doc' } | null> => {
+    if (!employee || !exportThemedHtml) return null;
+    const fileName = `${employee.fullName.replace(/\s+/g, '_')}_${fileSuffix}`;
+    try {
+      const blob = await renderPdfBlob({ html: exportThemedHtml, title: fileName, fileName });
+      return { blob, extension: 'pdf' };
+    } catch (err: any) {
+      console.error('Server PDF render failed, saving as Word instead', err);
+      const output = buildOutput();
+      if (!output) return null;
+      toast.warning(`PDF rendering failed (${err?.message || 'unknown error'}) - saved as a Word document instead.`);
+      return { blob: output.blob, extension: 'doc' };
+    }
+  };
+
   const handleSaveToDb = async () => {
     if (isSaved) return; // already generated for this exact content - the button reads "Saved"
-    const output = buildOutput();
-    if (!output || !employee || isUnsavedGuest || !offer || !selectedJobProfile) return;
+    if (!exportThemedHtml || !employee || isUnsavedGuest || !offer || !selectedJobProfile) return;
     setIsSaving(true);
     try {
+      // Rendered before the offer is written, so a failed render can't leave
+      // an offer saved with no document filed for it.
+      const file = await buildSaveFile();
+      if (!file) throw new Error('Nothing to save - the contract is empty');
+
       const offerPayload = { ...offer, job_profile_id: selectedJobProfile.id, status: 'active' as const };
       const persistedOffer = offer.id
         ? await updateEmploymentOffer(offer.id, offerPayload)
@@ -510,7 +538,7 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
       if (!persistedOffer) throw new Error('Failed to save the employment offer');
       setContractData?.((prev: any) => ({ ...prev, offer: persistedOffer }));
 
-      const saveResult = await saveContractToIndividual(employee.individualId, output.blob, employee.fullName.replace(/\s+/g, '_'));
+      const saveResult = await saveContractToIndividual(employee.individualId, file.blob, employee.fullName.replace(/\s+/g, '_'), file.extension);
       if (!saveResult.success) throw new Error(saveResult.error || 'Failed to file the generated contract');
 
       savedSignatureRef.current = JSON.stringify({ employeeId: employee.individualId, offer: persistedOffer, jobProfileId: selectedJobProfile.id, themeSettings });
@@ -534,11 +562,12 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
 
   const handleSaveLetter = async () => {
     if (!letter || !letterDocumentId || isLetterSaved) return;
-    const output = buildOutput();
-    if (!output || !employee || isUnsavedGuest) return;
+    if (!exportThemedHtml || !employee || isUnsavedGuest) return;
     setIsSaving(true);
     try {
-      const result = await saveDocumentToIndividual(employee.individualId, letterDocumentId, output.blob, `${employee.fullName.replace(/\s+/g, '_')}_${fileSuffix}`);
+      const file = await buildSaveFile();
+      if (!file) throw new Error('Nothing to save - the letter is empty');
+      const result = await saveDocumentToIndividual(employee.individualId, letterDocumentId, file.blob, `${employee.fullName.replace(/\s+/g, '_')}_${fileSuffix}`, file.extension);
       if (!result.success) throw new Error(result.error || 'Failed to file the letter');
       savedSignatureRef.current = letterSignature;
       toast.success(`${documentTitle} saved to ${employee.fullName}'s documents`);

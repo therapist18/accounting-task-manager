@@ -144,8 +144,6 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
-  const [isAutomationRunning, setIsAutomationRunning] = useState(false);
   const [previewDocuments, setPreviewDocuments] = useState<any[]>([]);
   const [currentPreviewIndex, setCurrentPreviewIndex] = useState(0);
   const [isSkipDialogOpen, setIsSkipDialogOpen] = useState(false);
@@ -630,7 +628,6 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   }, [stageDate]);
 
   const handleDocumentUpload = useCallback(() => onDocumentUpload?.(task, stage), [onDocumentUpload, task, stage]);
-  const handleTriggerAutomation = useCallback((e: React.MouseEvent) => { e.stopPropagation(); setAutomationDialogOpen(true); }, []);
   const handleSkipClick = async () => setIsSkipDialogOpen(true);
 
   // Scrolls the named blocking stage's own cell (same task, different stage — found via the
@@ -1481,7 +1478,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       }
       if (stageLink.tab === 'automation' && currentAutomationConfig) {
         return (
-          <Button variant="ghost" size="icon" className={cn("text-purple-600 hover:bg-purple-50", btnSizeClass)} title={`Open automation: ${currentAutomationConfig.docName}`} onClick={(e) => { e.stopPropagation(); window.open(`/dashboard/tasks/${task.id}?tab=automation&automationId=${currentAutomationConfig.automationId}`, '_blank', 'noopener,noreferrer'); }}>
+          <Button variant="ghost" size="icon" className={cn("text-purple-600 hover:bg-purple-50", btnSizeClass)} title={`Start application: ${currentAutomationConfig.docName}`} onClick={(e) => { e.stopPropagation(); window.open(`/dashboard/tasks/${task.id}?mode=guided&automationId=${currentAutomationConfig.automationId}`, '_blank', 'noopener,noreferrer'); }}>
             <Zap className={iconSizeClass} />
           </Button>
         );
@@ -1553,10 +1550,9 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       );
     }
 
-    const showAutomation = !!currentAutomationConfig && !hasLinkedDocument;
     const showSkip = !isStageCompleted;
     const showReassignType = hasMismatchedDocumentType;
-    const hasMoreActions = showAutomation || showSkip || showReassignType;
+    const hasMoreActions = showSkip || showReassignType;
 
     let officerContent: React.ReactNode = null;
     if (onOfficerChange && officers.length > 0 && stage.follow_up?.toLowerCase() === 'officer') {
@@ -1643,14 +1639,6 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          {showAutomation && (
-            <DropdownMenuItem onClick={handleTriggerAutomation} disabled={isAutomationRunning}>
-              <Zap className="mr-2 h-3.5 w-3.5 text-blue-600 fill-blue-600" />
-              <div className="flex flex-col">
-                <span>Run Automation</span><span className="text-[10px] text-muted-foreground leading-tight">via {currentAutomationConfig.docName}</span>
-              </div>
-            </DropdownMenuItem>
-          )}
           {showReassignType && (
             <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setIsReassignTypeDialogOpen(true); }}>
               <Link2 className="mr-2 h-3.5 w-3.5 text-indigo-600" />Fix Document Type
@@ -1934,7 +1922,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   // everything from renderActionsContent except the document view/upload buttons, which get
   // their own dedicated Upload/View column instead.
   // Everything that isn't date/status/document (officer assignment, the billing/requirements/
-  // automation deep-link, Run Automation, Skip Stage) folds into ONE "more actions" menu instead
+  // Start Application deep-link, Skip Stage) folds into ONE "more actions" menu instead
   // of a row of separate icon buttons — the transposed table's 4-column layout only has room for
   // a single compact trigger here, and a wall of icons per stage per task was the whole reason
   // this column existed as a distinct, decluttered space in the first place.
@@ -1952,7 +1940,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         return { icon: <ClipboardList className="mr-2 h-3.5 w-3.5 text-indigo-600 shrink-0" />, label: 'Requirements Checklist', onClick: (e: React.MouseEvent) => { e.stopPropagation(); onOpenRequirements?.(task); } };
       }
       if (stageLink.tab === 'automation' && currentAutomationConfig) {
-        return { icon: <Zap className="mr-2 h-3.5 w-3.5 text-purple-600 shrink-0" />, label: 'Open Automation', onClick: (e: React.MouseEvent) => { e.stopPropagation(); window.open(`/dashboard/tasks/${task.id}?tab=automation&automationId=${currentAutomationConfig.automationId}`, '_blank', 'noopener,noreferrer'); } };
+        return { icon: <Zap className="mr-2 h-3.5 w-3.5 text-purple-600 shrink-0" />, label: 'Start Application', onClick: (e: React.MouseEvent) => { e.stopPropagation(); window.open(`/dashboard/tasks/${task.id}?mode=guided&automationId=${currentAutomationConfig.automationId}`, '_blank', 'noopener,noreferrer'); } };
       }
       return null;
     })();
@@ -1977,7 +1965,6 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       );
     }
 
-    const showAutomation = !!currentAutomationConfig && !hasLinkedDocument;
     const showSkip = !isStageCompleted;
 
     // Status-changing actions that used to sit as icon-buttons directly next to the Status
@@ -2029,7 +2016,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       }
     }
 
-    const hasAnyItem = !!stageLinkItem || !!officerSubmenu || showAutomation || showSkip || showUndoSkip || showClear || showReassignType;
+    const hasAnyItem = !!stageLinkItem || !!officerSubmenu || showSkip || showUndoSkip || showClear || showReassignType;
     if (!hasAnyItem) return null;
 
     return (
@@ -2038,15 +2025,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         <DropdownMenuContent align="end">
           {stageLinkItem && <DropdownMenuItem onClick={stageLinkItem.onClick}>{stageLinkItem.icon}{stageLinkItem.label}</DropdownMenuItem>}
           {officerSubmenu}
-          {(stageLinkItem || officerSubmenu) && (showAutomation || showSkip || showUndoSkip || showClear || showReassignType) && <DropdownMenuSeparator />}
-          {showAutomation && (
-            <DropdownMenuItem onClick={handleTriggerAutomation} disabled={isAutomationRunning}>
-              <Zap className="mr-2 h-3.5 w-3.5 text-blue-600 fill-blue-600 shrink-0" />
-              <div className="flex flex-col">
-                <span>Run Automation</span><span className="text-[10px] text-muted-foreground leading-tight">via {currentAutomationConfig.docName}</span>
-              </div>
-            </DropdownMenuItem>
-          )}
+          {(stageLinkItem || officerSubmenu) && (showSkip || showUndoSkip || showClear || showReassignType) && <DropdownMenuSeparator />}
           {showReassignType && (
             <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setIsReassignTypeDialogOpen(true); }}>
               <Link2 className="mr-2 h-3.5 w-3.5 shrink-0 text-indigo-600" />Fix Document Type

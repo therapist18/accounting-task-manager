@@ -32,21 +32,26 @@ export interface SaveContractToIndividualResult {
 export function saveContractToIndividual(
   individualId: number,
   fileBlob: Blob,
-  fileLabel: string
+  fileLabel: string,
+  extension: 'pdf' | 'doc' = 'pdf'
 ): Promise<SaveContractToIndividualResult> {
-  return saveDocumentToIndividual(individualId, EMPLOYMENT_CONTRACT_DOCUMENT_ID, fileBlob, fileLabel);
+  return saveDocumentToIndividual(individualId, EMPLOYMENT_CONTRACT_DOCUMENT_ID, fileBlob, fileLabel, extension);
 }
 
 // Same filing for any individual-scoped document type - employment letters
 // file under their own letter type's acc_portal_kyc id (letterDocumentTypes.ts).
+// PDF by default (server-rendered, see renderPdfBlob in
+// lib/documentExport.ts); 'doc' only for the Word fallback when PDF
+// rendering is unavailable.
 export async function saveDocumentToIndividual(
   individualId: number,
   documentId: string,
   fileBlob: Blob,
-  fileLabel: string
+  fileLabel: string,
+  extension: 'pdf' | 'doc' = 'pdf'
 ): Promise<SaveContractToIndividualResult> {
   try {
-    const filePath = `individual-documents/${individualId}/${documentId}/${Date.now()}_${fileLabel}.doc`;
+    const filePath = `individual-documents/${individualId}/${documentId}/${Date.now()}_${fileLabel}.${extension}`;
     const { error: uploadError } = await supabase.storage
       .from('kyc-documents')
       .upload(filePath, fileBlob, { contentType: fileBlob.type });

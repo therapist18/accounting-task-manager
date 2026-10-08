@@ -16,8 +16,12 @@ import { cn } from "@/lib/utils"
 import { resolveVariableValueImpl, resolveTargetEntityIdImpl, fetchSourceDataImpl, getArrayFieldDataImpl, getFieldValueImpl, type FieldResolutionContext } from "../../utils/fieldResolution"
 import { isValidValue, cleanFieldValue, updateJsonValue, ETA_SCREENSHOT_DOCUMENT_ID } from "../../utils/AutomationMappingDialog"
 import { executeComputedField } from "../../utils/automationComputedFunctions"
-import { isTemplateEligible } from "../../../tasks-requirements/utils/templateGenerationData"
+import { isTemplateEligible, fetchMasterFieldsRecord } from "../../../tasks-requirements/utils/templateGenerationData"
 import type { JobWorkspaceData } from "../fetchJobWorkspaceData"
+import {
+  isFieldApplicable, getFieldLabel, buildRelationshipData, buildDocsByEntity, latestDoc, getFileUrl, cleanFormData,
+  deriveAutomationType as deriveAutomationTypeShared, saveEvidenceScreenshot,
+} from "../automationShared"
 import supabase from "@/lib/supabase/client"
 import { toast } from '@/lib/hooks/use-toast'
 import { ExtractionPreview } from "@/components/ExtractionPreview"
@@ -114,16 +118,6 @@ function getEntityTypeConfig(type: string) {
   }
 }
 
-function humanizeVariableName(name: string): string {
-  if (!name) return "Field"
-  return name
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
 function formatRelativeTime(iso: string | null | undefined): string {
   if (!iso) return "—"
   const diffMs = Date.now() - new Date(iso).getTime()
@@ -135,42 +129,6 @@ function formatRelativeTime(iso: string | null | undefined): string {
   const days = Math.floor(hours / 24)
   if (days < 7) return `${days}d ago`
   return new Date(iso).toLocaleDateString()
-}
-
-function getFieldLabel(field: any): string {
-  return field?.efnsDisplayName || field?.name || humanizeVariableName(field?.variableName) || "Field"
-}
-
-function isFieldApplicable(field: any, col: ColDef): boolean {
-  const entityTypes = field.entityTypes || (field.applicableTo ? [field.applicableTo] : [])
-  if (!entityTypes || entityTypes.length === 0) return true
-
-  const lowerEntityTypes = entityTypes.map(t => String(t).toLowerCase())
-  const colType = String(col.type).toLowerCase()
-  const colRoles = (col.roles || []).map(r => String(r).toLowerCase())
-
-  if (lowerEntityTypes.includes('dependent') && !lowerEntityTypes.includes('dependant')) lowerEntityTypes.push('dependant')
-  if (lowerEntityTypes.includes('dependant') && !lowerEntityTypes.includes('dependent')) lowerEntityTypes.push('dependent')
-
-  if (colType === 'dependent' || colType === 'dependant') {
-    if (lowerEntityTypes.includes('dependant') || lowerEntityTypes.includes('dependent')) return true
-  }
-
-  if (colType === 'principal') {
-    if (lowerEntityTypes.includes('principal') || lowerEntityTypes.includes('director') || lowerEntityTypes.includes('individual')) return true
-  }
-
-  if (lowerEntityTypes.includes(colType)) return true
-
-  for (const role of colRoles) {
-    if (lowerEntityTypes.includes(role)) return true
-    if (role === 'director' && lowerEntityTypes.includes('principal')) return true
-    if (role === 'principal' && lowerEntityTypes.includes('director')) return true
-  }
-
-  if (colType !== 'company' && lowerEntityTypes.includes('individual')) return true
-
-  return false
 }
 
 export function AutomationTab({ data, onRefresh, highlightAutomationId, onNavigateToRequirement, onNavigateToTemplate, automationJobs }: AutomationTabProps) {
@@ -207,12 +165,8 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
   const [docPreviewOpen, setDocPreviewOpen] = useState(false)
   const [docPreviewData, setDocPreviewData] = useState<any>(null)
   const [docPreviewLoading, setDocPreviewLoading] = useState<string | null>(null)
-  const [documentFiles, setDocumentFiles] = useState<any[]>([])
   const [computedFieldsPreview, setComputedFieldsPreview] = useState<Record<string, string>>({})
-  const [isLoadingDocuments, setIsLoadingDocuments] = useState(false)
   const [isComputing, setIsComputing] = useState(false)
-  const [docStatusByEntity, setDocStatusByEntity] = useState<Record<string, any[]>>({})
-  const [docStatusLoaded, setDocStatusLoaded] = useState(false)
   const [showPreviewModal, setShowPreviewModal] = useState(false)
   const [previewingDocuments, setPreviewingDocuments] = useState<any>(null)
   const [savedScreenshotDoc, setSavedScreenshotDoc] = useState<any>(null)
@@ -223,72 +177,15 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
   const logsEndRef = React.useRef<HTMLDivElement>(null)
   const columns = useMemo(() => buildParticipantColumns(task), [task])
 
-  const relationshipData = useMemo(() => {
-    if (!task) return []
-    const participants = task.participants_details || []
-    const applicant = task.applicant_details || {}
+  const relationshipData = useMemo(() => buildRelationshipData(task), [task])
 
-    const companyParticipant = participants.find((p: any) => p.type === 'company')
-    const isApplicantDependant = applicant.role === 'dependant' || (Array.isArray(applicant.role) && applicant.role.includes('dependant'))
-
-    let principal = participants.find((p: any) =>
-      p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('principal') : p.role === 'principal')
-    )
-
-    let dependants = participants
-      .filter((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('dependant') : p.role === 'dependant'))
-      .map((dep: any) => ({ id: dep.id, name: dep.name, relationship: dep.relationship || 'dependant' }))
-
-    if (isApplicantDependant) {
-      if (!dependants.find((d: any) => d.id === applicant.id)) {
-        dependants.push({ id: applicant.id || task?.individual_id, name: applicant.name, relationship: applicant.relationship || 'dependant' })
-      }
-    } else {
-      if (!principal) principal = { id: applicant.id || task?.individual_id, name: applicant.name, role: applicant.role }
-    }
-
-    return [{
-      company: { id: companyParticipant?.id || task?.company_id, name: companyParticipant?.name || task?.company_name || 'Company', type: 'company' },
-      principal: principal ? { id: principal.id, name: principal.name, role: principal.role } : null,
-      directors: participants
-        .filter((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? (p.role.includes('director') || p.role.includes('shareholder')) : (p.role === 'director' || p.role === 'shareholder')))
-        .map((d: any) => ({ id: d.id, name: d.name, role: d.role })),
-      dependants: dependants,
-      understudy: (() => {
-        const up = participants.find((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('understudy') : p.role === 'understudy'))
-        return up ? { id: up.id, name: up.name } : null
-      })(),
-      sponsor: (() => {
-        const sp = participants.find((p: any) => p.type === 'individual' && (Array.isArray(p.role) ? p.role.includes('sponsor') : p.role === 'sponsor'))
-        return sp ? { id: sp.id, name: sp.name } : null
-      })()
-    }]
-  }, [task])
-
+  // Shared session cache of tm_job_fields (also used by the Requirements/Templates tabs
+  // and guided mode) - a superset of the fields linked here, fetched once.
   useEffect(() => {
-    const linkedFieldIds = new Set<string>()
-      ; (automations || []).forEach(auto => {
-        if (auto.webdata && auto.webdata.length > 0) {
-          auto.webdata.forEach((field: any) => {
-            ; (field.linkedMasterFields || field.masterFieldIds || []).forEach((id: any) => linkedFieldIds.add(String(id)))
-              ; (field.arrayItems || []).forEach((item: any) => {
-                ; (item.linkedMasterFields || item.masterFieldIds || (item.linkedMasterFieldId ? [item.linkedMasterFieldId] : [])).forEach((id: any) => linkedFieldIds.add(String(id)))
-              })
-          })
-        }
-      })
-    if (linkedFieldIds.size === 0) return
-    const fetchJobFields = async () => {
-      const { data: fields } = await supabase.from('tm_job_fields').select('*').in('id', Array.from(linkedFieldIds))
-      if (fields) {
-        setJobFieldsRecord(fields.reduce((acc: Record<string, any>, field: any) => {
-          acc[String(field.id)] = field
-          return acc
-        }, {}))
-      }
-    }
-    fetchJobFields()
-  }, [automations])
+    let cancelled = false
+    fetchMasterFieldsRecord().then(record => { if (!cancelled) setJobFieldsRecord(record) })
+    return () => { cancelled = true }
+  }, [])
 
   // Pre-fetch source data
   useEffect(() => {
@@ -331,52 +228,14 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
     loadAll()
   }, [expandedAutomations, automations, jobFieldsRecord, relationshipData, task])
 
-  useEffect(() => {
-    const reqKycIds = new Set<string>()
-    const personCols: ColDef[] = []
-    const companyCols: ColDef[] = []
-      ; (automations || []).forEach((auto: any) => {
-        if (!expandedAutomations.has(auto.id)) return
-          ; (auto.webdata || []).forEach((f: any) => {
-            const docFields: any[] = []
-            if (f.fieldType === 'document') docFields.push(f)
-            if (f.fieldType === 'array') {
-              ; (f.arrayItems || []).forEach((item: any) => {
-                if (item.type === 'document') docFields.push({ ...item, entityTypes: item.entityTypes || f.entityTypes })
-              })
-            }
-            docFields.forEach((docField: any) => {
-              ; (docField.linkedKycDocuments || []).forEach((docId: string) => reqKycIds.add(docId))
-              columns.forEach(col => {
-                if (!isFieldApplicable(docField, col)) return
-                if (col.type === 'company') companyCols.push(col)
-                else personCols.push(col)
-              })
-            })
-          })
-      })
-    if (reqKycIds.size === 0) { setDocStatusLoaded(true); return }
-    const personIds = Array.from(new Set(personCols.map(c => String(c.id))))
-    const companyIds = Array.from(new Set(companyCols.map(c => String(c.id))))
-    const load = async () => {
-      const results: Record<string, any[]> = {}
-      const addDoc = (key: any, doc: any) => { const k = String(key); if (!results[k]) results[k] = []; results[k].push(doc) }
-      try {
-        await Promise.all([
-          personIds.length > 0
-            ? supabase.from('acc_portal_directors_documents').select('id, document_id, director_id, file_path').in('director_id', personIds).in('document_id', Array.from(reqKycIds)).neq('status', 'deleted')
-              .then(({ data }) => { (data || []).forEach((d: any) => addDoc(d.director_id, d)) })
-            : Promise.resolve(),
-          companyIds.length > 0
-            ? supabase.from('acc_portal_kyc_uploads').select('id, document_id, company_id, file_path').in('company_id', companyIds).in('document_id', Array.from(reqKycIds)).neq('status', 'deleted')
-              .then(({ data }) => { (data || []).forEach((d: any) => addDoc(d.company_id, d)) })
-            : Promise.resolve(),
-        ]);
-        setDocStatusByEntity(results)
-      } catch (err) { console.error('Error checking document status:', err) } finally { setDocStatusLoaded(true) }
-    }
-    load()
-  }, [automations, expandedAutomations, columns])
+  // Every document for this task's people/companies is already in `data` (loaded once
+  // by fetchJobWorkspaceData) - derive per-entity document status from it instead of
+  // re-querying the same tables whenever an automation is expanded.
+  const docStatusByEntity = useMemo(
+    () => buildDocsByEntity(data.documentsByIndividual, data.allCompanyDocuments),
+    [data.documentsByIndividual, data.allCompanyDocuments]
+  )
+  const docStatusLoaded = true
 
   const getDocsForCol = useCallback((linkedKycDocuments: string[] | undefined, col: ColDef) => {
     const docs = docStatusByEntity[String(col.id)] || []
@@ -474,16 +333,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
       return next
     })
   }
-  const deriveAutomationType = useCallback((automation: any): string => {
-    if (automation?.automation_type) return automation.automation_type;
-    const url = automation?.webhook_url || '';
-    const parts = url.split('/').filter(Boolean);
-    const last = parts[parts.length - 1];
-    if (last && !last.includes('localhost') && !last.includes('http')) return last;
-    const secondLast = parts[parts.length - 2];
-    if (secondLast && secondLast !== 'permit' && !secondLast.includes(':')) return secondLast;
-    return 'class-d';
-  }, []);
+  const deriveAutomationType = deriveAutomationTypeShared
 
   const filteredAutomations = useMemo(() => {
     if (!searchQuery.trim()) return automations || []
@@ -562,41 +412,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
       const byteNumbers = new Array(byteCharacters.length).fill(0).map((_, i) => byteCharacters.charCodeAt(i));
       const byteArray = new Uint8Array(byteNumbers);
       const blob = new Blob([byteArray], { type: 'image/png' });
-      const timestamp = Date.now();
-      const fileName = `eta - kenya - confirmation - ${timestamp}.png`;
-      const storagePath = `individual - documents / ${directorId} /${ETA_SCREENSHOT_DOCUMENT_ID}/${fileName}`;
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('kyc-documents')
-        .upload(storagePath, blob, {
-          contentType: 'image/png',
-          upsert: false,
-        });
-      if (uploadError) throw new Error(`Storage upload failed: ${uploadError.message}`);
-      const { data: docRecord, error: insertError } = await supabase
-        .from('acc_portal_directors_documents')
-        .insert({
-          director_id: directorId,
-          document_id: ETA_SCREENSHOT_DOCUMENT_ID,
-          file_path: storagePath,
-          file_name: fileName,
-          status: 'active',
-          extraction_status: 'success',
-          extracted_details: {
-            source: 'eta-kenya-automation',
-            captured_at: new Date().toISOString(),
-            task_id: task?.id,
-          },
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          // Plain scanner_users.id, matching bcl-registry's document-manager pages (the other
-          // app reading/writing this same table) — "uploaded at" is just this row's created_at,
-          // not a separate field, and uploaded_by is never a nested object there.
-          uploaded_by: actor.by_id,
-        })
-        .select()
-        .single();
-      if (insertError) throw new Error(`DB insert failed: ${insertError.message}`);
-      return docRecord;
+      return await saveEvidenceScreenshot(blob, directorId, task?.id, actor.by_id);
     } finally {
       setIsSavingScreenshot(false);
     }
@@ -787,6 +603,14 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
     };
   }, [pollingInterval]);
 
+  // pollSupabaseJob gets a new identity every render (it depends, via
+  // handleCompletedJob, on non-memoized helpers). Reaching it through a ref keeps the
+  // effect below keyed on the run history alone - with pollSupabaseJob as a dependency
+  // it re-ran every render, and its setLastRunByAutomation(new object) re-rendered
+  // again: "Maximum update depth exceeded" on any task that had run history.
+  const pollSupabaseJobRef = React.useRef(pollSupabaseJob);
+  pollSupabaseJobRef.current = pollSupabaseJob;
+
   // Whenever the parent's run history arrives/changes (fetched once in JobWorkspace
   // and passed down, rather than this tab re-querying it itself), derive "last run"
   // status per automation so it survives a page refresh, and transparently resume
@@ -820,11 +644,11 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
       });
       if (activeRun.job_id) {
         setAutomationJobId(activeRun.job_id);
-        const interval = setInterval(() => pollSupabaseJob(activeRun.job_id), 2000);
+        const interval = setInterval(() => pollSupabaseJobRef.current(activeRun.job_id), 2000);
         setPollingInterval(interval);
       }
     }
-  }, [task?.id, automationJobs, pollSupabaseJob]);
+  }, [task?.id, automationJobs]);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1067,47 +891,6 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
     }
   }, [kycDocsMap]);
 
-  const cleanFormData = (data: Record<string, any>): Record<string, any> => {
-    const cleaned: Record<string, any> = {};
-    for (const [key, value] of Object.entries(data)) {
-      if (value === null || value === undefined || value === '' || value === 'Missing') continue;
-      if (Array.isArray(value)) {
-        const cleanedArray = value
-          .map(item => {
-            if (typeof item === 'object' && item !== null) {
-              const cleanedItem: Record<string, any> = {};
-              let hasMeaningfulData = false;
-              for (const [itemKey, itemValue] of Object.entries(item)) {
-                if (['entityId', 'index', 'id'].includes(itemKey)) { cleanedItem[itemKey] = itemValue; continue; }
-                if (itemValue !== null && itemValue !== undefined && itemValue !== '' && itemValue !== 'Missing') {
-                  cleanedItem[itemKey] = itemValue;
-                  hasMeaningfulData = true;
-                }
-              }
-              return hasMeaningfulData ? cleanedItem : null;
-            }
-            return item;
-          })
-          .filter(item => item !== null);
-        if (cleanedArray.length > 0) cleaned[key] = cleanedArray;
-      } else if (typeof value === 'object' && value !== null) {
-        const cleanedObj: Record<string, any> = {};
-        let hasMeaningfulData = false;
-        for (const [objKey, objValue] of Object.entries(value)) {
-          if (['entityId', 'index', 'id'].includes(objKey)) { cleanedObj[objKey] = objValue; continue; }
-          if (objValue !== null && objValue !== undefined && objValue !== '' && objValue !== 'Missing') {
-            cleanedObj[objKey] = objValue;
-            hasMeaningfulData = true;
-          }
-        }
-        if (hasMeaningfulData) cleaned[key] = cleanedObj;
-      } else {
-        cleaned[key] = value;
-      }
-    }
-    return cleaned;
-  };
-
   // Follows the app's established client-side auth pattern (see sidebar.tsx's
   // useCurrentUser): no Supabase auth here, session lives behind /api/auth/session.
   const getCurrentUserInfo = useCallback(async () => {
@@ -1154,10 +937,10 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
         if (f.fieldType === 'array') {
           formData[f.variableName] = mergeArrayOverrides(f, getArrayFieldData(f));
         } else if (f.fieldType === 'document') {
-          const doc = documentFiles.find(d =>
-            f.linkedKycDocuments?.includes(d.document_id) &&
-            String(d.owner_id) === String(targetId)
-          );
+          // From the documents already loaded with the workspace - this used to read a
+          // list that was only fetched after a run had started, so the first run of a
+          // session sent every document (e.g. the passport) as null.
+          const doc = latestDoc((docStatusByEntity[String(targetId)] || []).filter((d: any) => f.linkedKycDocuments?.includes(d.document_id)));
           const fileUrl = doc?.file_path?.startsWith('http') ? doc.file_path : getFileUrl(doc?.file_path || '');
           formData[f.variableName] = fileUrl || null;
         } else if (f.fieldType === 'computed') {
@@ -1223,22 +1006,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
       toast({ title: 'Automation Error', description: e.message || 'Unknown error', variant: 'destructive' });
       setRunningAutomationId(null);
     }
-  }, [task, resolveTargetEntityId, getArrayFieldData, mergeArrayOverrides, documentFiles, computedFieldsPreview, resolvedValues, resolveVariableValue, cleanFormData, deriveAutomationType, pollSupabaseJob]);
-
-  const getFileUrl = (filePath: string) => {
-    if (!filePath) return '';
-    if (filePath.startsWith('http')) return filePath;
-    const bucketName = 'kyc-documents';
-    let cleanPath = filePath;
-    if (cleanPath.startsWith(bucketName + '/')) {
-      cleanPath = cleanPath.substring(bucketName.length + 1);
-    }
-    const fullPath = `${bucketName}/${cleanPath}`;
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!supabaseUrl) return '';
-    const encodedPath = encodeURIComponent(fullPath).replace(/%2F/g, '/');
-    return `${supabaseUrl}/storage/v1/object/public/${encodedPath}`;
-  };
+  }, [task, resolveTargetEntityId, getArrayFieldData, mergeArrayOverrides, docStatusByEntity, computedFieldsPreview, resolvedValues, resolveVariableValue, deriveAutomationType, pollSupabaseJob]);
 
   // masterFieldId identifies exactly which linked master field is being edited (the
   // one whose source was clicked in the "Linked Sources" popover, or the sole/primary
@@ -1376,37 +1144,6 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
     const timer = setTimeout(runComputation, 500);
     return () => clearTimeout(timer);
   }, [task?.individual_id, automations, relationshipData, task]);
-
-  // Fetch documents when needed
-  useEffect(() => {
-    if (!showConsole || !automationJobId) return;
-    const loadDocs = async () => {
-      setIsLoadingDocuments(true);
-      try {
-        const reqKycIds = new Set<string>();
-        const personIds = new Set<string>();
-        (automations || []).forEach(auto => {
-          if (auto.id !== runningAutomationId) return;
-          (auto.webdata || []).forEach((f: any) => {
-            if (f.fieldType === 'document' && f.linkedKycDocuments) {
-              f.linkedKycDocuments.forEach((docId: string) => reqKycIds.add(docId));
-              const targetId = resolveTargetEntityId(f) || String(task?.individual_id || "");
-              personIds.add(targetId);
-            }
-          });
-        });
-        if (personIds.size > 0 && reqKycIds.size > 0) {
-          const { data: docs } = await supabase.from('acc_portal_directors_documents')
-            .select('*, kyc_document:acc_portal_kyc!document_id(*)')
-            .in('director_id', Array.from(personIds))
-            .in('document_id', Array.from(reqKycIds))
-            .neq('status', 'deleted');
-          if (docs) setDocumentFiles(docs.map(d => ({ ...d, owner_type: 'person', owner_id: String(d.director_id) })));
-        }
-      } catch (err) { console.error('Error fetching documents:', err); } finally { setIsLoadingDocuments(false); }
-    };
-    loadDocs();
-  }, [showConsole, automationJobId, automations, runningAutomationId, task, resolveTargetEntityId]);
 
   const totalCols = columns.length + 4
 
@@ -1899,16 +1636,12 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                         <span className="text-xs text-slate-400 italic">See rows below</span>
                                       ) : hasDefault ? (
                                         <div className="flex gap-1.5 items-center justify-start w-full">
-                                          <TooltipProvider>
-                                            <Tooltip>
-                                              <TooltipTrigger asChild>
-                                                <Lock className="h-3.5 w-3.5 text-slate-400 cursor-help shrink-0" />
-                                              </TooltipTrigger>
-                                              <TooltipContent side="top" className="text-xs max-w-xs font-normal">
-                                                Preset by automation configuration.
-                                              </TooltipContent>
-                                            </Tooltip>
-                                          </TooltipProvider>
+                                          {/* Native title, not a Radix Tooltip: one asChild tooltip per matrix cell
+                                              hit Radix compose-refs 1.1.1's ref-churn loop under React 19
+                                              ("Maximum update depth exceeded"). */}
+                                          <span title="Preset by automation configuration." className="cursor-help shrink-0">
+                                            <Lock className="h-3.5 w-3.5 text-slate-400" />
+                                          </span>
                                           <span className="text-sm font-medium text-slate-600 truncate">{String(field.defaultValue)}</span>
                                         </div>
                                       ) : isEditing ? (
@@ -2144,14 +1877,9 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
                                             )
                                           ) : itemHasDefault ? (
                                             <div className="flex gap-1.5 items-center justify-start w-full">
-                                              <TooltipProvider>
-                                                <Tooltip>
-                                                  <TooltipTrigger asChild>
-                                                    <Lock className="h-3.5 w-3.5 text-slate-400 cursor-help shrink-0" />
-                                                  </TooltipTrigger>
-                                                  <TooltipContent side="top" className="text-xs max-w-xs font-normal">Preset by automation configuration.</TooltipContent>
-                                                </Tooltip>
-                                              </TooltipProvider>
+                                              <span title="Preset by automation configuration." className="cursor-help shrink-0">
+                                                <Lock className="h-3.5 w-3.5 text-slate-400" />
+                                              </span>
                                               <span className="text-sm font-medium text-slate-600 truncate">{String(item.defaultValue)}</span>
                                             </div>
                                           ) : isCellEditing ? (

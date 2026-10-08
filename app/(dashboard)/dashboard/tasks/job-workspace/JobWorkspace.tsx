@@ -16,6 +16,7 @@ import { TemplatesTab } from "./tabs/TemplatesTab"
 import { BillingTab } from "./tabs/BillingTab"
 import { HistoryTab } from "./tabs/HistoryTab"
 import { NotesTab } from "./tabs/NotesTab"
+import { GuidedApplication } from "./guided/GuidedApplication"
 
 interface JobWorkspaceProps {
   data: JobWorkspaceData
@@ -26,6 +27,19 @@ interface JobWorkspaceProps {
   initialRequirementId?: string
   initialOpenSendDialog?: boolean
   initialTemplateDocId?: string
+  /** "guided" opens the step-by-step application flow instead of the tabs */
+  initialMode?: string
+}
+
+// Keeps ?mode / ?automationId in the URL in step with guided mode (so refresh and
+// shared links land in the same place) without a navigation or refetch.
+function syncGuidedParams(guided: boolean, automationId?: string | null) {
+  const url = new URL(window.location.href)
+  if (guided) url.searchParams.set("mode", "guided")
+  else url.searchParams.delete("mode")
+  if (automationId) url.searchParams.set("automationId", automationId)
+  else if (guided) url.searchParams.delete("automationId")
+  window.history.replaceState(null, "", url.toString())
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -71,8 +85,22 @@ const TAB_DEFINITIONS = [
   { value: "notes", label: "Notes", icon: MessageSquare },
 ]
 
-export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutomationId, initialRequirementId, initialOpenSendDialog, initialTemplateDocId }: JobWorkspaceProps) {
+export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutomationId, initialRequirementId, initialOpenSendDialog, initialTemplateDocId, initialMode }: JobWorkspaceProps) {
   const { task, department, subdepartment, stages, individual } = data
+  const [guided, setGuided] = useState(initialMode === "guided")
+  const [guidedAutomationId, setGuidedAutomationId] = useState<string | null>(initialMode === "guided" ? initialAutomationId || null : null)
+
+  const enterGuided = (automationId?: string | null) => {
+    setGuided(true)
+    setGuidedAutomationId(automationId || null)
+    syncGuidedParams(true, automationId)
+  }
+  const exitGuided = () => {
+    setGuided(false)
+    syncGuidedParams(false)
+    // Land on the automation matrix - the closest tab to where the user just was.
+    handleTabChange("automation")
+  }
   const [activeTab, setActiveTab] = useState(initialTab || "workflow")
   const [visitedTabs, setVisitedTabs] = useState<Set<string>>(new Set([initialTab || "workflow"]))
   const [openReviewDraft, setOpenReviewDraft] = useState(false)
@@ -193,6 +221,19 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
   const statusLabel = task?.status?.replace("_", " ") || "Unknown"
   const clientDraft = task?.registry_metadata?.client_requirements_draft
 
+  if (guided) {
+    return (
+      <GuidedApplication
+        data={data}
+        automationId={guidedAutomationId}
+        automationJobs={automationJobs}
+        onAutomationChange={(id) => { setGuidedAutomationId(id || null); syncGuidedParams(true, id || null) }}
+        onExit={exitGuided}
+        onRefresh={onRefresh}
+      />
+    )
+  }
+
   return (
     <div className="h-screen flex flex-col bg-[#FAFAFC] overflow-hidden">
       <div className="h-1 bg-gradient-to-r from-custom-blue via-blue-400 to-blue-300" />
@@ -244,6 +285,16 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
                 <Badge variant="outline" className="text-sm font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border-blue-200">
                   {currentStage.name}
                 </Badge>
+              )}
+              {data.automations?.length > 0 && (
+                <Button
+                  size="sm"
+                  className="h-8 bg-custom-blue hover:bg-custom-blue/90 text-white"
+                  onClick={() => enterGuided(data.automations.length === 1 ? String(data.automations[0].id) : null)}
+                  title="Step-by-step: documents, details and letters, then run the automation"
+                >
+                  <Zap className="h-4 w-4 mr-1.5" /> Start application
+                </Button>
               )}
             </div>
           </div>

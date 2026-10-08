@@ -136,6 +136,7 @@ interface WebDataGroup {
   computedDocuments?: string[];
   customFieldSource?: string;
   defaultValue?: string;
+  isOptional?: boolean; // Guided application warns instead of blocking the run when this is empty
 }
 
 interface KYCDocument {
@@ -1139,6 +1140,16 @@ function WebDataGroupEditDialog({
                     className="text-sm"
                   />
                 </div>
+              </div>
+              <div className="mt-4 flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5">
+                <div>
+                  <Label className="text-sm font-semibold text-slate-700">Optional field</Label>
+                  <p className="text-xs text-slate-500">Guided application lets the run go ahead (with a warning) when this is empty. Required fields block the run.</p>
+                </div>
+                <Switch
+                  checked={editingGroup.isOptional === true}
+                  onCheckedChange={(c) => updateField('isOptional', c)}
+                />
               </div>
             </div>
 

@@ -4,7 +4,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Trash2, RotateCw, AlertTriangle, CheckCircle, XCircle, Square, Loader2 } from 'lucide-react'
+import { Trash2, RotateCw, AlertTriangle, CheckCircle, XCircle, Square, Sparkles, X, Loader2 } from 'lucide-react'
 import { performExtraction } from '@/lib/extractionUtils'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
@@ -12,12 +12,12 @@ import { ExtractionPreview } from '@/components/ExtractionPreview'
 import { FileUpload } from '@/components/ui/file-upload'
 import { toast } from "@/lib/hooks/use-toast"
 import supabase from '@/lib/supabase/client'
+import { cn } from "@/lib/utils"
 
 // File size constants (in bytes)
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB - Supabase standard limit
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const MAX_FILE_SIZE_MB = MAX_FILE_SIZE / (1024 * 1024);
 
-// Helper function to format file sizes
 const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return '0 Bytes';
   const k = 1024;
@@ -26,7 +26,6 @@ const formatFileSize = (bytes: number): string => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
 
-// Helper function to get file size color based on size
 const getFileSizeColor = (bytes: number): string => {
   const sizeMB = bytes / (1024 * 1024);
   if (sizeMB >= MAX_FILE_SIZE_MB) return 'text-red-600 font-semibold';
@@ -35,58 +34,15 @@ const getFileSizeColor = (bytes: number): string => {
   return 'text-gray-500';
 };
 
-const toastControllers = new Map<string, ReturnType<typeof toast>>();
-
-const showLoadingToast = (message: string, id?: string) => {
-  const title = 'Processing';
-  const description = message;
-
-  if (id && toastControllers.has(id)) {
-    toastControllers.get(id)?.update({ id, title, description, variant: 'default', open: true });
-    return id;
-  }
-
-  const controller = toast({ title, description, variant: 'default' });
-  toastControllers.set(controller.id, controller);
-  return controller.id;
-};
-
-const showSuccessToast = (message: string, id?: string) => {
-  const title = 'Success';
-  const description = message;
-
-  if (id && toastControllers.has(id)) {
-    const controller = toastControllers.get(id)!;
-    controller.update({ id, title, description, variant: 'success', open: true });
-    return id;
-  }
-
-  const controller = toast({ title, description, variant: 'success' });
-  toastControllers.set(controller.id, controller);
-  return controller.id;
-};
-
-const showErrorToast = (message: string, id?: string) => {
-  const title = 'Error';
-  const description = message;
-
-  if (id && toastControllers.has(id)) {
-    const controller = toastControllers.get(id)!;
-    controller.update({ id, title, description, variant: 'destructive', open: true });
-    return id;
-  }
-
-  const controller = toast({ title, description, variant: 'destructive' });
-  toastControllers.set(controller.id, controller);
-  return controller.id;
-};
-
 interface DocumentField {
   id: string
   name: string
   type: string
+  displayName?: string
   isArray?: boolean
-  isUnique?: boolean;
+  isUnique?: boolean
+  section?: string
+  options?: string[]
   arrayConfig?: {
     fields: {
       id: string
@@ -139,14 +95,18 @@ interface UploadModalProps {
   idFieldName?: string;
   documentIdFieldName?: string;
   isCompanyUpload?: boolean;
+  storagePathPrefix?: string;
   additionalFields?: Record<string, any>;
   onBeforeUpload?: (recordData: any) => Promise<any>;
   renderAsDialog?: boolean;
   showSaveButton?: boolean;
-  onPendingChange?: (docs: any[]) => void; // <--- Newly added callback
+  onPendingChange?: (docs: any[]) => void;
+  autoExtract?: boolean;
+  allowBackImage?: boolean;
+  backImageLabel?: string;
 }
 
-const ValidationDialog = ({ isOpen, onClose, onConfirm, title, description, type = 'warning', isSubmitting = false }) => {
+const ValidationDialog = ({ isOpen, onClose, onConfirm, title, description, type = 'warning', isSubmitting = false, uniqueFields = [] }) => {
   const getIcon = () => {
     switch (type) {
       case 'error': return <XCircle className="h-6 w-6 text-red-500" />
@@ -165,11 +125,30 @@ const ValidationDialog = ({ isOpen, onClose, onConfirm, title, description, type
 
   return (
     <Dialog open={isOpen} onOpenChange={isSubmitting ? () => { } : onClose}>
-      <DialogContent>
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <div className="flex items-center gap-3">
             {getIcon()}
-            <DialogTitle>{title}</DialogTitle>
+            <div className="flex-1">
+              <DialogTitle>{title}</DialogTitle>
+              {uniqueFields.length > 0 && (
+                <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-md">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-amber-500" />
+                    <span className="text-xs font-medium text-amber-800">
+                      Unique Identifier Fields:
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {uniqueFields.map((field, index) => (
+                      <span key={index} className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-medium rounded">
+                        {field.displayName || field.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </DialogHeader>
         <div className={`p-4 rounded-lg ${getColors()}`}>
@@ -198,12 +177,41 @@ const ValidationDialog = ({ isOpen, onClose, onConfirm, title, description, type
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
-}
+  );
+};
 
 const generateDocumentId = () => {
   return Math.random().toString(36).substring(2) + Date.now().toString(36);
-}
+};
+
+const fetchDocumentFieldsFromKYC = async (documentId: string) => {
+  if (!documentId) return [];
+  try {
+    const { data, error } = await supabase
+      .from('acc_portal_kyc')
+      .select('fields')
+      .eq('id', documentId)
+      .single();
+
+    if (error) {
+      console.warn('Failed to fetch fields from acc_portal_kyc:', error);
+      return [];
+    }
+
+    let fields = [];
+    if (Array.isArray(data)) {
+      if (data.length > 0 && data[0].fields) fields = data[0].fields;
+      else fields = data;
+    } else if (data && typeof data === 'object') {
+      if (data.fields) fields = data.fields;
+      else if (Array.isArray(data)) fields = data;
+    }
+    return fields || [];
+  } catch (err) {
+    console.error('Error fetching document fields from KYC:', err);
+    return [];
+  }
+};
 
 const normalizeName = (name) => {
   if (!name || typeof name !== 'string') return '';
@@ -211,7 +219,7 @@ const normalizeName = (name) => {
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-}
+};
 
 const checkCompanyNameMatchInFilename = (companyName, fileName) => {
   if (!companyName || !fileName) return { match: true };
@@ -300,7 +308,7 @@ const checkForIndividualDuplicates = async (personId, docId, extractedData, docu
           duplicateChecks.push({
             field: fieldName,
             value: uniqueValue.trim(),
-            fieldDisplayName: fieldName,
+            fieldDisplayName: field.displayName || fieldName,
           });
         }
       } catch (error) {
@@ -342,7 +350,7 @@ const checkForCompanyDuplicates = async (companyId, docId, extractedData, docume
           duplicateChecks.push({
             field: fieldName,
             value: uniqueValue.trim(),
-            fieldDisplayName: fieldName,
+            fieldDisplayName: field.displayName || fieldName,
           });
         }
       } catch (error) {
@@ -400,8 +408,7 @@ const validateMatchFields = (extractedData, documentFields, documentName = '') =
   if (missingMatchFields.length > 0) {
     return {
       isValid: false,
-      message: `The following match fields are missing: ${missingMatchFields.join(', ')}. ` +
-        'Please ensure these fields are properly extracted from the document.'
+      message: `The following match fields are missing: ${missingMatchFields.join(', ')}. Please ensure these fields are properly extracted.`
     };
   }
 
@@ -412,8 +419,7 @@ const validateMatchFields = (extractedData, documentFields, documentName = '') =
 
     return {
       isValid: false,
-      message: `Document mismatch: ${mismatchMessages}. ` +
-        'Please verify the document matches the expected asset.'
+      message: `Document mismatch: ${mismatchMessages}. Please verify the document matches the expected asset.`
     };
   }
 
@@ -440,8 +446,7 @@ const validateDocument = async (doc, validationContext) => {
       type: 'warning',
       message: 'Automatic extraction failed. Please enter the details manually below.'
     });
-  }
-  else if (hasExtractedData && finalSelectedDoc?.fields) {
+  } else if (hasExtractedData && finalSelectedDoc?.fields) {
     const matchValidation = validateMatchFields(
       doc.extractedData,
       finalSelectedDoc.fields,
@@ -523,7 +528,6 @@ const validateDocument = async (doc, validationContext) => {
   return { status: finalStatus, message: consolidatedReport };
 };
 
-
 export function UploadModal({
   isOpen,
   onClose,
@@ -546,32 +550,37 @@ export function UploadModal({
   idFieldName,
   documentIdFieldName,
   isCompanyUpload,
+  storagePathPrefix,
   additionalFields,
   onBeforeUpload,
   renderAsDialog = true,
   showSaveButton = true,
-  onPendingChange // Prop to pass unsubmitted state back to parent
+  onPendingChange,
+  autoExtract = true,
+  allowBackImage = false,
+  backImageLabel = 'Back',
 }: UploadModalProps) {
   const [uploadedDocs, setUploadedDocs] = useState<Array<{
     id: string;
     file: File;
     fileUrl: string;
+    backFile?: File;
+    backFileUrl?: string;
     extractedData: Record<string, any>;
     status: string;
     fileName?: string;
     validationStatus?: 'pending' | 'valid' | 'warning' | 'error';
     validationMessage?: string;
     selectedDocTypeId?: string;
+    fields?: any[];
   }>>([]);
 
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [currentDocumentName, setCurrentDocumentName] = useState(documentName);
   const [selectedValues, setSelectedValues] = useState<Record<string, string>>({});
-  const [extractingDocIds, setExtractingDocIds] = useState<Set<string>>(new Set());
-  const [stopExtraction, setStopExtraction] = useState(false);
-  const abortControllersRef = useRef<Record<string, AbortController>>({});
+  const [backFileTarget, setBackFileTarget] = useState<string | null>(null);
+  const backFileInputRef = useRef<HTMLInputElement>(null);
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
 
   useEffect(() => {
     setCurrentDocumentName(documentName);
@@ -583,9 +592,9 @@ export function UploadModal({
     title: '',
     description: '',
     type: 'warning',
-    onConfirm: null
+    onConfirm: null,
+    uniqueFields: []
   });
-  const onPendingChangeRef = useRef(onPendingChange);
 
   const availableDocTypes = useMemo(() => {
     if (allowMultipleTypes && documentTypes && documentTypes.length > 0) {
@@ -596,583 +605,78 @@ export function UploadModal({
 
   useEffect(() => {
     if (isOpen) {
-      const transformedDoc = selectedDoc ? {
-        ...selectedDoc,
-        id: selectedDoc.document_ids?.[0] || selectedDoc.kyc_document_id || selectedDoc.id
-      } : null;
-      setFinalSelectedDoc(transformedDoc);
+      setFinalSelectedDoc(selectedDoc);
       setUploadedDocs([]);
     }
   }, [isOpen, selectedDoc]);
 
   useEffect(() => {
-    onPendingChangeRef.current = onPendingChange;
-  }, [onPendingChange]);
-
-  useEffect(() => {
-    onPendingChangeRef.current?.(uploadedDocs);
-  }, [uploadedDocs]);
+    if (onPendingChange) {
+      onPendingChange(uploadedDocs);
+    }
+  }, [uploadedDocs, onPendingChange]);
 
   const individualName = useMemo(() => {
-    const isCompanyUpload = !!company?.id;
-    if (isCompanyUpload && selectedMember?.type === 'company') {
+    const isCompany = !!company?.id || isCompanyUpload;
+    if (isCompany) {
       return companyName || company?.company_name || entityName || 'Unknown Company';
     }
     return selectedMember?.full_name || selectedMember?.name || entityName || 'New Individual';
-  }, [entityName, selectedMember, company, companyName]);
+  }, [entityName, selectedMember, company, companyName, isCompanyUpload]);
 
   const personId = useMemo(() => {
     return selectedMember?.id || entityId;
   }, [selectedMember, entityId]);
 
   const docId = useMemo(() => {
-    return finalSelectedDoc?.document_ids?.[0] || finalSelectedDoc?.kyc_document_id || selectedDoc?.document_ids?.[0] || selectedDoc?.kyc_document_id;
-  }, [finalSelectedDoc, selectedDoc]);
+    return finalSelectedDoc?.id || selectedDocumentId;
+  }, [finalSelectedDoc, selectedDocumentId]);
 
-  const showExtractionProgressToast = (fileName, message, toastId) => {
-    return showLoadingToast(`${fileName}: ${message}`, toastId);
+  const handleStopExtraction = (docIdToStop: string) => {
+    const controller = abortControllersRef.current.get(docIdToStop);
+    if (controller) {
+      controller.abort();
+      abortControllersRef.current.delete(docIdToStop);
+    }
+    setUploadedDocs(prev => prev.map(d =>
+      d.id === docIdToStop && d.validationStatus === 'pending'
+        ? { ...d, validationStatus: 'warning', validationMessage: 'Extraction stopped. Please fill in the details manually.' }
+        : d
+    ));
   };
 
-  const handleFileUpload = async (files: File[]) => {
-    const requiredDropdowns = dropdowns?.filter(d => d.required) || [];
-    const missingRequiredDropdowns = requiredDropdowns.filter(d => !d.value);
+  const getUniqueFieldsFromDocs = (docs) => {
+    const uniqueFieldsMap = new Map();
+    docs.forEach(doc => {
+      const docType = allowMultipleTypes && doc.selectedDocTypeId
+        ? availableDocTypes.find(dt => dt.id === doc.selectedDocTypeId)
+        : finalSelectedDoc;
 
-    if (missingRequiredDropdowns.length > 0) {
-      const missingLabels = missingRequiredDropdowns.map(d => d.label).join(', ');
-      showErrorToast(`Please select: ${missingLabels}`);
-      return;
-    }
-
-    const fileArray = Array.isArray(files) ? files : [files];
-    if (!fileArray.length) return;
-
-    // Validate file sizes before processing
-    const oversizedFiles = fileArray.filter(file => file.size > MAX_FILE_SIZE);
-    if (oversizedFiles.length > 0) {
-      const oversizedFileNames = oversizedFiles.map(f => `${f.name} (${(f.size / (1024 * 1024)).toFixed(1)}MB)`).join(', ');
-      showErrorToast(`Files exceed maximum size limit (${MAX_FILE_SIZE_MB}MB): ${oversizedFileNames}`);
-      return;
-    }
-
-    const newDocs = fileArray.map(file => ({
-      id: generateDocumentId(),
-      file,
-      fileUrl: URL.createObjectURL(file),
-      extractedData: {},
-      status: 'pending',
-      fileName: file.name,
-      validationStatus: 'pending' as const,
-      validationMessage: 'Processing...',
-      selectedDocTypeId: allowMultipleTypes ? '' : (finalSelectedDoc?.document_ids?.[0] || finalSelectedDoc?.kyc_document_id || selectedDoc?.document_ids?.[0] || selectedDoc?.kyc_document_id)
-    }));
-    setUploadedDocs(prev => [...prev, ...newDocs]);
-
-    const isCompanyUpload = !!company?.id;
-    const validationContext = {
-      isCompanyUpload,
-      companyId: company?.id,
-      companyName: companyName || company?.company_name,
-      individualName,
-      personId,
-      docId,
-      documentName: documentName,
-      finalSelectedDoc,
-    };
-
-    if (!allowMultipleTypes) {
-      try {
-        const processedDocsPromises = newDocs.map(async (doc) => {
-          const extractionToastId = showLoadingToast(`Extraction in progress for ${doc.fileName}...`);
-
-          const createEmptyData = () => {
-            const emptyData = {};
-            if (finalSelectedDoc?.fields) {
-              finalSelectedDoc.fields.forEach(field => {
-                emptyData[field.name] = "";
-              });
-            }
-            return emptyData;
-          };
-
-          // Same AbortController + extractingDocIds bookkeeping handleDocTypeChange/
-          // handleReExtract use below — without it the "Stop Extraction" button rendered per
-          // doc stays permanently disabled (extractingDocIds never contains this doc's id)
-          // during this very first extraction pass right after file selection, the one path
-          // that previously couldn't be interrupted.
-          const abortController = new AbortController();
-          abortControllersRef.current[doc.id] = abortController;
-          setExtractingDocIds(prev => new Set(prev).add(doc.id));
-
-          try {
-            const fieldsToExtract = finalSelectedDoc?.fields || [];
-            let extractedData = {};
-            let success = true;
-
-            if (fieldsToExtract.length > 0) {
-              const result = await performExtraction(
-                doc.fileUrl,
-                fieldsToExtract,
-                finalSelectedDoc?.name || documentName,
-                (progressMessage) => showExtractionProgressToast(doc.fileName, progressMessage, extractionToastId),
-                doc.fileName,
-                abortController.signal,
-              );
-              extractedData = result.extractedData;
-              success = result.success;
-            } else {
-              showSuccessToast(`${doc.fileName} processed (no extraction needed)`, extractionToastId);
-            }
-
-            // handleStopExtraction already wrote its own "stopped" state for this doc (and
-            // showed its own toast) — don't clobber that with results that arrived after the
-            // user hit Stop.
-            if (stoppedDocIdsRef.current.has(doc.id)) {
-              stoppedDocIdsRef.current.delete(doc.id);
-              return null;
-            }
-
-            if (!extractedData || (typeof extractedData === 'object' && Object.keys(extractedData).length === 0)) {
-              extractedData = createEmptyData();
-            }
-
-            let parsedData;
-            if (typeof extractedData === 'string') {
-              try {
-                parsedData = JSON.parse(extractedData);
-              } catch (e) {
-                parsedData = createEmptyData();
-              }
-            } else {
-              parsedData = extractedData;
-            }
-
-            const docWithData = {
-              ...doc,
-              extractedData: parsedData,
-              status: 'valid'
-            };
-
-            showSuccessToast(`Processed ${doc.fileName}`, extractionToastId);
-
-            let validation = { status: 'valid' as const, message: 'Document passed validation' };
-            if (finalSelectedDoc?.fields?.length > 0) {
-              validation = await validateDocument(docWithData, validationContext);
-            }
-
-            return {
-              ...docWithData,
-              validationStatus: validation.status,
-              validationMessage: validation.message,
-            };
-
-          } catch (error) {
-            if (stoppedDocIdsRef.current.has(doc.id) || error?.name === 'AbortError' || error?.message?.includes('aborted')) {
-              stoppedDocIdsRef.current.delete(doc.id);
-              return null;
-            }
-
-            console.error(`Error processing ${doc.fileName}:`, error);
-
-            showErrorToast(`Extraction failed for ${doc.fileName}. Please enter details manually.`, extractionToastId);
-
-            const emptyData = createEmptyData();
-
-            return {
-              ...doc,
-              extractedData: emptyData,
-              validationStatus: 'warning' as const,
-              validationMessage: 'Extraction failed. Please fill in the details manually.',
-            };
-          } finally {
-            delete abortControllersRef.current[doc.id];
-            setExtractingDocIds(prev => {
-              const newSet = new Set(prev);
-              newSet.delete(doc.id);
-              return newSet;
+      if (docType?.fields) {
+        docType.fields.forEach(field => {
+          if (field.isUnique && !uniqueFieldsMap.has(field.name)) {
+            uniqueFieldsMap.set(field.name, {
+              name: field.name,
+              displayName: field.displayName || field.name
             });
           }
         });
-
-        const fullyProcessedDocs = (await Promise.all(processedDocsPromises)).filter(Boolean);
-        setUploadedDocs(prev => prev.map(oldDoc =>
-          fullyProcessedDocs.find(pd => pd.id === oldDoc.id) || oldDoc
-        ));
-
-      } catch (error) {
-        console.error('Error in file upload:', error);
-        showErrorToast(`An error occurred while processing files: ${error.message}`);
       }
-    }
-  };
-
-  const handleDocTypeChange = async (docId: string, newDocTypeId: string) => {
-    console.log('handleDocTypeChange called for docId:', docId, 'newDocTypeId:', newDocTypeId);
-    const doc = uploadedDocs.find(d => d.id === docId);
-    if (!doc) {
-      console.log('Doc not found with id:', docId);
-      return;
-    }
-
-    const selectedDocType = availableDocTypes.find(dt => dt.id === newDocTypeId);
-    if (!selectedDocType) {
-      console.log('DocType not found with id:', newDocTypeId);
-      return;
-    }
-
-    // Create AbortController for this extraction
-    const abortController = new AbortController();
-    abortControllersRef.current[docId] = abortController;
-    console.log('Created AbortController for docId:', docId);
-
-    // Add to extracting set
-    setExtractingDocIds(prev => {
-      const newSet = new Set(prev).add(docId);
-      console.log('Added docId to extracting set:', docId, 'New set:', Array.from(newSet));
-      return newSet;
     });
-
-    setUploadedDocs(prev => prev.map(d =>
-      d.id === docId ? { ...d, selectedDocTypeId: newDocTypeId, validationStatus: 'pending', validationMessage: 'Re-extracting...' } : d
-    ));
-
-    const extractionToastId = showLoadingToast(`Extraction in progress for ${doc.fileName}...`);
-
-    try {
-      const fieldsToExtract = selectedDocType.fields || [];
-      let extractedData = {};
-      let success = true;
-
-      if (fieldsToExtract.length > 0) {
-        const result = await performExtraction(
-          doc.fileUrl,
-          fieldsToExtract,
-          selectedDocType.display_name || selectedDocType.name,
-          (progressMessage) => showExtractionProgressToast(doc.fileName, progressMessage, extractionToastId),
-          doc.fileName,
-          abortController.signal
-        );
-        extractedData = result.extractedData;
-        success = result.success;
-      } else {
-        showSuccessToast(`${doc.fileName} processed (no extraction needed)`, extractionToastId);
-      }
-
-      // Check if this document was stopped while extraction was in progress
-      console.log('Checking if doc was stopped. stoppedDocIdsRef:', Array.from(stoppedDocIdsRef.current), 'docId:', docId);
-      if (stoppedDocIdsRef.current.has(docId)) {
-        console.log(`Document ${doc.fileName} was stopped, ignoring extraction results`);
-        stoppedDocIdsRef.current.delete(docId);
-        return;
-      }
-      console.log('Document was not stopped, proceeding with extraction results');
-
-      if (!extractedData || (typeof extractedData === 'object' && Object.keys(extractedData).length === 0)) {
-        if (fieldsToExtract.length > 0) {
-          throw new Error('No data was extracted from the document');
-        } else {
-          extractedData = {};
-        }
-      }
-
-      let parsedData;
-      if (typeof extractedData === 'string') {
-        try {
-          parsedData = JSON.parse(extractedData);
-        } catch (e) {
-          console.error('Failed to parse extracted data:', e);
-          throw new Error('Failed to parse extracted data');
-        }
-      } else {
-        parsedData = extractedData;
-      }
-
-      const docWithData = {
-        ...doc,
-        extractedData: parsedData,
-        status: 'valid',
-        selectedDocTypeId: newDocTypeId
-      };
-
-      showSuccessToast(`Extracted from ${doc.fileName}`, extractionToastId);
-
-      const isCompanyUpload = !!company?.id;
-      const validationContext = {
-        isCompanyUpload,
-        companyId: company?.id,
-        companyName: companyName || company?.company_name,
-        individualName,
-        personId,
-        docId: newDocTypeId,
-        documentName: selectedDocType.display_name || selectedDocType.name,
-        finalSelectedDoc: selectedDocType,
-      };
-
-      let validation = { status: 'valid' as const, message: 'Document passed validation' };
-      if (selectedDocType.fields?.length > 0) {
-        validation = await validateDocument(docWithData, validationContext);
-      }
-
-      setUploadedDocs(prev => prev.map(d =>
-        d.id === docId ? {
-          ...docWithData,
-          validationStatus: validation.status,
-          validationMessage: validation.message,
-        } : d
-      ));
-
-      // Remove from extracting set
-      setExtractingDocIds(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(docId);
-        return newSet;
-      });
-
-      // Clean up abort controller
-      delete abortControllersRef.current[docId];
-
-      // Remove from stopped docs ref
-      stoppedDocIdsRef.current.delete(docId);
-    } catch (error) {
-      // Clean up abort controller
-      delete abortControllersRef.current[docId];
-
-      // Check if it was an abort error
-      if (error.name === 'AbortError' || error.message?.includes('aborted')) {
-        console.log(`Extraction aborted for ${doc.fileName}`);
-        return;
-      }
-
-      console.error(`Error processing ${doc.fileName}:`, error);
-      showErrorToast(`Extraction failed. Please enter details manually.`, extractionToastId);
-      const emptyData = {};
-      if (selectedDocType.fields) {
-        selectedDocType.fields.forEach(field => {
-          emptyData[field.name] = "";
-        });
-      }
-
-      setUploadedDocs(prev => prev.map(d =>
-        d.id === docId ? {
-          ...d,
-          extractedData: emptyData,
-          selectedDocTypeId: newDocTypeId,
-          validationStatus: 'warning',
-          validationMessage: 'Extraction failed. Please fill in the details manually.'
-        } : d
-      ));
-
-      // Remove from extracting set on error
-      setExtractingDocIds(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(docId);
-        return newSet;
-      });
-    }
-  };
-
-  // Add a ref to track which docs were explicitly stopped
-  const stoppedDocIdsRef = useRef<Set<string>>(new Set());
-
-  const handleStopExtraction = (docId: string) => {
-    console.log('Stop extraction clicked for docId:', docId);
-    console.log('Current extractingDocIds:', Array.from(extractingDocIds));
-    console.log('Current abortControllers:', Object.keys(abortControllersRef.current));
-
-    // Track that this doc was explicitly stopped
-    stoppedDocIdsRef.current.add(docId);
-    console.log('Added to stoppedDocIdsRef');
-
-    // Abort the extraction
-    if (abortControllersRef.current[docId]) {
-      console.log('Aborting controller for doc:', docId);
-      abortControllersRef.current[docId].abort();
-      delete abortControllersRef.current[docId];
-    } else {
-      console.log('No abort controller found for doc:', docId);
-    }
-
-    // Immediately update document state to stopped
-    setExtractingDocIds(prev => {
-      const newSet = new Set(prev);
-      newSet.delete(docId);
-      console.log('Removed from extractingDocIds:', docId);
-      return newSet;
-    });
-
-    setUploadedDocs(prevDocs =>
-      prevDocs.map(d =>
-        d.id === docId ? {
-          ...d,
-          validationStatus: 'warning',
-          validationMessage: 'Extraction stopped. You can now manually enter the data.'
-        } : d
-      )
-    );
-
-    toast({
-      title: 'Extraction Stopped',
-      description: 'You can now manually enter the data.',
-      variant: 'default'
-    });
-  };
-
-  const handleReExtract = async (docIdToReExtract: string) => {
-    console.log('handleReExtract called for docId:', docIdToReExtract);
-    const docToUpdate = uploadedDocs.find(d => d.id === docIdToReExtract);
-    if (!docToUpdate) {
-      console.log('Doc not found with id:', docIdToReExtract);
-      return;
-    }
-
-    const docTypeToUse = allowMultipleTypes && docToUpdate.selectedDocTypeId
-      ? availableDocTypes.find(dt => dt.id === docToUpdate.selectedDocTypeId)
-      : finalSelectedDoc;
-
-    if (!docTypeToUse) {
-      console.log('DocType not found');
-      showErrorToast('Please select a document type first');
-      return;
-    }
-
-    // Create AbortController for this extraction
-    const abortController = new AbortController();
-    abortControllersRef.current[docIdToReExtract] = abortController;
-    console.log('Created AbortController for docId in handleReExtract:', docIdToReExtract);
-
-    // Add to extracting set
-    setExtractingDocIds(prev => {
-      const newSet = new Set(prev).add(docIdToReExtract);
-      console.log('Added docId to extracting set in handleReExtract:', docIdToReExtract, 'New set:', Array.from(newSet));
-      return newSet;
-    });
-
-    setUploadedDocs(prevDocs =>
-      prevDocs.map(d =>
-        d.id === docIdToReExtract ? { ...d, validationStatus: 'pending', validationMessage: 'Re-extracting...' } : d
-      )
-    );
-
-    const extractionToastId = showLoadingToast(`Extraction in progress for ${docToUpdate.fileName}...`);
-    const isCompanyUpload = !!company?.id;
-    const validationContext = {
-      isCompanyUpload,
-      companyId: company?.id,
-      companyName: companyName || company?.company_name,
-      individualName,
-      personId,
-      docId: docTypeToUse.id,
-      finalSelectedDoc: docTypeToUse,
-      documentName: docTypeToUse.display_name || docTypeToUse.name,
-    };
-
-    try {
-      const fieldsToExtract = docTypeToUse.fields || [];
-      let extractedData = {};
-      let success = true;
-
-      if (fieldsToExtract.length > 0) {
-        const result = await performExtraction(
-          docToUpdate.fileUrl,
-          fieldsToExtract,
-          docTypeToUse.display_name || docTypeToUse.name || documentName,
-          (progressMessage) => showExtractionProgressToast(docToUpdate.fileName, progressMessage, extractionToastId),
-          docToUpdate.fileName,
-          abortController.signal
-        );
-        extractedData = result.extractedData;
-        success = result.success;
-      } else {
-        showSuccessToast(`${docToUpdate.fileName} processed (no extraction needed)`, extractionToastId);
-      }
-
-      // Check if this document was stopped while extraction was in progress
-      console.log('Checking if doc was stopped in handleReExtract. stoppedDocIdsRef:', Array.from(stoppedDocIdsRef.current), 'docId:', docIdToReExtract);
-      if (stoppedDocIdsRef.current.has(docIdToReExtract)) {
-        console.log(`Document ${docToUpdate.fileName} was stopped, ignoring extraction results`);
-        stoppedDocIdsRef.current.delete(docIdToReExtract);
-        return;
-      }
-      console.log('Document was not stopped in handleReExtract, proceeding with extraction results');
-
-      const newExtractedData = typeof extractedData === 'string' ? JSON.parse(extractedData) : extractedData || {};
-      const updatedDocForValidation = { ...docToUpdate, extractedData: newExtractedData, status: success ? 'valid' : 'pending' };
-
-      if (fieldsToExtract.length > 0) {
-        showSuccessToast(`Re-extracted from ${docToUpdate.fileName}`, extractionToastId);
-      }
-
-      const validation = await validateDocument(updatedDocForValidation, validationContext);
-
-      setUploadedDocs(prevDocs =>
-        prevDocs.map(d =>
-          d.id === docIdToReExtract ? {
-            ...updatedDocForValidation,
-            validationStatus: validation.status,
-            validationMessage: validation.message,
-          } : d
-        )
-      );
-
-      // Remove from extracting set
-      setExtractingDocIds(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(docIdToReExtract);
-        return newSet;
-      });
-
-      // Clean up abort controller
-      delete abortControllersRef.current[docIdToReExtract];
-    } catch (error) {
-      // Clean up abort controller
-      delete abortControllersRef.current[docIdToReExtract];
-
-      // Check if it was an abort error
-      if (error.name === 'AbortError' || error.message?.includes('aborted')) {
-        console.log(`Extraction aborted for ${docToUpdate.fileName}`);
-        return;
-      }
-
-      showErrorToast(`Re-extraction failed for ${docToUpdate.fileName}. Please enter details manually.`, extractionToastId);
-      const emptyData = {};
-      if (docTypeToUse.fields) {
-        docTypeToUse.fields.forEach(field => {
-          emptyData[field.name] = "";
-        });
-      }
-
-      setUploadedDocs(prevDocs =>
-        prevDocs.map(d =>
-          d.id === docIdToReExtract ? {
-            ...d,
-            extractedData: emptyData,
-            validationStatus: 'warning',
-            validationMessage: 'Re-extraction failed. Please fill in the details manually.'
-          } : d
-        )
-      );
-
-      // Remove from extracting set on error
-      setExtractingDocIds(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(docIdToReExtract);
-        return newSet;
-      });
-
-      // Remove from stopped docs ref
-      stoppedDocIdsRef.current.delete(docIdToReExtract);
-    }
+    return Array.from(uniqueFieldsMap.values());
   };
 
   const handleSaveUploads = async () => {
+    const shouldSkipSave = additionalFields?.disableSave === true;
+
     if (uploadedDocs.length === 0) {
-      showErrorToast('Please select at least one file to upload');
+      toast({ title: 'Notice', description: 'Please upload at least one document.', variant: 'default' });
       return;
     }
 
-    if (allowMultipleTypes) {
-      const docsWithoutType = uploadedDocs.filter(doc => !doc.selectedDocTypeId);
-      if (docsWithoutType.length > 0) {
-        showErrorToast('Please select a document type for all uploaded files.');
+    if (!shouldSkipSave) {
+      if (!targetTable || !idFieldName || !documentIdFieldName) {
+        toast({ title: 'Error', description: 'Upload configuration is incomplete.', variant: 'destructive' });
         return;
       }
     }
@@ -1184,14 +688,30 @@ export function UploadModal({
       return docType?.fields?.length > 0;
     });
 
+    if (autoExtract === false) {
+      const docsNotYetExtracted = docsToValidate.filter(doc => Object.keys(doc.extractedData || {}).length === 0);
+      if (docsNotYetExtracted.length > 0) {
+        toast({
+          title: 'Extraction Required',
+          description: docsNotYetExtracted.length === 1
+            ? `Click "Extract" on ${docsNotYetExtracted[0].fileName} before saving.`
+            : `Click "Extract" on all documents before saving.`,
+          variant: 'destructive'
+        });
+        return;
+      }
+    }
+
     const docsWithErrors = docsToValidate.filter(doc => doc.validationStatus === 'error');
     if (docsWithErrors.length > 0) {
+      const uniqueFields = getUniqueFieldsFromDocs(docsWithErrors);
       setValidationDialog({
         isOpen: true,
-        title: 'Upload Blocked',
-        description: `Cannot upload due to critical errors. Please resolve the issues highlighted in red.`,
+        title: 'Critical Validation Errors',
+        description: 'Cannot upload due to critical errors. Please resolve the issues before proceeding.',
         type: 'error',
-        onConfirm: null
+        onConfirm: null,
+        uniqueFields
       });
       return;
     }
@@ -1199,12 +719,17 @@ export function UploadModal({
     const docsWithWarnings = docsToValidate.filter(doc => doc.validationStatus === 'warning');
     if (docsWithWarnings.length > 0) {
       const warningMessage = docsWithWarnings.map(d => `${d.fileName}:\n${d.validationMessage}`).join('\n\n');
+      const uniqueFields = getUniqueFieldsFromDocs(docsWithWarnings);
+
       setValidationDialog({
         isOpen: true,
         title: 'Validation Warnings',
         description: `Potential issues were detected:\n\n${warningMessage}\n\nProceed with upload?`,
         type: 'warning',
-        onConfirm: () => proceedWithUpload()
+        onConfirm: async () => {
+          await proceedWithUpload();
+        },
+        uniqueFields
       });
       return;
     }
@@ -1212,51 +737,428 @@ export function UploadModal({
     await proceedWithUpload();
   };
 
-  const proceedWithUpload = async () => {
-    setIsUploading(true);
-    const toastId = showLoadingToast('Processing documents...');
+  const handleFileUpload = async (files: File[]) => {
+    const requiredDropdowns = dropdowns?.filter(d => d.required) || [];
+    const missingRequiredDropdowns = requiredDropdowns.filter(d => !d.value);
+
+    if (missingRequiredDropdowns.length > 0) {
+      const missingLabels = missingRequiredDropdowns.map(d => d.label).join(', ');
+      toast({ title: 'Required Fields', description: `Please select: ${missingLabels}`, variant: 'destructive' });
+      return;
+    }
+
+    const fileArray = Array.isArray(files) ? files : [files];
+    if (!fileArray.length) return;
+
+    const selectedDocTypeFromDropdown = selectedValues['document-type'] || '';
+
+    const newDocs = fileArray.map(file => ({
+      id: generateDocumentId(),
+      file,
+      fileUrl: URL.createObjectURL(file),
+      extractedData: {},
+      status: 'pending',
+      fileName: file.name,
+      validationStatus: 'pending' as const,
+      validationMessage: 'Processing...',
+      selectedDocTypeId: allowMultipleTypes ? (selectedDocTypeFromDropdown || '') : (finalSelectedDoc?.id || selectedDoc?.id)
+    }));
+
+    setUploadedDocs(prev => [...prev, ...newDocs]);
+
+    const isCompany = !!company?.id || isCompanyUpload;
+    const validationContext = {
+      isCompanyUpload: isCompany,
+      companyId: company?.id,
+      companyName: companyName || company?.company_name,
+      individualName,
+      personId,
+      docId,
+      documentName,
+      finalSelectedDoc,
+    };
 
     try {
-      const effectiveIsCompany = isCompanyUpload || selectedMember?.type === 'company' || targetTable === 'acc_portal_kyc_uploads';
+      const processedDocsPromises = newDocs.map(async (doc) => {
+        if (autoExtract === false) {
+          let docTypeToUse = finalSelectedDoc;
+          let fieldsToExtract = finalSelectedDoc?.fields || [];
 
-      let entityIdToUse = effectiveIsCompany
-        ? (company?.id || entityId || selectedMember?.id)
-        : (selectedMember?.id || entityId);
+          if (allowMultipleTypes && doc.selectedDocTypeId) {
+            docTypeToUse = availableDocTypes.find(dt => dt.id === doc.selectedDocTypeId);
+            if (docTypeToUse) {
+              fieldsToExtract = docTypeToUse.fields || [];
+              if (fieldsToExtract.length === 0 && docTypeToUse.id) {
+                fieldsToExtract = await fetchDocumentFieldsFromKYC(docTypeToUse.id);
+              }
+            }
+          } else if (!allowMultipleTypes) {
+            if (fieldsToExtract.length === 0 && selectedDocumentId) {
+              fieldsToExtract = await fetchDocumentFieldsFromKYC(selectedDocumentId);
+              setFinalSelectedDoc(prev => ({ ...prev, fields: fieldsToExtract }));
+            }
+          }
 
-      const entityNameToUse = effectiveIsCompany
-        ? (companyName || company?.company_name || selectedMember?.full_name || entityName || 'Unknown Company')
-        : (selectedMember?.name || selectedMember?.full_name || entityName || 'New Individual');
-
-      if (!entityIdToUse) {
-        const alternativeId = selectedMember?.director_id || selectedMember?.user_id || selectedMember?.person_id || entityId;
-        if (alternativeId) {
-          entityIdToUse = alternativeId;
+          return {
+            ...doc,
+            fields: fieldsToExtract,
+            status: 'pending',
+            validationStatus: 'warning' as const,
+            validationMessage: allowBackImage
+              ? 'Ready for extraction. Add a back image if necessary, then click "Extract".'
+              : 'Ready for extraction. Click "Extract" to proceed.'
+          };
         }
-      }
 
-      const shouldSkipSave = additionalFields?.disableSave === true;
-      const isQuickAdd = !effectiveIsCompany && additionalFields?.isFormContext;
+        const controller = new AbortController();
+        abortControllersRef.current.set(doc.id, controller);
 
-      if (!shouldSkipSave && !isQuickAdd && !entityIdToUse) {
-        showErrorToast('Missing ID. Please ensure an entity is selected.', toastId);
-        setIsUploading(false);
-        return;
-      }
+        try {
+          let docTypeToUse = finalSelectedDoc;
+          let fieldsToExtract = finalSelectedDoc?.fields || [];
 
-      const invalidDocs = uploadedDocs.filter(doc => {
-        const docType = allowMultipleTypes && doc.selectedDocTypeId
-          ? availableDocTypes.find(dt => dt.id === doc.selectedDocTypeId)
-          : finalSelectedDoc;
-        return (docType?.fields?.length > 0 && doc.validationStatus === 'error');
+          if (allowMultipleTypes && doc.selectedDocTypeId) {
+            docTypeToUse = availableDocTypes.find(dt => dt.id === doc.selectedDocTypeId);
+            if (docTypeToUse) {
+              fieldsToExtract = docTypeToUse.fields || [];
+              if (fieldsToExtract.length === 0 && docTypeToUse.id) {
+                fieldsToExtract = await fetchDocumentFieldsFromKYC(docTypeToUse.id);
+              }
+            }
+          } else if (!allowMultipleTypes) {
+            if (fieldsToExtract.length === 0 && selectedDocumentId) {
+              fieldsToExtract = await fetchDocumentFieldsFromKYC(selectedDocumentId);
+              setFinalSelectedDoc(prev => ({ ...prev, fields: fieldsToExtract }));
+            }
+          }
+
+          if (fieldsToExtract.length === 0) {
+            return { ...doc, status: 'valid', validationStatus: 'valid' as const, validationMessage: 'Ready' };
+          }
+
+          const extractionResult = await performExtraction(
+            doc.fileUrl,
+            fieldsToExtract,
+            docTypeToUse?.name || documentName,
+            undefined,
+            doc.fileName,
+            controller.signal
+          );
+
+          if (extractionResult.cancelled) {
+            return {
+              ...doc,
+              fields: fieldsToExtract,
+              validationStatus: 'warning' as const,
+              validationMessage: 'Extraction stopped. Please fill in details manually.'
+            };
+          }
+
+          let { extractedData } = extractionResult;
+          let parsedData = typeof extractedData === 'string' ? JSON.parse(extractedData) : (extractedData || {});
+
+          const docWithData = {
+            ...doc,
+            extractedData: parsedData,
+            fields: fieldsToExtract,
+            status: 'valid'
+          };
+
+          const validation = await validateDocument(docWithData, {
+            ...validationContext,
+            docId: docTypeToUse?.id || docId,
+            documentName: docTypeToUse?.name || documentName,
+            finalSelectedDoc: docTypeToUse || finalSelectedDoc
+          });
+
+          return {
+            ...docWithData,
+            validationStatus: validation.status,
+            validationMessage: validation.message,
+          };
+        } catch (error) {
+          if ((error as any)?.name === 'AbortError') {
+            return {
+              ...doc,
+              validationStatus: 'warning' as const,
+              validationMessage: 'Extraction stopped. Please fill in details manually.'
+            };
+          }
+          return {
+            ...doc,
+            validationStatus: 'warning' as const,
+            validationMessage: 'Extraction failed. Please fill manually.'
+          };
+        } finally {
+          abortControllersRef.current.delete(doc.id);
+        }
       });
 
-      if (invalidDocs.length > 0) {
-        showErrorToast('Validation errors must be fixed first.', toastId);
-        setIsUploading(false);
+      const fullyProcessedDocs = await Promise.all(processedDocsPromises);
+      setUploadedDocs(prev => prev.map(oldDoc =>
+        fullyProcessedDocs.find(pd => pd.id === oldDoc.id) || oldDoc
+      ));
+    } catch (error) {
+      console.error('Error handling files:', error);
+    }
+  };
+
+  const handleAddBackFile = (docId: string, files: File[]) => {
+    const file = files[0];
+    if (!file) return;
+    setUploadedDocs(prev => prev.map(d =>
+      d.id === docId ? { ...d, backFile: file, backFileUrl: URL.createObjectURL(file) } : d
+    ));
+    setBackFileTarget(null);
+  };
+
+  const handleDocTypeChange = async (docId: string, newDocTypeId: string) => {
+    const doc = uploadedDocs.find(d => d.id === docId);
+    if (!doc) return;
+
+    const selectedDocType = availableDocTypes.find(dt => dt.id === newDocTypeId) || selectedDoc;
+    if (!selectedDocType) return;
+
+    if (autoExtract === false) {
+      let fieldsToExtract = selectedDocType.fields || [];
+      if (fieldsToExtract.length === 0 && selectedDocType.id) {
+        fieldsToExtract = await fetchDocumentFieldsFromKYC(selectedDocType.id);
+      }
+      setUploadedDocs(prev => prev.map(d =>
+        d.id === docId ? {
+          ...d,
+          selectedDocTypeId: newDocTypeId,
+          fields: fieldsToExtract,
+          validationStatus: 'warning',
+          validationMessage: 'Document type updated. Click "Extract" to process.'
+        } : d
+      ));
+      return;
+    }
+
+    setUploadedDocs(prev => prev.map(d =>
+      d.id === docId ? { ...d, selectedDocTypeId: newDocTypeId, validationStatus: 'pending', validationMessage: 'Re-extracting...' } : d
+    ));
+
+    const controller = new AbortController();
+    abortControllersRef.current.set(docId, controller);
+
+    try {
+      let fieldsToExtract = selectedDocType.fields || [];
+      if (fieldsToExtract.length === 0 && selectedDocType.id) {
+        fieldsToExtract = await fetchDocumentFieldsFromKYC(selectedDocType.id);
+      }
+
+      if (fieldsToExtract.length === 0) {
+        setUploadedDocs(prev => prev.map(d =>
+          d.id === docId
+            ? { ...d, extractedData: {}, status: 'valid', validationStatus: 'valid', validationMessage: 'Image uploaded successfully' }
+            : d
+        ));
         return;
       }
 
-      const dropdownValues = {};
+      const docTypeExtractionResult = await performExtraction(
+        doc.fileUrl,
+        fieldsToExtract,
+        selectedDocType.display_name || selectedDocType.name,
+        undefined,
+        doc.fileName,
+        controller.signal
+      );
+
+      if (docTypeExtractionResult.cancelled) {
+        setUploadedDocs(prev => prev.map(d =>
+          d.id === docId ? { ...d, validationStatus: 'warning', validationMessage: 'Extraction stopped. Please fill in details manually.' } : d
+        ));
+        return;
+      }
+
+      const { extractedData } = docTypeExtractionResult;
+      let parsedData = typeof extractedData === 'string' ? JSON.parse(extractedData) : (extractedData || {});
+
+      const docWithData = {
+        ...doc,
+        extractedData: parsedData,
+        status: 'valid',
+        selectedDocTypeId: newDocTypeId
+      };
+
+      const isCompany = !!company?.id || isCompanyUpload;
+      const validation = await validateDocument(docWithData, {
+        isCompanyUpload: isCompany,
+        companyId: company?.id,
+        companyName: companyName || company?.company_name,
+        individualName,
+        personId,
+        docId: newDocTypeId,
+        documentName: selectedDocType.display_name || selectedDocType.name,
+        finalSelectedDoc: selectedDocType,
+      });
+
+      setUploadedDocs(prev => prev.map(d =>
+        d.id === docId ? {
+          ...docWithData,
+          validationStatus: validation.status,
+          validationMessage: validation.message,
+        } : d
+      ));
+    } catch (error) {
+      if ((error as any)?.name === 'AbortError') {
+        setUploadedDocs(prev => prev.map(d =>
+          d.id === docId ? { ...d, validationStatus: 'warning', validationMessage: 'Extraction stopped. Please fill in details manually.' } : d
+        ));
+        return;
+      }
+      setUploadedDocs(prev => prev.map(d =>
+        d.id === docId ? {
+          ...d,
+          extractedData: {},
+          selectedDocTypeId: newDocTypeId,
+          validationStatus: 'warning',
+          validationMessage: 'Extraction failed. Please fill manually.'
+        } : d
+      ));
+    } finally {
+      abortControllersRef.current.delete(docId);
+    }
+  };
+
+  const handleReExtract = async (docIdToReExtract: string, forceAI: boolean = false) => {
+    const docToUpdate = uploadedDocs.find(d => d.id === docIdToReExtract);
+    if (!docToUpdate) return;
+
+    let docTypeToUse = allowMultipleTypes && docToUpdate.selectedDocTypeId
+      ? availableDocTypes.find(dt => dt.id === docToUpdate.selectedDocTypeId)
+      : finalSelectedDoc;
+
+    if (!docTypeToUse) docTypeToUse = selectedDoc || null;
+    if (!docTypeToUse) {
+      toast({ title: 'Error', description: 'Please select a document type first.', variant: 'destructive' });
+      return;
+    }
+
+    setUploadedDocs(prevDocs =>
+      prevDocs.map(d =>
+        d.id === docIdToReExtract ? { ...d, validationStatus: 'pending', validationMessage: forceAI ? 'Re-extracting with AI...' : 'Extracting...' } : d
+      )
+    );
+
+    const controller = new AbortController();
+    abortControllersRef.current.set(docIdToReExtract, controller);
+
+    try {
+      let fieldsToExtract = docTypeToUse.fields || [];
+      if (fieldsToExtract.length === 0 && docTypeToUse.id) {
+        fieldsToExtract = await fetchDocumentFieldsFromKYC(docTypeToUse.id);
+      }
+
+      if (fieldsToExtract.length === 0) {
+        setUploadedDocs(prevDocs =>
+          prevDocs.map(d =>
+            d.id === docIdToReExtract ? {
+              ...d,
+              extractedData: {},
+              validationStatus: 'valid',
+              validationMessage: 'Image uploaded successfully'
+            } : d
+          )
+        );
+        return;
+      }
+
+      const reExtractionResult = await performExtraction(
+        docToUpdate.fileUrl,
+        fieldsToExtract,
+        docTypeToUse.display_name || docTypeToUse.name || documentName,
+        undefined,
+        docToUpdate.fileName,
+        controller.signal,
+        forceAI
+      );
+
+      if (reExtractionResult.cancelled) {
+        setUploadedDocs(prevDocs =>
+          prevDocs.map(d =>
+            d.id === docIdToReExtract ? { ...d, validationStatus: 'warning', validationMessage: 'Extraction stopped. Please fill in details manually.' } : d
+          )
+        );
+        return;
+      }
+
+      const { extractedData, success } = reExtractionResult;
+      const newExtractedData = typeof extractedData === 'string' ? JSON.parse(extractedData) : (extractedData || {});
+
+      const updatedDocForValidation = {
+        ...docToUpdate,
+        extractedData: newExtractedData,
+        status: success ? 'valid' : 'pending'
+      };
+
+      const isCompany = !!company?.id || isCompanyUpload;
+      const validation = await validateDocument(updatedDocForValidation, {
+        isCompanyUpload: isCompany,
+        companyId: company?.id,
+        companyName: companyName || company?.company_name,
+        individualName,
+        personId,
+        docId: docTypeToUse.id,
+        finalSelectedDoc: docTypeToUse,
+        documentName: docTypeToUse.display_name || docTypeToUse.name,
+      });
+
+      setUploadedDocs(prevDocs =>
+        prevDocs.map(d =>
+          d.id === docIdToReExtract ? {
+            ...updatedDocForValidation,
+            validationStatus: validation.status,
+            validationMessage: validation.message,
+          } : d
+        )
+      );
+      toast({ title: 'Success', description: `Processed ${docToUpdate.fileName}`, variant: 'success' });
+    } catch (error) {
+      if ((error as any)?.name === 'AbortError') {
+        setUploadedDocs(prevDocs =>
+          prevDocs.map(d =>
+            d.id === docIdToReExtract ? { ...d, validationStatus: 'warning', validationMessage: 'Extraction stopped. Please fill in details manually.' } : d
+          )
+        );
+        return;
+      }
+      setUploadedDocs(prevDocs =>
+        prevDocs.map(d =>
+          d.id === docIdToReExtract ? {
+            ...d,
+            extractedData: {},
+            validationStatus: 'warning',
+            validationMessage: 'Extraction failed. Please fill manually.'
+          } : d
+        )
+      );
+    } finally {
+      abortControllersRef.current.delete(docIdToReExtract);
+    }
+  };
+
+  const proceedWithUpload = async () => {
+    setIsUploading(true);
+
+    try {
+      const isCompany = !!company?.id || isCompanyUpload;
+      const entityIdToUse = isCompany ? (company?.id || entityId) : (selectedMember?.id || entityId);
+      const shouldSkipSave = additionalFields?.disableSave === true;
+
+      const resolveDocTypeForSave = (doc: any) => {
+        if (doc?.selectedDocTypeId) {
+          const found = (documentTypes || []).find(dt => String(dt.id) === String(doc.selectedDocTypeId))
+            || availableDocTypes.find(dt => String(dt.id) === String(doc.selectedDocTypeId));
+          if (found) return found;
+        }
+        return finalSelectedDoc;
+      };
+
+      const dropdownValues: Record<string, any> = {};
       dropdowns?.forEach(dropdown => {
         if (dropdown.value) {
           dropdownValues[dropdown.id] = dropdown.value;
@@ -1268,103 +1170,96 @@ export function UploadModal({
       });
 
       const uploadPromises = uploadedDocs.map(async (doc) => {
-        try {
-          const docTypeForUpload = allowMultipleTypes && doc.selectedDocTypeId
-            ? availableDocTypes.find(dt => dt.id === doc.selectedDocTypeId)
-            : finalSelectedDoc;
+        const docTypeForUpload = resolveDocTypeForSave(doc);
+        const documentTypeId = docTypeForUpload?.id || selectedDocumentId;
 
-          if (!docTypeForUpload?.id) throw new Error('Document type missing');
-
-          if (shouldSkipSave) {
-            return {
+        if (shouldSkipSave) {
+          return {
+            files: [{
               file: doc.file,
-              extractedData: { ...doc.extractedData, originalFileName: doc.file.name },
+              backFile: doc.backFile,
+              extractedData: {
+                ...doc.extractedData,
+                originalFileName: doc.file.name
+              },
               documentType: docTypeForUpload
-            };
-          }
-
-          const entityPathName = entityNameToUse.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_-]+/g, '-');
-
-          const DOCUMENT_TYPE_IDS = {
-            'Sale Agreement': 'f84cdd4b-8d62-49da-ab47-da58afb097bf',
-            'Supplier Invoice': '40c57bf8-1c47-4867-8b43-0c026ad173e6',
-            'Initial Loan Schedule': '728e1385-7b30-4c20-9d45-9ded211ac2e5',
-            'Loan Agreement': 'b17d7f6f-7c11-43c4-91d6-9312a8e6951c',
-            'ETR Receipt': 'b6b4a74f-eff9-4512-b1c9-485f4179dbc1'
+            }]
           };
-
-          const documentTypeId = DOCUMENT_TYPE_IDS[docTypeForUpload.display_name] || docTypeForUpload.id;
-
-          const folder = effectiveIsCompany ? 'company-documents' : 'individual-documents';
-          const filePath = `${folder}/${entityPathName}/${documentTypeId}/${doc.file.name}`;
-
-          const { error: uploadError } = await supabase.storage
-            .from('kyc-documents')
-            .upload(filePath, doc.file, { cacheControl: '3600', upsert: true });
-
-          if (uploadError) {
-            // Provide more specific error messages for common issues
-            if (uploadError.message.includes('size') || uploadError.message.includes('exceeded')) {
-              throw new Error(`File "${doc.fileName}" exceeds maximum size limit (${MAX_FILE_SIZE_MB}MB). Please compress the file or contact support for larger file uploads.`);
-            } else if (uploadError.message.includes('quota') || uploadError.message.includes('limit')) {
-              throw new Error(`Storage quota exceeded for file "${doc.fileName}". Please contact support or try a smaller file.`);
-            } else {
-              throw new Error(`Upload failed for "${doc.fileName}": ${uploadError.message}`);
-            }
-          }
-
-          const extractedDataWithAssetId = { ...doc.extractedData };
-          let assetIdToUse = companyAssetId || '';
-
-          const recordData: any = {
-            [documentIdFieldName]: documentTypeId,
-            file_path: filePath,
-            extracted_details: extractedDataWithAssetId,
-            status: 'active',
-            created_at: new Date().toISOString(),
-            ...(assetIdToUse && { company_asset_id: assetIdToUse }),
-            [idFieldName]: entityIdToUse,
-            ...additionalFields
-          };
-
-          if (onBeforeUpload) {
-            const customResult = await onBeforeUpload(recordData);
-            if (customResult) return customResult;
-          }
-
-          const { data: insertedData, error: insertError } = await supabase
-            .from(targetTable)
-            .insert([recordData])
-            .select();
-
-          if (insertError) throw new Error(`DB Save failed: ${insertError.message}`);
-
-          return { ...insertedData[0], ...(effectiveIsCompany && { company_id: entityIdToUse }) };
-
-        } catch (error) {
-          console.error('Error uploading doc:', doc.fileName, error);
-          throw error;
         }
+
+        const pathPrefix = storagePathPrefix || (isCompany ? 'company-documents' : 'individual-documents');
+        const filePath = `${pathPrefix}/${entityIdToUse}/${documentTypeId}/${doc.file.name}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('kyc-documents')
+          .upload(filePath, doc.file, {
+            cacheControl: '3600',
+            upsert: true
+          });
+
+        if (uploadError) {
+          throw new Error(`Failed to upload file: ${uploadError.message}`);
+        }
+
+        let backFilePath: string | null = null;
+        if (doc.backFile) {
+          backFilePath = `${pathPrefix}/${entityIdToUse}/${documentTypeId}/back_${doc.backFile.name}`;
+          await supabase.storage
+            .from('kyc-documents')
+            .upload(backFilePath, doc.backFile, { cacheControl: '3600', upsert: true });
+        }
+
+        const recordData: any = {
+          [documentIdFieldName]: documentTypeId,
+          file_path: filePath,
+          extracted_details: {
+            ...doc.extractedData,
+            ...(backFilePath ? { back_file_path: backFilePath } : {})
+          },
+          ...(targetTable !== 'acc_portal_directors_documents' && { status: 'active' }),
+          created_at: new Date().toISOString(),
+          ...(companyAssetId && { company_asset_id: companyAssetId }),
+          [idFieldName]: entityIdToUse,
+          ...additionalFields
+        };
+
+        if (Object.keys(dropdownValues).length > 0) {
+          const commentLabels = Object.entries(dropdownValues)
+            .filter(([key]) => key.endsWith('_label'))
+            .map(([_, value]) => value);
+          if (commentLabels.length > 0) {
+            recordData.comments = commentLabels.join(' | ');
+          }
+        }
+
+        Object.keys(recordData).forEach(key => recordData[key] === undefined && delete recordData[key]);
+
+        if (onBeforeUpload) {
+          const result = await onBeforeUpload(recordData);
+          if (result) return result;
+        }
+
+        return {
+          ...recordData,
+          file: doc.file,
+          extractedData: doc.extractedData,
+          documentType: docTypeForUpload
+        };
       });
 
       const results = await Promise.all(uploadPromises);
-
-      if (shouldSkipSave) {
-        onSuccess?.({ files: results.map(r => ({ file: r.file, extractedData: r.extractedData })) });
-      } else {
-        if (onSuccess) {
-          const resultToPass = results.length === 1 ? results[0] : results;
-          await onSuccess(resultToPass);
-        }
-      }
-
-      showSuccessToast('Successfully uploaded and processed!', toastId);
+      toast({ title: 'Success', description: 'All documents processed successfully!', variant: 'success' });
       setUploadedDocs([]);
       setIsUploading(false);
       onClose();
 
+      if (onSuccess && results && results.length > 0) {
+        const resultToPass = results.length === 1 ? results[0] : results;
+        onSuccess(resultToPass);
+      }
     } catch (error) {
-      showErrorToast(error.message || 'Upload failed', toastId);
+      console.error('Error uploading documents:', error);
+      toast({ title: 'Upload Failed', description: error?.message || 'Failed to upload documents.', variant: 'destructive' });
       setIsUploading(false);
     }
   };
@@ -1380,50 +1275,15 @@ export function UploadModal({
 
   const getValidationColor = (status) => {
     switch (status) {
-      case 'valid': return 'border-green-200 bg-green-50'
-      case 'warning': return 'border-yellow-200 bg-yellow-50'
-      case 'error': return 'border-red-200 bg-red-50'
-      default: return 'border-gray-200 bg-gray-50'
-    }
-  };
-  const dropdownsDeps = useMemo(() => {
-    return dropdowns?.map(d => `${d.id}:${d.value}`).join() || '';
-  }, [dropdowns]);
-
-  useEffect(() => {
-    if (!dropdowns) return;
-
-    const initialValues = dropdowns.reduce((acc, dropdown) => {
-      if (dropdown.value !== undefined) {
-        acc[dropdown.id] = dropdown.value;
-      }
-      return acc;
-    }, {} as Record<string, string>);
-
-    setSelectedValues(prev => {
-      const hasChanges = Object.entries(initialValues).some(
-        ([key, value]) => prev[key] !== value
-      );
-      return hasChanges ? { ...prev, ...initialValues } : prev;
-    });
-  }, [dropdownsDeps]);
-
-  const handleDialogOpenChange = (open: boolean) => {
-    if (!open) {
-      onClose();
+      case 'valid': return 'border-green-200 bg-green-50/50'
+      case 'warning': return 'border-yellow-200 bg-yellow-50/50'
+      case 'error': return 'border-red-200 bg-red-50/50'
+      default: return 'border-gray-200 bg-gray-50/50'
     }
   };
 
   const renderContent = () => (
-    <div className='w-full max-h-[90vh] overflow-y-auto'>
-      {!renderAsDialog && (
-        <div className="mb-4">
-          <h3 className="text-lg font-semibold">
-            Upload <span className='uppercase'>{currentDocumentName}</span> for {individualName}
-          </h3>
-        </div>
-      )}
-
+    <div className="flex flex-col h-full max-h-[85vh]">
       {dropdowns && dropdowns.length > 0 && (
         <div className="space-y-4 mb-4">
           {dropdowns.map((dropdown) => (
@@ -1434,19 +1294,17 @@ export function UploadModal({
               </label>
               <select
                 id={dropdown.id}
-                className="w-full p-2 border rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                className="w-full p-2 border rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
                 value={selectedValues[dropdown.id] || ''}
                 onChange={(e) => {
                   const value = e.target.value;
                   setSelectedValues(prev => ({ ...prev, [dropdown.id]: value }));
-
                   if (dropdown.id === 'document-type') {
                     const selectedOption = dropdown.options?.find(opt => opt.value === value);
                     if (selectedOption) {
                       setCurrentDocumentName(selectedOption.label || documentName);
                     }
                   }
-
                   dropdown.onChange(value);
                 }}
                 disabled={dropdown.disabled}
@@ -1473,34 +1331,26 @@ export function UploadModal({
         </div>
       )}
 
-      <div className="mt-4">
-        <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
-          <div className="flex items-center gap-2 text-sm text-blue-800">
-            <AlertTriangle className="h-4 w-4" />
-            <span>
-              <strong>File Size Limit:</strong> Maximum {MAX_FILE_SIZE_MB}MB per file.
-              Files larger than this will be rejected automatically.
-            </span>
-          </div>
-        </div>
+      <div>
         <div className="p-4">
           <FileUpload onFilesSelected={handleFileUpload} />
         </div>
 
         {uploadedDocs.length > 0 && (
-          <>
-            <div className="h-[60vh] overflow-y-auto space-y-6 mb-6">
+          <div className="flex flex-col max-h-[60vh] mt-4 overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-6 pb-2">
               {uploadedDocs.map((doc) => {
                 const docTypeForPreview = allowMultipleTypes && doc.selectedDocTypeId
                   ? availableDocTypes.find(dt => dt.id === doc.selectedDocTypeId)
                   : finalSelectedDoc;
+                const fieldsToShow = doc.fields || docTypeForPreview?.fields || documentFields || [];
 
                 return (
                   <div key={doc.id} className={`relative rounded-lg p-4 border ${getValidationColor(doc.validationStatus)}`}>
-                    <div className="flex justify-between items-start mb-4">
+                    <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
                       <div className="flex items-center gap-2 flex-grow">
                         {getValidationIcon(doc.validationStatus)}
-                        <span className="text-xs font-medium">
+                        <span className="text-xs font-semibold">
                           {doc.validationStatus ?
                             doc.validationStatus.charAt(0).toUpperCase() + doc.validationStatus.slice(1) :
                             'Pending'}
@@ -1530,41 +1380,78 @@ export function UploadModal({
                           </div>
                         )}
                       </div>
+
                       <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          title="Stop Extraction"
-                          className="text-amber-600 hover:text-amber-800 hover:bg-amber-100"
-                          onClick={() => handleStopExtraction(doc.id)}
-                          disabled={!extractingDocIds.has(doc.id)}
-                        >
-                          <Square className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          title="Re-extract"
-                          className="text-blue-600 hover:text-blue-800 hover:bg-blue-100"
-                          onClick={() => handleReExtract(doc.id)}
-                          disabled={allowMultipleTypes && !doc.selectedDocTypeId || extractingDocIds.has(doc.id)}
-                        >
-                          {extractingDocIds.has(doc.id) ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
-                        </Button>
+                        {allowBackImage && (
+                          <>
+                            {doc.backFileUrl ? (
+                              <div className="relative group">
+                                <img src={doc.backFileUrl} alt={backImageLabel} className="h-8 w-14 object-contain bg-gray-50 rounded border border-gray-200" />
+                                <span className="absolute top-0.5 left-0.5 text-[9px] font-bold bg-gray-700 text-white px-1 rounded">{backImageLabel.toUpperCase()}</span>
+                                <button
+                                  onClick={() => setUploadedDocs(prev => prev.map(d => d.id === doc.id ? { ...d, backFile: undefined, backFileUrl: undefined } : d))}
+                                  className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  <X className="h-2.5 w-2.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-xs border-dashed border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50"
+                                onClick={() => { setBackFileTarget(doc.id); backFileInputRef.current?.click(); }}
+                              >
+                                + {backImageLabel}
+                              </Button>
+                            )}
+                          </>
+                        )}
+
+                        {doc.validationStatus === 'pending' ? (
+                          <Button
+                            size="sm"
+                            className="h-8 text-xs gap-1.5 font-semibold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"
+                            onClick={() => handleStopExtraction(doc.id)}
+                          >
+                            <Square className="h-3 w-3 fill-current" />
+                            Stop
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            className={cn(
+                              "h-8 text-xs gap-1.5 font-semibold",
+                              (!doc.extractedData || Object.keys(doc.extractedData).length === 0)
+                                ? "bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+                                : "bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200"
+                            )}
+                            onClick={() => handleReExtract(doc.id)}
+                          >
+                            <RotateCw className="h-3.5 w-3.5" />
+                            {!doc.extractedData || Object.keys(doc.extractedData).length === 0 ? 'Extract' : 'Re-extract'}
+                          </Button>
+                        )}
+
+                        {doc.validationStatus !== 'pending' && doc.extractedData && Object.keys(doc.extractedData).length > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            title="Re-extract using AI instead of local parser"
+                            className="h-8 text-xs gap-1.5 font-semibold border-purple-200 text-purple-600 hover:bg-purple-50"
+                            onClick={() => handleReExtract(doc.id, true)}
+                          >
+                            <Sparkles className="h-3.5 w-3.5" />
+                            Re-extract with AI
+                          </Button>
+                        )}
+
                         <Button
                           variant="ghost"
                           size="sm"
                           title="Remove"
-                          className="text-red-600 hover:text-red-800 hover:bg-red-100"
-                          onClick={() => {
-                            setExtractingDocIds(prev => {
-                              const newSet = new Set(prev);
-                              newSet.delete(doc.id);
-                              return newSet;
-                            });
-                            setUploadedDocs(uploadedDocs.filter(d => d.id !== doc.id));
-                          }}
-                          disabled={extractingDocIds.has(doc.id)}
+                          className="text-red-600 hover:text-red-800 hover:bg-red-100 h-8 w-8 p-0"
+                          onClick={() => setUploadedDocs(uploadedDocs.filter(d => d.id !== doc.id))}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -1572,49 +1459,43 @@ export function UploadModal({
                     </div>
 
                     {doc.validationMessage && doc.validationStatus !== 'valid' && (
-                      <div className="mb-4 p-3 rounded-md bg-white border">
-                        <p className="text-sm text-gray-700 whitespace-pre-line">{doc.validationMessage}</p>
+                      <div className="mb-4 p-3 rounded-md bg-white border text-xs text-gray-700 whitespace-pre-line">
+                        {doc.validationMessage}
                       </div>
                     )}
 
-                    {(!allowMultipleTypes || doc.selectedDocTypeId) && docTypeForPreview && (
-                      <ExtractionPreview
-                        extractedData={doc.extractedData || {}}
-                        fields={docTypeForPreview.fields || documentFields || []}
-                        fileUrl={doc.fileUrl}
-                        fileName={doc.fileName}
-                        expanded={true}
-                        showSaveButton={false}
-                        onDataChange={(fieldName, value) => {
-                          setUploadedDocs(prevDocs =>
-                            prevDocs.map(d =>
-                              d.id === doc.id
-                                ? {
-                                  ...d,
-                                  extractedData: {
-                                    ...d.extractedData,
-                                    [fieldName]: value
-                                  }
-                                }
-                                : d
-                            )
-                          );
-                        }}
-                      />
-                    )}
-
-                    {allowMultipleTypes && !doc.selectedDocTypeId && (
-                      <div className="text-center py-8 text-gray-500 text-sm">
-                        Please select a document type above to extract data
+                    <div className="space-y-4">
+                      <div className="h-[70vh] min-h-0 overflow-hidden rounded border border-gray-200">
+                        <ExtractionPreview
+                          extractedData={{
+                            ...(doc.extractedData || {}),
+                            ...(doc.backFileUrl ? { backFileUrl: doc.backFileUrl, backFileName: doc.backFile?.name } : {}),
+                          }}
+                          fields={fieldsToShow}
+                          fileUrl={doc.fileUrl}
+                          fileName={doc.fileName}
+                          expanded={true}
+                          showSaveButton={false}
+                          allowBackImage={allowBackImage}
+                          documentId={docTypeForPreview?.id || selectedDocumentId}
+                          onDataChange={(fieldName, value) => {
+                            setUploadedDocs(prev => prev.map(d =>
+                              d.id === doc.id ? {
+                                ...d,
+                                extractedData: { ...d.extractedData, [fieldName]: value }
+                              } : d
+                            ));
+                          }}
+                        />
                       </div>
-                    )}
+                    </div>
                   </div>
                 );
               })}
             </div>
 
-            <div className="mt-4">
-              {showSaveButton && (
+            {showSaveButton && (
+              <DialogFooter className="shrink-0 pt-4 border-t mt-2">
                 <Button
                   onClick={handleSaveUploads}
                   disabled={isUploading}
@@ -1622,9 +1503,9 @@ export function UploadModal({
                 >
                   {isUploading ? 'Saving...' : `Save ${uploadedDocs.length} Document${uploadedDocs.length !== 1 ? 's' : ''}`}
                 </Button>
-              )}
-            </div>
-          </>
+              </DialogFooter>
+            )}
+          </div>
         )}
       </div>
 
@@ -1633,25 +1514,42 @@ export function UploadModal({
         isSubmitting={isUploading}
         onClose={() => setValidationDialog({ ...validationDialog, isOpen: false })}
       />
+
+      {allowBackImage && (
+        <input
+          ref={backFileInputRef}
+          type="file"
+          accept="image/*,application/pdf"
+          className="hidden"
+          onChange={e => {
+            if (backFileTarget && e.target.files) {
+              handleAddBackFile(backFileTarget, Array.from(e.target.files));
+              e.target.value = '';
+            }
+          }}
+        />
+      )}
     </div>
   );
 
   if (renderAsDialog) {
     return (
-      <Dialog open={isOpen} onOpenChange={handleDialogOpenChange}>
+      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
         <DialogContent
-          className='max-w-[90vw] w-full max-h-[90vh]'
+          className="max-w-[85vw] sm:max-w-[85vw] w-full max-h-[92vh] overflow-hidden flex flex-col p-6"
           onInteractOutside={(e) => {
             e.preventDefault();
             onClose();
           }}
         >
           <DialogHeader>
-            <DialogTitle>
-              Upload <span className='uppercase'>{currentDocumentName}</span> for {individualName}
+            <DialogTitle className="text-base font-semibold">
+              Upload <span className="uppercase text-primary">{currentDocumentName}</span> for {individualName}
             </DialogTitle>
           </DialogHeader>
-          {renderContent()}
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {renderContent()}
+          </div>
         </DialogContent>
       </Dialog>
     );

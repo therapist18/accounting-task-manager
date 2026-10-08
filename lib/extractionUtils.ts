@@ -360,28 +360,52 @@ export const performExtraction = async (
   documentType: string,
   onProgress?: (message: string) => void,
   originalFileName?: string,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  forceAI: boolean = false
 ): Promise<{
   extractedData: ExtractionResult;
   success: boolean;
   message: string;
+  cancelled?: boolean;
   validationErrors?: ValidationError[];
   failedImage?: string;
   failedFields?: Field[];
 }> => {
   fields = normalizeFields(fields);
 
+  if (abortSignal?.aborted) {
+    return {
+      extractedData: {},
+      success: false,
+      cancelled: true,
+      message: 'Extraction stopped by user.',
+      failedImage: fileUrl,
+      failedFields: fields
+    };
+  }
+
   let attempts = 0;
   const MAX_ATTEMPTS = modelsToTry.length;
 
-  onProgress?.('Preparing document for extraction...');
+  if (forceAI) {
+    onProgress?.('Re-extracting with AI as requested...');
+  } else {
+    onProgress?.('Preparing document for extraction...');
+  }
 
   while (attempts < MAX_ATTEMPTS) {
     try {
       // Check if extraction was aborted
       if (abortSignal?.aborted) {
-        console.log('performExtraction: Abort signal detected, throwing AbortError');
-        throw new DOMException('Extraction aborted', 'AbortError');
+        console.log('performExtraction: Abort signal detected, returning cancelled');
+        return {
+          extractedData: {},
+          success: false,
+          cancelled: true,
+          message: 'Extraction stopped by user.',
+          failedImage: fileUrl,
+          failedFields: fields
+        };
       }
 
       const modelName = modelsToTry[attempts];
@@ -523,6 +547,16 @@ export const performExtraction = async (
       };
 
     } catch (error) {
+      if ((error as any)?.name === 'AbortError' || abortSignal?.aborted) {
+        return {
+          extractedData: {},
+          success: false,
+          cancelled: true,
+          message: 'Extraction stopped by user.',
+          failedImage: fileUrl,
+          failedFields: fields
+        };
+      }
       attempts++;
       console.error(`Extraction attempt ${attempts} failed:`, error);
 

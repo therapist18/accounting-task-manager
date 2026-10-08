@@ -7,7 +7,7 @@ import { Loader2, Save, FileDown, ChevronDown, Building2, FolderCheck, Palette }
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { replacePlaceholders } from '../../tasks-requirements/utils/templateFormatters';
-import { downloadBlob, buildWordDocBlob, printElementAsPdf } from '@/lib/documentExport';
+import { downloadBlob, buildWordDocBlob, downloadPdf, renderPdfBlob } from '@/lib/documentExport';
 import { withDerivedFeeValues } from '../utils/feeCalculations';
 import { withDirectorsAcknowledgementBlock } from '../utils/directorsBlock';
 import { withTableOfContents } from '../utils/tableOfContents';
@@ -337,9 +337,11 @@ export function ContractPreview({
     setExporting('pdf');
     try {
       const baseName = company?.legal_name?.replace(/\s+/g, '_') || 'Consultancy';
-      await printElementAsPdf({
-        element: viewerRef.current?.getPrintArea() ?? null,
+      // Server-rendered PDF file; print dialog only if that fails.
+      await downloadPdf({
+        html: printThemedHtml,
         fileName: `${baseName}_Contract`,
+        element: viewerRef.current?.getPrintArea() ?? null,
       });
     } catch (err: any) {
       toast.error(err?.message || 'Failed to export PDF');
@@ -352,10 +354,23 @@ export function ContractPreview({
     if (!company || !bodyHtml) return;
     setFilingToProfile(true);
     try {
-      const { bodyContent, css } = toWordExportHtml(bodyHtml, themeSettings, mergedValues);
-      const result = await saveContractToProfile(company.id, company.company_name, bodyContent, css);
+      // Same server-rendered PDF as the download; the Word .doc only as a
+      // fallback so filing never gets blocked by a failed render.
+      let file: { blob: Blob; extension: 'pdf' | 'doc' };
+      try {
+        file = { blob: await renderPdfBlob({ html: printThemedHtml, title: `Consultancy Agreement - ${company.company_name}` }), extension: 'pdf' };
+      } catch (err: any) {
+        console.error('Server PDF render failed, filing as Word instead', err);
+        const output = buildOutput();
+        if (!output) throw new Error('Nothing to file - the contract is empty');
+        file = { blob: output.blob, extension: 'doc' };
+        toast.warning(`PDF rendering failed (${err?.message || 'unknown error'}) - filed as a Word document instead.`);
+      }
+      const result = await saveContractToProfile(company.id, company.company_name, file);
       if (result.success) toast.success('Filed to company profile');
       else toast.error(result.error || 'Failed to file to company profile');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to file to company profile');
     } finally {
       setFilingToProfile(false);
     }

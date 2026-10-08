@@ -3,6 +3,10 @@
 //   - downloadBlob:             one saveAs wrapper
 //   - buildWordDocBlob /        .doc download (real Microsoft Office HTML with
 //     downloadHtmlAsWord          mso namespaces, so Word honors @page + mso-* CSS)
+//   - downloadPdf / renderPdfBlob: real PDF files rendered server-side by
+//                               headless Chromium (/api/render-pdf) - same
+//                               layout as Chrome's Save as PDF, no dialog.
+//                               downloadPdf falls back to printElementAsPdf.
 //   - printElementAsPdf:        browser print pipeline ("Save as PDF") with
 //                               font/image waiting, filename via document.title,
 //                               optional detach-to-body, and reliable cleanup
@@ -152,6 +156,122 @@ export async function printElementAsPdf(opts: PrintElementAsPdfOptions): Promise
   } catch (error: any) {
     cleanup();
     throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PDF export via server-side headless Chromium (/api/render-pdf)
+// ---------------------------------------------------------------------------
+
+export interface PrintHtmlDocumentOptions {
+  html: string;
+  title?: string;
+  pageMargin?: string;
+}
+
+// Standalone page carrying the same @page + theme-wrapper rules as
+// DocumentViewer's print-only area, so the server render lays out exactly
+// like printElementAsPdf's window.print() of that area.
+export function buildPrintHtmlDocument({ html, title = "Document", pageMargin = "0.5in" }: PrintHtmlDocumentOptions): string {
+  const escapedTitle = title.replace(/[<&>]/g, (c) => ({ "<": "&lt;", "&": "&amp;", ">": "&gt;" })[c] as string);
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${escapedTitle}</title>
+<style>
+  @page { size: A4; margin: ${pageMargin}; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #000; }
+  [class^="contract-theme-"] { padding: 0 !important; max-width: 100% !important; margin: 0 !important; }
+</style>
+</head>
+<body>${html}</body>
+</html>`;
+}
+
+const FULL_DOCUMENT_RE = /^\s*(<!doctype|<html)/i;
+
+// The server renders from about:blank, so relative/same-origin image URLs
+// (e.g. /logo.png, or a path only this app serves) can't resolve there -
+// embed those as data URLs first. Cross-origin images stay as absolute URLs
+// and are fetched by the server render itself.
+async function inlineLocalImages(html: string): Promise<string> {
+  if (typeof DOMParser === "undefined" || typeof window === "undefined" || !/<img\b/i.test(html)) return html;
+  const isFullDocument = FULL_DOCUMENT_RE.test(html);
+  const doc = new DOMParser().parseFromString(isFullDocument ? html : `<body>${html}</body>`, "text/html");
+  await Promise.all(
+    Array.from(doc.querySelectorAll("img[src]")).map(async (img) => {
+      const src = img.getAttribute("src") || "";
+      if (!src || src.startsWith("data:")) return;
+      let absolute: URL;
+      try { absolute = new URL(src, window.location.href); } catch { return; }
+      if (absolute.origin !== window.location.origin) {
+        img.setAttribute("src", absolute.href);
+        return;
+      }
+      const dataUrl = await imageUrlToDataUrl(absolute.href);
+      img.setAttribute("src", dataUrl || absolute.href);
+    })
+  );
+  return isFullDocument ? `<!DOCTYPE html>\n${doc.documentElement.outerHTML}` : doc.body.innerHTML;
+}
+
+export interface RenderPdfOptions extends PrintHtmlDocumentOptions {
+  fileName?: string;
+  // Extra CSS appended last (e.g. "hide the photo" variants of a document).
+  extraCss?: string;
+}
+
+// Renders HTML to a real PDF file with server-side headless Chromium (vector
+// text, same layout as Chrome's Save as PDF). Accepts either a fragment
+// (wrapped by buildPrintHtmlDocument with the A4 @page + pageMargin) or a
+// complete <!DOCTYPE html> document that carries its own <head>/@page, used
+// as-is. Returns a Blob to download or upload - no print dialog involved.
+export async function renderPdfBlob(opts: RenderPdfOptions): Promise<Blob> {
+  const html = await inlineLocalImages(opts.html);
+  let documentHtml = FULL_DOCUMENT_RE.test(html) ? html : buildPrintHtmlDocument({ ...opts, html });
+  if (opts.extraCss) {
+    documentHtml = documentHtml.replace(/<\/head>/i, `<style>${opts.extraCss}</style></head>`);
+  }
+  const res = await fetch("/api/render-pdf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ html: documentHtml, fileName: opts.fileName || opts.title }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error(detail?.error || `PDF rendering failed (${res.status})`);
+  }
+  return res.blob();
+}
+
+export interface DownloadPdfOptions extends Omit<RenderPdfOptions, "html"> {
+  fileName: string;
+  // The document to render. Omit to use `element`'s innerHTML instead (e.g.
+  // a DocumentViewer's getPrintArea()).
+  html?: string;
+  // Printed via printElementAsPdf if the server render fails, so a download
+  // never dead-ends. Its own options (onBeforePrint, detach, ...) go in
+  // printFallback.
+  element?: HTMLElement | null;
+  printFallback?: Omit<PrintElementAsPdfOptions, "element" | "fileName">;
+}
+
+// The one-call PDF download: server render -> file download, falling back to
+// the browser print dialog on `element` if the render fails.
+// Resolves to which path produced the PDF.
+export async function downloadPdf(opts: DownloadPdfOptions): Promise<"server" | "print"> {
+  const html = opts.html ?? opts.element?.innerHTML ?? "";
+  try {
+    if (!html) throw new Error("Nothing to render");
+    const blob = await renderPdfBlob({ ...opts, html, title: opts.title || opts.fileName });
+    downloadBlob(blob, `${opts.fileName}.pdf`);
+    return "server";
+  } catch (err) {
+    if (!opts.element) throw err;
+    console.error("Server PDF render failed, falling back to the print dialog", err);
+    await printElementAsPdf({ ...opts.printFallback, element: opts.element, fileName: opts.fileName });
+    return "print";
   }
 }
 

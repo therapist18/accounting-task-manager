@@ -38,13 +38,38 @@ const parseAndCleanUUIDs = (input: any): string[] => {
   return [...new Set(matches)]
 }
 
-export async function fetchMasterFields(): Promise<Map<number, any>> {
-  const { data, error } = await supabase.from('tm_job_fields').select('*').order('id', { ascending: true })
-  if (error) {
-    console.error('Failed to fetch master fields:', error)
-    return new Map()
-  }
-  return new Map((data || []).map((field: any) => [field.id, field]))
+// tm_job_fields is config data that every workspace tab (Requirements, Templates,
+// Automation, guided mode) needs in full - one shared in-flight/settled promise per
+// session instead of each tab re-downloading the whole table on mount. A failed
+// load isn't cached, so the next caller retries.
+const MASTER_FIELDS_TTL_MS = 5 * 60 * 1000
+let masterFieldsCache: { promise: Promise<Map<number, any>>; at: number } | null = null
+
+export function invalidateMasterFieldsCache() {
+  masterFieldsCache = null
+}
+
+export function fetchMasterFields(): Promise<Map<number, any>> {
+  if (masterFieldsCache && Date.now() - masterFieldsCache.at < MASTER_FIELDS_TTL_MS) return masterFieldsCache.promise
+  const promise = (async () => {
+    const { data, error } = await supabase.from('tm_job_fields').select('*').order('id', { ascending: true })
+    if (error) {
+      console.error('Failed to fetch master fields:', error)
+      masterFieldsCache = null
+      return new Map()
+    }
+    return new Map((data || []).map((field: any) => [field.id, field]))
+  })()
+  masterFieldsCache = { promise, at: Date.now() }
+  return promise
+}
+
+/** Same cached master fields, keyed by String(id) - the shape fieldResolution's ctx.jobFields expects. */
+export async function fetchMasterFieldsRecord(): Promise<Record<string, any>> {
+  const map = await fetchMasterFields()
+  const record: Record<string, any> = {}
+  map.forEach((field, id) => { record[String(id)] = field })
+  return record
 }
 
 export async function fetchDocumentTemplates(documentId: string, task: any, jobLevel?: any): Promise<any[]> {

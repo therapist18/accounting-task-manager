@@ -18,6 +18,13 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // /api/render-pdf (headless Chromium) - keep these out of the bundle and
+  // make sure the compressed Chromium binary is traced into the function,
+  // since it is read from disk at runtime rather than imported.
+  serverExternalPackages: ["@sparticuz/chromium", "playwright-core"],
+  outputFileTracingIncludes: {
+    "/api/render-pdf": ["./node_modules/@sparticuz/chromium/bin/**"],
+  },
 }
 
 export default nextConfig

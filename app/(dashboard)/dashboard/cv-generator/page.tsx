@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Sparkles, FileText, Download, Check, User, Briefcase, GraduationCap, FolderGit2, BookOpen, MessageSquare, AlertCircle, Eye, Search, Users, ImagePlus, X, Loader2, CheckCircle2, Save, Settings2, Palette, ChevronDown, ChevronRight, Globe, ArrowRight, Award, Target, FileSpreadsheet, Layout, Type, Image, PenLine, BarChart3, Crosshair, FileText as CoverLetterIcon, Copy, RefreshCw, Database } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { printElementAsPdf, buildWordDocBlob, downloadBlob } from "@/lib/documentExport";
+import { downloadPdf, buildWordDocBlob, downloadBlob } from "@/lib/documentExport";
 import { applyWordSafeDomFixes } from "@/lib/documentTheme";
 import { buildCvDocument } from "@/app/(dashboard)/dashboard/cv-generator/utils/cvThemeEngine";
 import { type DocumentViewerHandle } from "@/components/contracts/DocumentViewer";
@@ -1618,7 +1618,6 @@ export default function CVGeneratorPage() {
     if (!element) return;
 
     setIsDownloadingPdf(true);
-    toast.info("Opening print dialog — choose \"Save as PDF\" as the destination.");
 
     const age = cvData.personalDetails?.dateOfBirth
       ? (() => { const dob = cvData.personalDetails.dateOfBirth; const [d, m, y] = dob.includes('/') ? dob.split('/').map(Number) : [0, 0, Number(dob.split('-')[0])]; const birth = new Date(y, m ? m - 1 : 0, d || 1); return `${Math.floor((Date.now() - birth.getTime()) / (365.25 * 24 * 3600 * 1000))}`; })()
@@ -1628,12 +1627,20 @@ export default function CVGeneratorPage() {
     const applicantName = (cvData.personalInfo.fullName || 'CV').replace(/\s+/g, '_');
     const fileName = [applicantName, age, 'REF', rec, prof].filter(Boolean).join('_');
 
+    // Server-rendered PDF file of the preview's print area (CvPreviewPanel
+    // prints with a 0 page margin - the theme draws its own); falls back to
+    // the print dialog if the render fails.
     try {
-      await printElementAsPdf({
+      const via = await downloadPdf({
         element,
         fileName,
-        onCleanup: () => setIsDownloadingPdf(false),
+        pageMargin: "0",
+        printFallback: { onCleanup: () => setIsDownloadingPdf(false) },
       });
+      if (via === "server") {
+        setIsDownloadingPdf(false);
+        toast.success("PDF downloaded");
+      }
     } catch (error: any) {
       console.error("PDF generation failed", error);
       setIsDownloadingPdf(false);

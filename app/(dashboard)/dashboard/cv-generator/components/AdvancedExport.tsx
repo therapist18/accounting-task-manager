@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { X, Download, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { downloadBlob, printElementAsPdf } from "@/lib/documentExport";
+import { downloadBlob, downloadPdf } from "@/lib/documentExport";
 import { type DocumentViewerHandle } from "@/components/contracts/DocumentViewer";
 
 interface AdvancedExportProps {
@@ -65,19 +65,27 @@ export default function AdvancedExport({ cvData, previewRef, onClose }: Advanced
     const hidePhoto = type === 'pdf-no-photo';
     const suffix = hidePhoto ? '_NoPhoto' : type === 'print' ? '_Print' : '';
 
-    await printElementAsPdf({
+    const hidePhotoCss = '#cv-preview-container img[alt="Profile"], #cv-preview-container .cv-photo, #cv-preview-container .cv-photo-wrap { display: none !important; }';
+
+    // Server-rendered PDF file (0 page margin, as CvPreviewPanel prints);
+    // the print-dialog fallback injects the same hide-photo CSS itself.
+    await downloadPdf({
       element,
       fileName: `${baseName()}${suffix}_CV`,
-      onBeforePrint: () => {
-        if (hidePhoto) {
-          const style = document.createElement("style");
-          style.id = "adv-export-hide-photo";
-          style.textContent = '#cv-preview-container img[alt="Profile"], #cv-preview-container .cv-photo, #cv-preview-container .cv-photo-wrap { display: none !important; }';
-          document.head.appendChild(style);
-        }
-      },
-      onCleanup: () => {
-        document.getElementById("adv-export-hide-photo")?.remove();
+      pageMargin: "0",
+      extraCss: hidePhoto ? hidePhotoCss : undefined,
+      printFallback: {
+        onBeforePrint: () => {
+          if (hidePhoto) {
+            const style = document.createElement("style");
+            style.id = "adv-export-hide-photo";
+            style.textContent = hidePhotoCss;
+            document.head.appendChild(style);
+          }
+        },
+        onCleanup: () => {
+          document.getElementById("adv-export-hide-photo")?.remove();
+        },
       },
     });
 
@@ -93,13 +101,16 @@ export default function AdvancedExport({ cvData, previewRef, onClose }: Advanced
     container.id = "cv-preview-container";
     container.innerHTML = `<style>#cv-preview-container{font-family:Arial,Helvetica,sans-serif;color:#000;font-size:11pt;line-height:1.4}#cv-preview-container h1{font-size:18pt;margin:0 0 4pt}#cv-preview-container h2{font-size:13pt;margin:14pt 0 4pt;border-bottom:1px solid #000;padding-bottom:2pt}#cv-preview-container h3{font-size:11pt;margin:10pt 0 2pt}#cv-preview-container p,#cv-preview-container li{margin:2pt 0}</style>${buildAtsHtml()}`;
 
-    await printElementAsPdf({
+    const via = await downloadPdf({
       element: container,
       fileName: `${baseName()}_ATS_CV`,
-      bodyClassName: "pdf-mode",
-      detach: true,
-      onCleanup: () => container.remove(),
+      printFallback: {
+        bodyClassName: "pdf-mode",
+        detach: true,
+        onCleanup: () => container.remove(),
+      },
     });
+    if (via === "server") container.remove();
 
     toast.success("ATS-friendly PDF exported!");
   };

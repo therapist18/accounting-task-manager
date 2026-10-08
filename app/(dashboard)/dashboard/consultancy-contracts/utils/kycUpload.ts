@@ -1,5 +1,4 @@
 import supabase from '@/lib/supabase/client';
-import { buildWordDocBlob } from '@/lib/documentExport';
 
 // The "Accountant Contract" document type in acc_portal_kyc - filing the
 // generated contract under this id makes it show up in the company profile
@@ -18,16 +17,13 @@ export interface SaveToProfileResult {
   error?: string;
 }
 
-// Renders the contract to a Word (.doc) Blob and files it as a company KYC
-// upload. Word, not PDF, because printElementAsPdf only drives the browser's
-// native "Save as PDF" print dialog (no Blob it can hand back) - Word export
-// is the only path here that produces a real file without a user-completed
-// save dialog in the middle.
+// Files the generated contract as a company KYC upload. The caller renders
+// the file - normally a server-rendered PDF (renderPdfBlob in
+// lib/documentExport.ts), or the Word .doc if PDF rendering is unavailable.
 export async function saveContractToProfile(
   companyId: string | number,
   companyName: string,
-  renderedHtml: string,
-  css?: string
+  file: { blob: Blob; extension: 'pdf' | 'doc' }
 ): Promise<SaveToProfileResult> {
   try {
     const { data: docType } = await supabase
@@ -37,14 +33,13 @@ export async function saveContractToProfile(
       .maybeSingle();
     const docName = docType?.name || 'Accountant Contract';
 
-    const blob = buildWordDocBlob({ html: renderedHtml, title: `Consultancy Agreement - ${companyName}`, css });
     const normalizedCompanyName = normalizeCompanyName(companyName);
     const timestamp = Date.now();
-    const filePath = `company-documents/${normalizedCompanyName}/${docName}/${timestamp}.doc`;
+    const filePath = `company-documents/${normalizedCompanyName}/${docName}/${timestamp}.${file.extension}`;
 
     const { error: uploadError } = await supabase.storage
       .from('kyc-documents')
-      .upload(filePath, blob, { contentType: 'application/msword' });
+      .upload(filePath, file.blob, { contentType: file.extension === 'pdf' ? 'application/pdf' : 'application/msword' });
     if (uploadError) return { success: false, error: uploadError.message };
 
     const { error: insertError } = await supabase.from('acc_portal_kyc_uploads').insert({
