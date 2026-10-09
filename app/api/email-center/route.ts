@@ -18,14 +18,15 @@ export async function GET(request: NextRequest) {
     const light = new URL(request.url).searchParams.get("light") === "1"
 
     // Explicit column list: OAuth tokens never leave the server. email_count/first_email_at
-    // (20261004000000) are kept current by a trigger on `emails`, not computed here — if that
-    // migration isn't applied yet, retry without them rather than failing the whole tab.
+    // (20261004000000) are kept current by a trigger on `emails`, not computed here; created_by_id /
+    // audit_log come from 20261013000000 — if either migration isn't applied yet, retry without them
+    // rather than failing the whole tab.
     const ACCOUNT_COLUMNS_BASE = "id, email, label, status, company_id, watch_expiry, last_synced_at, last_sync_error, created_at"
-    const ACCOUNT_COLUMNS = `${ACCOUNT_COLUMNS_BASE}, email_count, first_email_at`
+    const ACCOUNT_COLUMNS = `${ACCOUNT_COLUMNS_BASE}, email_count, first_email_at, created_by_id, audit_log`
     // Loaded on every page open — withSupabaseRetry absorbs a transient network blip on any of these
     // before it's treated as a real failure.
     let accountsRes = await withSupabaseRetry<any>(() => sb.from("email_accounts").select(ACCOUNT_COLUMNS).order("email"))
-    if (accountsRes.error && /email_count|first_email_at/i.test(accountsRes.error.message ?? "")) {
+    if (accountsRes.error && /email_count|first_email_at|created_by_id|audit_log/i.test(accountsRes.error.message ?? "")) {
       accountsRes = await withSupabaseRetry<any>(() => sb.from("email_accounts").select(ACCOUNT_COLUMNS_BASE).order("email"))
     }
 

@@ -36,7 +36,11 @@ export interface TaskBasketContact {
 // with received_accounts/total_accounts and auto_resolved.
 export interface TaskBasketHistoryEntry {
   checked_at: string
-  event?: "late_upload" | "late_reception"
+  event?: "late_upload" | "late_reception" | "late_receipts" | "report_sent"
+  // report_sent: the client was sent this basket report (task manager -> send-report)
+  channels?: string[]
+  recipients?: string[]
+  file_name?: string
   still_pending?: boolean
   received_accounts?: number
   total_accounts?: number
@@ -97,6 +101,34 @@ export interface TaskBasketItem {
   has_comments: boolean
   comments: TaskBasketComment[]
   missing_accounts: TaskBasketMissingAccount[]
+  missing_taxes: TaskBasketMissingTax[]
+  /** The module's deadline for the cycle (YYYY-MM-DD) — what the client was told. */
+  deadline: string | null
+}
+
+// Payment receipt items only: the receipts still outstanding, with what KRA shows (kra-tools'
+// supabase/migrations/20261009_task_basket_taxes_and_deadline.sql).
+export interface TaskBasketMissingTax {
+  tax: string
+  label: string
+  kra_paid: boolean
+  kra_payment_date: string | null
+  kra_amount: number | null
+}
+
+/** "PAYE — paid on KRA 03/10/2026, proof missing" / "NITA — not paid" */
+export function formatMissingTax(tax: TaskBasketMissingTax): string {
+  return tax.kra_paid
+    ? `${tax.label} — paid on KRA${tax.kra_payment_date ? ` ${tax.kra_payment_date}` : ""}, proof missing`
+    : `${tax.label} — not paid`
+}
+
+/** One line per outstanding thing on an item (accounts, taxes), for tables and reports. */
+export function outstandingLines(item: Pick<TaskBasketItem, "missing_accounts" | "missing_taxes">): string[] {
+  return [
+    ...item.missing_accounts.map((a) => `${formatMissingAccount(a)}${a.status === "noted" ? " — noted" : " — missing"}`),
+    ...item.missing_taxes.map(formatMissingTax),
+  ]
 }
 
 export interface TaskBasketFilters {
@@ -137,6 +169,8 @@ export async function getTaskBasketItems(filters: TaskBasketFilters = {}): Promi
     comments: row.comments || [],
     has_comments: !!row.has_comments,
     missing_accounts: row.missing_accounts || [],
+    missing_taxes: row.missing_taxes || [],
+    deadline: row.deadline || null,
   }))
 }
 

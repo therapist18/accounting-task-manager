@@ -3,6 +3,8 @@ import { getGmailClient } from '@/lib/gmail/client'
 import { createClient } from '@supabase/supabase-js'
 import { getServiceClient } from '@/lib/email-center/service'
 import { renewWatch, syncAccount, type AccountRow } from '@/lib/email-center/ingest'
+import { withSupabaseRetry } from '@/lib/supabaseRetry'
+import { getAppSessionFromRequest } from '@/lib/auth/session'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 
@@ -63,7 +65,8 @@ export async function GET(request: NextRequest) {
     const gmail = getGmailClient(access_token, refresh_token)
     console.log('Fetching Gmail profile...')
     const profile = await gmail.users.getProfile({ userId: 'me' })
-    const emailAddress = profile.data.emailAddress!
+    // Normalised so the lookup below and the unique index on lower(trim(email)) see one address.
+    const emailAddress = profile.data.emailAddress!.trim().toLowerCase()
 
     console.log('Connected account:', emailAddress)
 
@@ -100,12 +103,34 @@ export async function GET(request: NextRequest) {
 
     // ── Manual upsert: check if row exists, then update or insert ──
     console.log('Checking for existing record (email:', emailAddress, ')...')
-    const { data: existing } = await sb
-      .from('email_accounts')
-      .select('id, company_id')
-      .eq('email', emailAddress)
-      .maybeSingle()
+    // A failed lookup must abort, never fall through as "no row" — that is how a second, unlinked row
+    // for an already-connected mailbox got inserted. limit(1) rather than maybeSingle() so leftover
+    // duplicates (oldest wins) can't error out and trigger yet another insert.
+    const { data: existingRows, error: lookupErr } = await withSupabaseRetry<any>(() =>
+      sb
+        .from('email_accounts')
+        .select('id, company_id, audit_log')
+        // (audit_log / created_by_id need 20261013000000 applied before this deploys)
+        .ilike('email', emailAddress)
+        .order('created_at', { ascending: true })
+        .limit(1)
+    )
+    if (lookupErr) {
+      console.error('Existing-account lookup failed:', JSON.stringify(lookupErr))
+      return NextResponse.redirect(`${APP_URL}/dashboard/emails?error=db_error`)
+    }
+    const existing = existingRows?.[0] ?? null
     const existingCompanyId = existing?.company_id ?? null
+
+    // Who connected it — the app session cookie rides along on Google's redirect back here. Optional:
+    // a connect without a session still works, it just isn't attributed.
+    const actorId = (await getAppSessionFromRequest(request))?.user.id ?? null
+    const auditEntry = (action: 'connected' | 'reconnected', companyId: string | null) => ({
+      action,
+      by_id: actorId,
+      at: new Date().toISOString(),
+      ...(companyId ? { company_id: companyId } : {}),
+    })
 
     // Link the mailbox to the company it was connected from — but never silently move one that is
     // already linked elsewhere; that's a deliberate change on the Mailboxes tab.
@@ -118,9 +143,16 @@ export async function GET(request: NextRequest) {
 
     if (existing?.id) {
       console.log('Existing account found — updating id:', existing.id)
+      const linkTo = stateCompany && !existingCompanyId ? String(stateCompany.id) : null
+      const priorLog = Array.isArray(existing.audit_log) ? existing.audit_log : []
       const { data, error } = await sb
         .from('email_accounts')
-        .update({ ...accountPayload, ...(stateCompany && !existingCompanyId ? { company_id: String(stateCompany.id) } : {}) })
+        .update({
+          ...accountPayload,
+          ...(linkTo ? { company_id: linkTo, company_assigned_by_id: actorId } : {}),
+          ...(actorId ? { updated_by_id: actorId } : {}),
+          audit_log: [...priorLog, auditEntry('reconnected', linkTo)],
+        })
         .eq('id', existing.id)
         .select()
         .single()
@@ -130,7 +162,13 @@ export async function GET(request: NextRequest) {
       console.log('No existing account — inserting new row...')
       const { data, error } = await sb
         .from('email_accounts')
-        .insert({ ...accountPayload, ...(stateCompany ? { company_id: String(stateCompany.id) } : {}), created_at: new Date().toISOString() })
+        .insert({
+          ...accountPayload,
+          ...(stateCompany ? { company_id: String(stateCompany.id), company_assigned_by_id: actorId } : {}),
+          created_by_id: actorId,
+          audit_log: [auditEntry('connected', stateCompany ? String(stateCompany.id) : null)],
+          created_at: new Date().toISOString(),
+        })
         .select()
         .single()
       account = data

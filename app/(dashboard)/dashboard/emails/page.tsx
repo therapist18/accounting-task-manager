@@ -1080,6 +1080,7 @@ export default function EmailCenterPage() {
             onAccountLinked={updateAccountCompany}
             onSynced={handleRefresh}
             onSyncFrom={openSyncFrom}
+            staff={staff}
             showTime={showTime}
             loading={loading || companiesLoading}
           />

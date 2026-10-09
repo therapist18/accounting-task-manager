@@ -14,7 +14,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     const { company_id } = (await request.json()) as { company_id?: string | null }
     const companyId = company_id ? String(company_id) : null
 
-    const { data: account } = await sb.from("email_accounts").select("id, email, company_id").eq("id", id).maybeSingle()
+    const { data: account } = await sb.from("email_accounts").select("id, email, company_id, audit_log").eq("id", id).maybeSingle()
     if (!account) return NextResponse.json({ success: false, error: "Mailbox not found." }, { status: 404 })
 
     if (companyId) {
@@ -28,6 +28,16 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
         company_id: companyId,
         company_assigned_by_id: actor.id,
         updated_by_id: actor.id,
+        audit_log: [
+          ...(Array.isArray(account.audit_log) ? account.audit_log : []),
+          {
+            action: companyId ? (account.company_id ? "moved" : "linked") : "unlinked",
+            by_id: actor.id,
+            at: new Date().toISOString(),
+            ...(companyId ? { company_id: companyId } : {}),
+            ...(account.company_id ? { from_company_id: String(account.company_id) } : {}),
+          },
+        ],
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)

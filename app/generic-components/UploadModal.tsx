@@ -610,11 +610,14 @@ export function UploadModal({
     }
   }, [isOpen, selectedDoc]);
 
+  const onPendingChangeRef = useRef(onPendingChange);
   useEffect(() => {
-    if (onPendingChange) {
-      onPendingChange(uploadedDocs);
-    }
-  }, [uploadedDocs, onPendingChange]);
+    onPendingChangeRef.current = onPendingChange;
+  }, [onPendingChange]);
+
+  useEffect(() => {
+    onPendingChangeRef.current?.(uploadedDocs);
+  }, [uploadedDocs]);
 
   const individualName = useMemo(() => {
     const isCompany = !!company?.id || isCompanyUpload;

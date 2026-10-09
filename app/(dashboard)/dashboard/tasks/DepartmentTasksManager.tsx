@@ -4551,6 +4551,25 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
           kycDocsMap={kycDocuments}
         />
       )}
+
+      {reportDocUpload && (
+        <UploadModal
+          isOpen={!!reportDocUpload}
+          onClose={() => setReportDocUpload(null)}
+          onSuccess={handleReportDocUploadSuccess}
+          documentName={reportDocUpload.reportDoc.documentName || reportDocUpload.reportDoc.name || 'Document'}
+          selectedDocumentId={reportDocUpload.reportDoc.documentId || reportDocUpload.reportDoc.id}
+          entityId={reportDocUpload.entityId}
+          entityName={reportDocUpload.entityName}
+          isCompanyUpload={reportDocUpload.entityType === 'company'}
+          targetTable={reportDocUpload.entityType === 'company' ? 'acc_portal_kyc_uploads' : 'acc_portal_directors_documents'}
+          idFieldName={reportDocUpload.entityType === 'company' ? 'company_id' : 'director_id'}
+          documentIdFieldName={reportDocUpload.entityType === 'company' ? 'kyc_document_id' : 'document_id'}
+          storagePathPrefix={reportDocUpload.entityType === 'company' ? 'company-documents' : 'individual-documents'}
+          allowBackImage={true}
+          autoExtract={true}
+        />
+      )}
     </div >
   )
 }                                                                                                                                                   

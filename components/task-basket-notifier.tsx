@@ -25,22 +25,36 @@ const POLL_MS = 2 * 60 * 1000
 const COMPANY_REFRESH_MS = 60 * 60 * 1000
 const BASKET_PATH = "/dashboard/task-basket"
 const SEEN_KEY = "taskBasket.notifiedIds.v1"
+// Items that moved to received_late (the client delivered after the push) — announced once each.
+const LATE_SEEN_KEY = "taskBasket.notifiedLateIds.v1"
+const LATE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 const ASKED_PERMISSION_KEY = "taskBasket.askedNotificationPermission.v1"
 
-function readSeen(userId: string): Set<string> | null {
+function readSeen(userId: string, key = SEEN_KEY): Set<string> | null {
   try {
-    const raw = window.localStorage.getItem(`${SEEN_KEY}:${userId}`)
+    const raw = window.localStorage.getItem(`${key}:${userId}`)
     return raw ? new Set<string>(JSON.parse(raw)) : null
   } catch {
     return null
   }
 }
 
-function writeSeen(userId: string, ids: Set<string>) {
+function writeSeen(userId: string, ids: Set<string>, key = SEEN_KEY) {
   try {
-    window.localStorage.setItem(`${SEEN_KEY}:${userId}`, JSON.stringify([...ids]))
+    window.localStorage.setItem(`${key}:${userId}`, JSON.stringify([...ids]))
   } catch {
     /* storage unavailable (private mode / quota) - worst case we notify again next load */
+  }
+}
+
+function summariseLate(items: TaskBasketItem[]) {
+  const names = [...new Set(items.map((i) => i.company_name))]
+  const shown = names.slice(0, 3).join(", ")
+  const more = names.length > 3 ? ` +${names.length - 3} more` : ""
+  const modules = [...new Set(items.map((i) => TASK_BASKET_MODULE_LABELS[i.module] ?? i.module))].join(" · ")
+  return {
+    title: `Task Basket: ${items.length} received after the deadline`,
+    body: `${modules}\n${shown}${more}`,
   }
 }
 
@@ -84,8 +98,8 @@ export default function TaskBasketNotifier({ userId }: { userId: string }) {
       return list
     }
 
-    const deliver = (items: TaskBasketItem[]) => {
-      const { title, body } = summarise(items)
+    const deliver = (items: TaskBasketItem[], late = false) => {
+      const { title, body } = late ? summariseLate(items) : summarise(items)
       const open = () => routerRef.current.push(BASKET_PATH)
 
       // In-app toast, with a shortcut to the basket.
@@ -117,18 +131,31 @@ export default function TaskBasketNotifier({ userId }: { userId: string }) {
       if (busyRef.current || cancelled) return
       busyRef.current = true
       try {
-        const [items, companies] = await Promise.all([
+        const [items, lateItems, companies] = await Promise.all([
           getTaskBasketItems({ status: "open" }),
+          getTaskBasketItems({ status: "received_late" }).catch(() => [] as TaskBasketItem[]),
           getCompanies().catch(() => [] as Company[]),
         ])
         if (cancelled) return
 
         const companyById = new Map(companies.map((c) => [String(c.id), c]))
-        const visible = items.filter(
-          (item) =>
-            !companyById.has(String(item.company_id)) ||
-            companyMatchesCategoryFilters(companyById.get(String(item.company_id)), DEFAULT_CATEGORY_FILTERS)
+        const inScope = (item: TaskBasketItem) =>
+          !companyById.has(String(item.company_id)) ||
+          companyMatchesCategoryFilters(companyById.get(String(item.company_id)), DEFAULT_CATEGORY_FILTERS)
+        const visible = items.filter(inScope)
+
+        // Late deliveries: a pushed company sent its statement / files / receipts after the deadline
+        // and kra-tools closed the item as received_late. Only recent ones, each announced once; the
+        // first run on a browser/install just records them, like the open-items check below.
+        const recentLate = lateItems.filter(
+          (i) => inScope(i) && i.resolved_at && Date.now() - new Date(i.resolved_at).getTime() < LATE_WINDOW_MS
         )
+        const seenLate = readSeen(userId, LATE_SEEN_KEY)
+        if (seenLate) {
+          const freshLate = recentLate.filter((i) => !seenLate.has(i.id))
+          if (freshLate.length) deliver(freshLate, true)
+        }
+        writeSeen(userId, new Set(recentLate.map((i) => i.id)), LATE_SEEN_KEY)
 
         const seen = readSeen(userId)
         const currentIds = new Set(visible.map((i) => i.id))

@@ -1464,12 +1464,16 @@ export function StageUploadDialog({
     if (!originatingDoc?.id) return;
 
     setPendingDocuments(prev => {
-      const updated = { ...prev };
+      const keysToDelete = Object.keys(prev).filter(key => key === originatingDoc.id || key.startsWith(`${originatingDoc.id}_`));
+      const hasNewDocs = newDocument && Object.keys(newDocument).length > 0 && (!newDocument.files || newDocument.files.length > 0);
 
-      Object.keys(updated).forEach(key => {
-        if (key === originatingDoc.id || key.startsWith(`${originatingDoc.id}_`)) {
-          delete updated[key];
-        }
+      if (keysToDelete.length === 0 && !hasNewDocs) {
+        return prev;
+      }
+
+      const updated = { ...prev };
+      keysToDelete.forEach(key => {
+        delete updated[key];
       });
 
       if (!newDocument || Object.keys(newDocument).length === 0 || (newDocument.files && newDocument.files.length === 0)) {

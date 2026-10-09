@@ -23,7 +23,7 @@ import { Pagination } from "./Pagination"
 import { TableLoading, SortTh, TD_CLASS, useTableSort, zebraRow } from "./table"
 import {
   PILL_BUTTON_ACTIVE_CLASS, PILL_BUTTON_CLASS, PRIMARY_PILL_BUTTON_CLASS, SearchSelect, api, fmtDateTime, needsReconnect,
-  type AccountRow,
+  type AccountRow, type StaffOption,
 } from "./shared"
 
 // The Mailboxes tab is company-first: every company (narrowed by the same Client Category Filter the
@@ -61,7 +61,10 @@ const COMPANY_SORT: Record<string, (r: CompanyRowData) => string | number> = {
   emails: (r) => r.accounts.reduce((sum, a) => sum + (a.email_count ?? 0), 0),
   first_email: (r) => r.accounts.map((a) => a.first_email_at).filter(Boolean).sort()[0] ?? "￿", // no data sorts last
   last_sync: (r) => r.lastSync,
+  connected_on: (r) => r.accounts.map(connectedAt).filter(Boolean).sort()[0] ?? "￿",
   push: (r) => r.live,
+  issues: (r) => r.failing + r.accounts.filter((a) => a.last_sync_error).length,
+  mailbox_actions: (r) => r.accounts.length,
   actions: (r) => (r.state === "connected" ? 1 : 0), // companies that still need a mailbox first
 }
 
@@ -70,7 +73,9 @@ const ACCOUNT_SORT: Record<string, (a: AccountRow) => string | number> = {
   emails: (a) => a.email_count ?? 0,
   first_email: (a) => a.first_email_at ?? "￿",
   last_sync: (a) => a.last_synced_at ?? "",
+  connected_on: (a) => connectedAt(a) ?? "￿",
   push: (a) => (watchActive(a) ? 1 : 0),
+  issues: (a) => (needsReconnect(a) ? 2 : a.last_sync_error ? 1 : 0),
   link: (a) => a.label ?? a.email,
   sync: (a) => (a.status === "active" ? 1 : 0),
 }
@@ -101,6 +106,55 @@ function FirstEmailCell({ a, showTime }: { a: AccountRow; showTime: boolean }) {
     </span>
   ) : (
     <span className="text-slate-300">—</span>
+  )
+}
+
+const AUDIT_VERB: Record<string, string> = {
+  connected: "Connected", reconnected: "Reconnected", linked: "Linked", moved: "Moved", unlinked: "Unlinked",
+}
+
+// Who connected the mailbox and when. Rows from before 20261013000000 have no creator recorded — they
+// show "—" for who, and fall back to the row's created_at for when.
+const connectedById = (a: AccountRow) => a.created_by_id ?? a.audit_log?.find((e) => e.action === "connected")?.by_id ?? null
+const connectedAt = (a: AccountRow) => a.audit_log?.find((e) => e.action === "connected")?.at ?? a.created_at ?? null
+
+// Hover shows the mailbox's full audit_log (connect / reconnect / link / move / unlink).
+function ConnectedByCell({ a, staffNames }: { a: AccountRow; staffNames: Map<string, string> }) {
+  const who = (id: string | null | undefined) => (id ? staffNames.get(String(id)) ?? "Unknown user" : "Unknown user")
+  const log = a.audit_log ?? []
+  const byId = connectedById(a)
+  const history = log.map((e) => `${AUDIT_VERB[e.action] ?? e.action} by ${who(e.by_id)} · ${fmtDateTime(e.at, true)}`).join("\n")
+  return (
+    <span title={history || undefined}>
+      {byId ? <span className="text-slate-800">{who(byId)}</span> : <span className="text-slate-300">—</span>}
+      {log.length > 1 && <span className="block text-sm text-slate-400">{log.length} changes</span>}
+    </span>
+  )
+}
+
+function ConnectedOnCell({ a, showTime }: { a: AccountRow; showTime: boolean }) {
+  const at = connectedAt(a)
+  return at ? <span className="tabular-nums">{fmtDateTime(at, showTime)}</span> : <span className="text-slate-300">—</span>
+}
+
+// Reconnect-needed and the last sync error — a column of their own instead of lines under the address.
+function SyncIssueCell({ a, reconnectHref }: { a: AccountRow; reconnectHref: string }) {
+  if (!needsReconnect(a) && !a.last_sync_error) return <span className="text-slate-300">—</span>
+  return (
+    <div className="space-y-1">
+      {needsReconnect(a) && (
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="text-sm font-semibold bg-red-50 text-red-700 border-red-200 rounded-full px-2.5 py-0.5">Reconnect needed</Badge>
+          <a href={reconnectHref} className="text-sm font-semibold text-red-700 underline" title="Sign in to this Google account again to restore access">Reconnect</a>
+        </div>
+      )}
+      {a.last_sync_error && (
+        <div className="flex items-center gap-1 text-sm text-red-600" title={a.last_sync_error}>
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span className="truncate max-w-[16rem]">{a.last_sync_error}</span>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -205,6 +259,7 @@ export function MailboxesPanel({
   onSynced,
   onSyncFrom,
   showTime,
+  staff,
   loading = false,
 }: {
   accounts: AccountRow[]
@@ -229,6 +284,8 @@ export function MailboxesPanel({
   // Opens the "Sync from date" dialog, optionally starting with specific mailboxes selected.
   onSyncFrom: (accountIds?: string[]) => void
   showTime: boolean
+  // Staff list the page already holds — used to name who connected/linked each mailbox.
+  staff: StaffOption[]
   loading?: boolean
 }) {
   const [categoryFilters, setCategoryFilters] = useState<FilterState | null>(DEFAULT_CATEGORY_FILTERS)
@@ -242,6 +299,7 @@ export function MailboxesPanel({
   const [page, setPage] = useState(0)
 
   const q = search.trim().toLowerCase()
+  const staffNames = useMemo(() => new Map(staff.map((s) => [s.id, s.name])), [staff])
 
   // Jumping here from the failed-mailboxes indicator: drop the client-category filter too, so a failing
   // mailbox on a company the default filter hides can't be missed.
@@ -304,8 +362,12 @@ export function MailboxesPanel({
     [baseRows, view]
   )
 
-  const companySort = useTableSort(companyRows, COMPANY_SORT, [{ key: "company", dir: "asc" }])
-  const accountSort = useTableSort(unlinked, ACCOUNT_SORT, [{ key: "email", dir: "asc" }])
+  // "Connected by" sorts by name, which needs the staff list — so it is added here, not in the static maps.
+  const nameOf = (a: AccountRow) => { const id = connectedById(a); return id ? staffNames.get(String(id)) ?? "" : "" }
+  const companySortBy = useMemo(() => ({ ...COMPANY_SORT, connected_by: (r: CompanyRowData) => r.accounts.map(nameOf).filter(Boolean).sort()[0] ?? "￿" }), [staffNames]) // eslint-disable-line react-hooks/exhaustive-deps
+  const accountSortBy = useMemo(() => ({ ...ACCOUNT_SORT, connected_by: (a: AccountRow) => nameOf(a) || "￿" }), [staffNames]) // eslint-disable-line react-hooks/exhaustive-deps
+  const companySort = useTableSort(companyRows, companySortBy, [{ key: "company", dir: "asc" }])
+  const accountSort = useTableSort(unlinked, accountSortBy, [{ key: "email", dir: "asc" }])
 
   useEffect(() => setPage(0), [view, categoryFilters, q, itemsPerPage, accounts.length])
 
@@ -490,7 +552,10 @@ export function MailboxesPanel({
       <div className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
         <div className="overflow-auto flex-1 min-h-0 custom-scrollbar">
           {!showingUnlinked ? (
-            <table className="w-full min-w-[1900px] border-separate border-spacing-0 text-base">
+            // One sub-row per mailbox: the company's own cells (and its Actions) span them, and every
+            // mailbox detail is its own column — so a company with two mailboxes reads as two aligned lines
+            // instead of one tall cell whose stacked values drift out of line with the columns beside it.
+            <table className="w-full min-w-[2300px] border-separate border-spacing-0 text-base">
               <thead className="sticky top-0 z-30 bg-white shadow-xs">
                 <tr>
                   <SortTh tone="blue" id="#" levels={companySort.levels} onSort={companySort.toggle} className="w-16 text-center">#</SortTh>
@@ -498,177 +563,156 @@ export function MailboxesPanel({
                   <SortTh tone="blue" id="kra_email" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[240px]">KRA email</SortTh>
                   <SortTh tone="blue" id="kra_password" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[200px]">KRA email password</SortTh>
                   <SortTh tone="blue" id="state" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[170px]">Status</SortTh>
-                  <SortTh tone="blue" id="mailboxes" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[340px]">Mailbox</SortTh>
+                  <SortTh tone="blue" id="mailboxes" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[260px]">Mailbox</SortTh>
+                  <SortTh tone="blue" id="connected_by" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[160px]">Connected by</SortTh>
+                  <SortTh tone="blue" id="connected_on" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[140px]">Connected on</SortTh>
                   <SortTh tone="blue" id="emails" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[100px]">Emails</SortTh>
                   <SortTh tone="blue" id="first_email" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[140px]">First email</SortTh>
                   <SortTh tone="blue" id="last_sync" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[150px]">Last sync</SortTh>
-                  <SortTh tone="blue" id="push" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[150px]">Push</SortTh>
+                  <SortTh tone="blue" id="push" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[130px]">Push</SortTh>
+                  <SortTh tone="blue" id="issues" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[180px]">Sync issue</SortTh>
+                  <SortTh tone="blue" id="mailbox_actions" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[300px]">Move / unlink</SortTh>
                   <SortTh tone="blue" id="actions" levels={companySort.levels} onSort={companySort.toggle} className="min-w-[250px] text-left border-r-0">Actions</SortTh>
                 </tr>
               </thead>
               <tbody>
-                {loading && <TableLoading cols={11} />}
+                {loading && <TableLoading cols={15} />}
                 {!loading && pageCompanyRows.map((r, index) => {
                   const cid = String(r.company.id)
                   const key = `c-${cid}`
                   const connectedOnce = r.accounts.length > 0
-                  return (
-                    <tr key={cid} className={cn("transition-colors", zebraRow(index))}>
-                      <td className={cn(TD_CLASS, "text-center text-slate-400 tabular-nums font-medium")}>{start + index + 1}</td>
-                      <td className={TD_CLASS}>
+                  const span = Math.max(1, r.accounts.length)
+                  const rowClass = cn("transition-colors", zebraRow(index))
+                  const dash = <span className="text-slate-300">—</span>
+
+                  // The cells that belong to the company, not to one mailbox — rendered once, spanning every sub-row.
+                  const companyCells = (
+                    <>
+                      <td rowSpan={span} className={cn(TD_CLASS, "text-center text-slate-400 tabular-nums font-medium")}>{start + index + 1}</td>
+                      <td rowSpan={span} className={TD_CLASS}>
                         <div className="font-semibold text-slate-900 leading-snug">{r.company.company_name}</div>
                         {r.company.kra_pin && <div className="text-sm text-slate-500 mt-0.5 font-mono">{r.company.kra_pin}</div>}
                       </td>
-                      <td className={TD_CLASS}>
-                        {r.kraEmail ? <div className="text-slate-800 break-all">{r.kraEmail}</div> : <span className="text-slate-300">—</span>}
+                      <td rowSpan={span} className={TD_CLASS}>
+                        {r.kraEmail ? <div className="text-slate-800 break-all">{r.kraEmail}</div> : dash}
                       </td>
-                      <td className={TD_CLASS}><KraPassword value={r.kraPassword} revealAll={revealPasswords} onSave={(pw) => onKraPasswordSave(cid, pw)} /></td>
-                      <td className={cn(TD_CLASS, "whitespace-nowrap")}><StateBadge state={r.state} /></td>
-                      <td className={TD_CLASS}>
+                      <td rowSpan={span} className={TD_CLASS}><KraPassword value={r.kraPassword} revealAll={revealPasswords} onSave={(pw) => onKraPasswordSave(cid, pw)} /></td>
+                      <td rowSpan={span} className={cn(TD_CLASS, "whitespace-nowrap")}><StateBadge state={r.state} /></td>
+                    </>
+                  )
+
+                  const actionsCell = (
+                    <td rowSpan={span} className={cn(TD_CLASS, "border-r-0")}>
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         {connectedOnce ? (
-                          <div className="space-y-1.5">
-                            {r.accounts.map((a) => (
-                              <div key={a.id}>
-                                <div className="text-slate-800 break-all">{a.email}</div>
-                                {needsReconnect(a) && (
-                                  <div className="flex items-center gap-2 mt-0.5">
-                                    <Badge variant="outline" className="text-sm font-semibold bg-red-50 text-red-700 border-red-200 rounded-full px-2.5 py-0.5">Reconnect needed</Badge>
-                                    <a href={`/api/gmail/connect?company=${encodeURIComponent(cid)}`} className="text-sm font-semibold text-red-700 underline" title="Sign in to this Google account again to restore access">Reconnect</a>
-                                  </div>
-                                )}
-                                {a.last_sync_error && (
-                                  <div className="flex items-center gap-1 text-sm text-red-600 mt-0.5" title={a.last_sync_error}>
-                                    <AlertCircle className="w-4 h-4 shrink-0" />
-                                    <span className="truncate max-w-[16rem]">{a.last_sync_error}</span>
-                                  </div>
-                                )}
-                                <div className="flex items-center gap-1.5 mt-1">
-                                  <SearchSelect
-                                    className="w-48"
-                                    value=""
-                                    disabled={busy === a.id}
-                                    onChange={(companyId) => { if (companyId && companyId !== cid) reassign(a, r.company.company_name, companyId) }}
-                                    placeholder="Move to company…"
-                                    options={linkOptions.filter((o) => o.value !== cid)}
-                                  />
-                                  <Button variant="outline" size="sm" disabled={busy === a.id} onClick={() => reassign(a, r.company.company_name, null)} className="h-9 px-3 gap-1.5 rounded-md border-slate-200 text-base font-medium" title="Detach this mailbox from the company">
-                                    {busy === a.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Unlink className="w-4 h-4 text-slate-600" />} Unlink
-                                  </Button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : <span className="text-slate-300">—</span>}
-                      </td>
-                      <td className={cn(TD_CLASS, "whitespace-nowrap tabular-nums text-slate-600")}>
-                        {connectedOnce ? (
-                          <div className="space-y-1.5">
-                            {r.accounts.map((a) => <div key={a.id}><EmailCountCell a={a} /></div>)}
-                          </div>
-                        ) : <span className="text-slate-300">—</span>}
-                      </td>
-                      <td className={cn(TD_CLASS, "whitespace-nowrap tabular-nums text-slate-600")}>
-                        {connectedOnce ? (
-                          <div className="space-y-1.5">
-                            {r.accounts.map((a) => <div key={a.id}><FirstEmailCell a={a} showTime={showTime} /></div>)}
-                          </div>
-                        ) : <span className="text-slate-300">—</span>}
-                      </td>
-                      <td className={cn(TD_CLASS, "whitespace-nowrap tabular-nums text-slate-600")}>
-                        {connectedOnce ? (
-                          <div className="space-y-1.5">
-                            {r.accounts.map((a) => <div key={a.id}>{a.last_synced_at ? fmtDateTime(a.last_synced_at, showTime) : "Never"}</div>)}
-                          </div>
-                        ) : <span className="text-slate-300">—</span>}
-                      </td>
-                      <td className={cn(TD_CLASS, "whitespace-nowrap")}>
-                        {connectedOnce ? (
-                          <div className="space-y-1.5">
-                            {r.accounts.map((a) => <div key={a.id}><PushBadge live={watchActive(a)} /></div>)}
-                          </div>
-                        ) : <span className="text-slate-300">—</span>}
-                      </td>
-                      <td className={cn(TD_CLASS, "border-r-0")}>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {connectedOnce ? (
-                            <>
-                              <Button variant="outline" size="sm" disabled={busy === key || r.state !== "connected"} onClick={() => sync(key, r.accounts.filter((a) => !needsReconnect(a)))} className="h-9 px-3 gap-1.5 rounded-md border-slate-200 text-base font-medium" title="Check Gmail for new mail now">
-                                {busy === key ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4 text-slate-600" />} Sync
+                          <>
+                            <Button variant="outline" size="sm" disabled={busy === key || r.state !== "connected"} onClick={() => sync(key, r.accounts.filter((a) => !needsReconnect(a)))} className="h-9 px-3 gap-1.5 rounded-md border-slate-200 text-base font-medium" title="Check Gmail for new mail now">
+                              {busy === key ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4 text-slate-600" />} Sync
+                            </Button>
+                            <Button variant="outline" size="sm" disabled={r.state !== "connected"} onClick={() => onSyncFrom(r.accounts.filter((a) => !needsReconnect(a)).map((a) => a.id))} className="h-9 px-3 gap-1.5 rounded-md border-slate-200 text-base font-medium" title="Pull in older mail from a chosen date">
+                              <History className="w-4 h-4 text-slate-600" /> From date
+                            </Button>
+                            <a href={`/api/gmail/connect?company=${encodeURIComponent(cid)}`} title={r.failing > 0 ? "Sign in again to restore access" : "Connect another mailbox for this company"}>
+                              <Button variant="outline" size="sm" className={cn("h-9 px-3 gap-1.5 rounded-md text-base font-medium", r.failing > 0 ? "border-red-300 text-red-800 bg-red-50 hover:bg-red-100" : "border-slate-200")}>
+                                <Plus className="w-4 h-4" /> {r.failing > 0 ? "Reconnect" : "Mailbox"}
                               </Button>
-                              <Button variant="outline" size="sm" disabled={r.state !== "connected"} onClick={() => onSyncFrom(r.accounts.filter((a) => !needsReconnect(a)).map((a) => a.id))} className="h-9 px-3 gap-1.5 rounded-md border-slate-200 text-base font-medium" title="Pull in older mail from a chosen date">
-                                <History className="w-4 h-4 text-slate-600" /> From date
+                            </a>
+                          </>
+                        ) : (
+                          <>
+                            <a href={`/api/gmail/connect?company=${encodeURIComponent(cid)}`}>
+                              <Button size="sm" className="h-9 px-3 gap-1.5 rounded-md bg-custom-blue hover:bg-custom-blue/90 text-white text-base font-semibold">
+                                <Plus className="w-4 h-4" /> Connect Gmail
                               </Button>
-                              <a href={`/api/gmail/connect?company=${encodeURIComponent(cid)}`} title={r.failing > 0 ? "Sign in again to restore access" : "Connect another mailbox for this company"}>
-                                <Button variant="outline" size="sm" className={cn("h-9 px-3 gap-1.5 rounded-md text-base font-medium", r.failing > 0 ? "border-red-300 text-red-800 bg-red-50 hover:bg-red-100" : "border-slate-200")}>
-                                  <Plus className="w-4 h-4" /> {r.failing > 0 ? "Reconnect" : "Mailbox"}
-                                </Button>
-                              </a>
-                            </>
-                          ) : (
-                            <>
-                              <a href={`/api/gmail/connect?company=${encodeURIComponent(cid)}`}>
-                                <Button size="sm" className="h-9 px-3 gap-1.5 rounded-md bg-custom-blue hover:bg-custom-blue/90 text-white text-base font-semibold">
-                                  <Plus className="w-4 h-4" /> Connect Gmail
-                                </Button>
-                              </a>
-                              {counts.unlinked > 0 && (
-                                <SearchSelect
-                                  className="w-52"
-                                  value=""
-                                  disabled={!!busy}
-                                  onChange={(accountId) => { const a = accounts.find((x) => x.id === accountId); if (a) assign(a, cid) }}
-                                  placeholder="Link existing…"
-                                  options={accounts.filter((a) => !a.company_id).map((a) => ({ value: a.id, label: a.email }))}
-                                />
-                              )}
-                            </>
-                          )}
+                            </a>
+                            {counts.unlinked > 0 && (
+                              <SearchSelect
+                                className="w-52"
+                                value=""
+                                disabled={!!busy}
+                                onChange={(accountId) => { const a = accounts.find((x) => x.id === accountId); if (a) assign(a, cid) }}
+                                placeholder="Link existing…"
+                                options={accounts.filter((a) => !a.company_id).map((a) => ({ value: a.id, label: a.email }))}
+                              />
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  )
+
+                  if (!connectedOnce) {
+                    return (
+                      <tr key={cid} className={rowClass}>
+                        {companyCells}
+                        {Array.from({ length: 9 }, (_, i) => <td key={i} className={TD_CLASS}>{dash}</td>)}
+                        {actionsCell}
+                      </tr>
+                    )
+                  }
+
+                  return r.accounts.map((a, i) => (
+                    <tr key={`${cid}-${a.id}`} className={rowClass}>
+                      {i === 0 && companyCells}
+                      <td className={TD_CLASS}><div className="text-slate-800 break-all">{a.email}</div></td>
+                      <td className={cn(TD_CLASS, "whitespace-nowrap")}><ConnectedByCell a={a} staffNames={staffNames} /></td>
+                      <td className={cn(TD_CLASS, "whitespace-nowrap text-slate-600")}><ConnectedOnCell a={a} showTime={showTime} /></td>
+                      <td className={cn(TD_CLASS, "whitespace-nowrap tabular-nums text-slate-600")}><EmailCountCell a={a} /></td>
+                      <td className={cn(TD_CLASS, "whitespace-nowrap tabular-nums text-slate-600")}><FirstEmailCell a={a} showTime={showTime} /></td>
+                      <td className={cn(TD_CLASS, "whitespace-nowrap tabular-nums text-slate-600")}>{a.last_synced_at ? fmtDateTime(a.last_synced_at, showTime) : "Never"}</td>
+                      <td className={cn(TD_CLASS, "whitespace-nowrap")}><PushBadge live={watchActive(a)} /></td>
+                      <td className={TD_CLASS}><SyncIssueCell a={a} reconnectHref={`/api/gmail/connect?company=${encodeURIComponent(cid)}`} /></td>
+                      <td className={TD_CLASS}>
+                        <div className="flex items-center gap-1.5">
+                          <SearchSelect
+                            className="w-48"
+                            value=""
+                            disabled={busy === a.id}
+                            onChange={(companyId) => { if (companyId && companyId !== cid) reassign(a, r.company.company_name, companyId) }}
+                            placeholder="Move to company…"
+                            options={linkOptions.filter((o) => o.value !== cid)}
+                          />
+                          <Button variant="outline" size="sm" disabled={busy === a.id} onClick={() => reassign(a, r.company.company_name, null)} className="h-9 px-3 gap-1.5 rounded-md border-slate-200 text-base font-medium" title="Detach this mailbox from the company">
+                            {busy === a.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Unlink className="w-4 h-4 text-slate-600" />} Unlink
+                          </Button>
                         </div>
                       </td>
+                      {i === 0 && actionsCell}
                     </tr>
-                  )
+                  ))
                 })}
                 {!loading && pageCompanyRows.length === 0 && (
-                  <tr><td colSpan={11} className="py-16 text-center text-slate-400 text-base">
+                  <tr><td colSpan={15} className="py-16 text-center text-slate-400 text-base">
                     {companies.length === 0 ? "No companies loaded." : "No companies match this filter."}
                   </td></tr>
                 )}
               </tbody>
             </table>
           ) : (
-            <table className="w-full min-w-[1150px] border-separate border-spacing-0 text-base">
+            <table className="w-full min-w-[1600px] border-separate border-spacing-0 text-base">
               <thead className="sticky top-0 z-30 bg-white shadow-xs">
                 <tr>
                   <SortTh tone="blue" id="#" levels={accountSort.levels} onSort={accountSort.toggle} className="w-16 text-center">#</SortTh>
                   <SortTh tone="blue" id="email" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[260px]">Mailbox</SortTh>
+                  <SortTh tone="blue" id="connected_by" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[160px]">Connected by</SortTh>
+                  <SortTh tone="blue" id="connected_on" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[140px]">Connected on</SortTh>
                   <SortTh tone="blue" id="emails" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[100px]">Emails</SortTh>
                   <SortTh tone="blue" id="first_email" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[140px]">First email</SortTh>
                   <SortTh tone="blue" id="link" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[300px]">Link to company</SortTh>
                   <SortTh tone="blue" id="last_sync" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[150px]">Last sync</SortTh>
-                  <SortTh tone="blue" id="push" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[150px]">Push</SortTh>
+                  <SortTh tone="blue" id="push" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[130px]">Push</SortTh>
+                  <SortTh tone="blue" id="issues" levels={accountSort.levels} onSort={accountSort.toggle} className="text-left min-w-[180px]">Sync issue</SortTh>
                   <SortTh tone="blue" id="sync" levels={accountSort.levels} onSort={accountSort.toggle} className="w-28 border-r-0">Sync</SortTh>
                 </tr>
               </thead>
               <tbody>
-                {loading && <TableLoading cols={8} />}
+                {loading && <TableLoading cols={11} />}
                 {!loading && pageAccountRows.map((a, index) => (
                   <tr key={a.id} className={cn("transition-colors", zebraRow(index))}>
                     <td className={cn(TD_CLASS, "text-center text-slate-400 tabular-nums font-medium")}>{start + index + 1}</td>
-                    <td className={TD_CLASS}>
-                      <div className="font-semibold text-slate-900">{a.email}</div>
-                      {needsReconnect(a) && (
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <Badge variant="outline" className="text-sm font-semibold bg-red-50 text-red-700 border-red-200 rounded-full px-2.5 py-0.5">Reconnect needed</Badge>
-                          <a href="/api/gmail/connect" className="text-sm font-semibold text-red-700 underline" title="Sign in to this Google account again to restore access">Reconnect</a>
-                        </div>
-                      )}
-                      {a.last_sync_error && (
-                        <div className="flex items-center gap-1 text-sm text-red-600 max-w-xs mt-0.5" title={a.last_sync_error}>
-                          <AlertCircle className="w-4 h-4 shrink-0" />
-                          <span className="truncate">{a.last_sync_error}</span>
-                        </div>
-                      )}
-                    </td>
+                    <td className={TD_CLASS}><div className="font-semibold text-slate-900 break-all">{a.email}</div></td>
+                    <td className={cn(TD_CLASS, "whitespace-nowrap")}><ConnectedByCell a={a} staffNames={staffNames} /></td>
+                    <td className={cn(TD_CLASS, "whitespace-nowrap text-slate-600")}><ConnectedOnCell a={a} showTime={showTime} /></td>
                     <td className={cn(TD_CLASS, "whitespace-nowrap tabular-nums text-slate-600")}><EmailCountCell a={a} /></td>
                     <td className={cn(TD_CLASS, "whitespace-nowrap tabular-nums text-slate-600")}><FirstEmailCell a={a} showTime={showTime} /></td>
                     <td className={TD_CLASS}>
@@ -684,6 +728,7 @@ export function MailboxesPanel({
                     </td>
                     <td className={cn(TD_CLASS, "text-slate-600 whitespace-nowrap tabular-nums")}>{a.last_synced_at ? fmtDateTime(a.last_synced_at, showTime) : "Never"}</td>
                     <td className={cn(TD_CLASS, "whitespace-nowrap")}><PushBadge live={watchActive(a)} /></td>
+                    <td className={TD_CLASS}><SyncIssueCell a={a} reconnectHref="/api/gmail/connect" /></td>
                     <td className={cn(TD_CLASS, "text-center border-r-0")}>
                       <Button variant="outline" size="sm" className="h-10 w-10 p-0 rounded-md border-slate-200 hover:bg-slate-100" disabled={busy === `a-${a.id}` || needsReconnect(a)} onClick={() => sync(`a-${a.id}`, [a])}>
                         {busy === `a-${a.id}` ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCw className="w-5 h-5 text-slate-600" />}
@@ -692,7 +737,7 @@ export function MailboxesPanel({
                   </tr>
                 ))}
                 {!loading && pageAccountRows.length === 0 && (
-                  <tr><td colSpan={8} className="py-16 text-center text-slate-400 text-base">
+                  <tr><td colSpan={11} className="py-16 text-center text-slate-400 text-base">
                     <Link2 className="h-8 w-8 mx-auto mb-2 text-slate-300" />
                     Every mailbox is linked to a company.
                   </td></tr>

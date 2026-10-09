@@ -17,7 +17,7 @@ import { useCurrentUser as useSharedCurrentUser, hasPermission, type AuthUser } 
 
 const navItems = [
     { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard, permission: "dashboard.view" },
-    { title: "Email Inbox", href: "/dashboard/emails", icon: Mail, permission: "emails.view" },
+    { title: "KRA Email Center", href: "/dashboard/emails", icon: Mail, permission: "emails.view" },
     // No permission: immigration alerts are for everyone signed in.
     { title: "Immigration Alerts", href: "/dashboard/immigration-alerts", icon: ShieldAlert },
     {

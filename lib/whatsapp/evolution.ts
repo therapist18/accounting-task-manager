@@ -83,3 +83,73 @@ export async function sendWhatsAppText(recipient: string, message: string): Prom
     return { success: false, error: message_ };
   }
 }
+
+/**
+ * A recipient as kra-tools' report routing stores it, ready for Evolution: a group JID or a
+ * 254-number passes through; a WhatsApp group invite code / link (letters, no '@') is resolved to
+ * the group's JID first — the same handling as kra-tools' EvolutionAPIDirectService.
+ */
+export async function resolveWhatsAppRecipient(recipient: string): Promise<string> {
+  const value = (recipient || "").trim();
+  if (!value || value.includes("@") || !/[a-zA-Z]/.test(value)) {
+    // Bare numbers: 07XXXXXXXX / +254… -> 254XXXXXXXXX.
+    const digits = value.replace(/\D/g, "");
+    if (/^0\d{9}$/.test(digits)) return `254${digits.slice(1)}`;
+    return value.includes("@") ? value : digits || value;
+  }
+  const config = readConfig();
+  const code = value.replace("https://chat.whatsapp.com/", "");
+  try {
+    const response = await fetch(
+      `${config.baseUrl}/group/inviteInfo/${encodeURIComponent(config.instanceName)}?inviteCode=${encodeURIComponent(code)}`,
+      { headers: { apikey: config.apiKey }, signal: AbortSignal.timeout(15000) },
+    );
+    if (response.ok) {
+      const info = await response.json();
+      if (info?.id) return info.id;
+    }
+  } catch (error) {
+    console.warn("[whatsapp] could not resolve group invite code:", error);
+  }
+  return value;
+}
+
+/**
+ * Sends a document (PDF / Excel) via Evolution's sendMedia, as base64 — the same endpoint kra-tools
+ * uses for slips and receipts. Returns a result rather than throwing, like sendWhatsAppText.
+ */
+export async function sendWhatsAppDocument(
+  recipient: string,
+  file: { base64: string; fileName: string; mimeType: string },
+  caption?: string,
+): Promise<SendResult> {
+  const config = readConfig();
+  if (!config.apiKey) return { success: false, error: "WhatsApp is not configured (missing Evolution API key)." };
+  if (!recipient) return { success: false, error: "No recipient." };
+
+  try {
+    const number = await resolveWhatsAppRecipient(recipient);
+    const response = await fetch(`${config.baseUrl}/message/sendMedia/${encodeURIComponent(config.instanceName)}`, {
+      method: "POST",
+      headers: { apikey: config.apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        number,
+        mediatype: "document",
+        mimetype: file.mimeType,
+        media: file.base64,
+        fileName: file.fileName,
+        ...(caption ? { caption } : {}),
+      }),
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      console.error("[whatsapp] Evolution API rejected the document:", response.status, body);
+      return { success: false, error: `WhatsApp send failed (${response.status})${body ? `: ${body.slice(0, 200)}` : ""}` };
+    }
+    return { success: true };
+  } catch (error) {
+    console.error("[whatsapp] document send failed:", error);
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
+  }
+}

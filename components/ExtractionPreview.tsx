@@ -699,7 +699,7 @@ export const ExtractionPreview = ({
   };
 
   const content = (
-    <ResizablePanelGroup id={panelGroupInstanceId.groupId} orientation="horizontal" className="h-full w-full min-h-0">
+    <ResizablePanelGroup id={panelGroupInstanceId.groupId} direction="horizontal" className="flex flex-row h-full w-full min-h-0">
       {/* Preview Panel */}
       <ResizablePanel id={panelGroupInstanceId.panel1} order={1} defaultSize={40} minSize={20} maxSize={60} className="h-full min-h-0 flex flex-col">
         <div className="h-full max-h-full flex flex-col min-h-0 overflow-hidden shadow-sm">
@@ -774,7 +774,7 @@ export const ExtractionPreview = ({
         </div>
       </ResizablePanel>
 
-      <ResizableHandle />
+      <ResizableHandle withHandle />
 
       {/* Extracted Data Panel */}
       <ResizablePanel id={panelGroupInstanceId.panel2} order={2} defaultSize={60} minSize={30} maxSize={80} className="h-full min-h-0 flex flex-col">

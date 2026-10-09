@@ -128,6 +128,18 @@ export interface AccountRow {
   // most mail (certificates, acknowledgements, system noise) is deliberately never stored at all.
   email_count?: number
   first_email_at?: string | null
+  created_at?: string | null
+  // Audit (20261013000000): who connected it, and every connect / reconnect / link / move / unlink since.
+  created_by_id?: string | null
+  audit_log?: MailboxAuditEntry[]
+}
+
+export interface MailboxAuditEntry {
+  action: "connected" | "reconnected" | "linked" | "moved" | "unlinked"
+  by_id: string | null
+  at: string
+  company_id?: string
+  from_company_id?: string
 }
 
 // Sync errors that mean Google no longer accepts this mailbox's stored login (revoked, expired, password

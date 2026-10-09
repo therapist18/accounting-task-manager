@@ -14,8 +14,11 @@ import {
   TaskBasketStatus,
   TASK_BASKET_MODULE_LABELS,
   TASK_BASKET_STATUS_LABELS,
-  formatMissingAccount,
+  outstandingLines,
 } from "@/lib/supabase/taskBasket"
+import { CompanyPanels, matchesCompanySelection } from "../emails/components/CompanyPanels"
+import BasketSummary from "./components/BasketSummary"
+import SendReportDialog from "./components/SendReportDialog"
 // The app-wide Client Category Filter (ACC / IMM / Audit / Sheria, by client and operational status)
 // plus its predicate — the same pair the Email Center's company panels and sidebars use, so a
 // category selected here means the same thing as it does everywhere else.
@@ -54,12 +57,8 @@ const EXPORT_COLUMNS: ExcelColumn<TaskBasketItem>[] = [
     value: (r) => r.contact_summary.map((c) => `${c.name} (${c.channel}: ${c.value})`).join("\n") || "No contact configured",
   },
   { header: "Reason", width: 40, wrap: true, value: (r) => r.reason },
-  {
-    header: "Outstanding accounts", width: 40, wrap: true,
-    value: (r) => r.missing_accounts
-      .map((a) => `${formatMissingAccount(a)}${a.status === "noted" ? " — noted" : ""}`)
-      .join("\n"),
-  },
+  { header: "Deadline", width: 12, value: (r) => r.deadline || "—" },
+  { header: "Outstanding", width: 44, wrap: true, value: (r) => outstandingLines(r).join("\n") },
   {
     header: "Comments", width: 40, wrap: true,
     value: (r) => r.comments
@@ -117,7 +116,9 @@ export default function TaskBasketPage() {
     [companies]
   )
 
-  const visibleItems = useMemo(() => {
+  // Everything the toolbar filters let through — before the company sidebar narrows it, so the
+  // sidebar's per-company counts describe the whole filtered basket.
+  const filteredItems = useMemo(() => {
     const byComments = commentFilter === "all"
       ? items
       : items.filter((item) => item.has_comments === (commentFilter === "with"))
@@ -130,6 +131,22 @@ export default function TaskBasketPage() {
         companyMatchesCategoryFilters(companyById.get(String(item.company_id)), categoryFilters)
     )
   }, [items, companyById, categoryFilters, commentFilter])
+
+  // Company sidebar (the Email Center's CompanyPanels): [] = all companies.
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([])
+  const visibleItems = useMemo(
+    () => filteredItems.filter((item) => matchesCompanySelection(String(item.company_id), selectedCompanyIds)),
+    [filteredItems, selectedCompanyIds]
+  )
+
+  // Items (one row per company/module) or Summary (one row per company, every module).
+  const [view, setView] = useState<"items" | "summary">("items")
+  // Report dialog: undefined = closed, null = overall report, number = that company.
+  const [reportCompanyId, setReportCompanyId] = useState<number | null | undefined>(undefined)
+  const reportItems = useMemo(
+    () => (reportCompanyId === undefined ? [] : reportCompanyId === null ? visibleItems : visibleItems.filter((i) => i.company_id === reportCompanyId)),
+    [reportCompanyId, visibleItems]
+  )
 
   const openCount = useMemo(() => items.filter((i) => i.status === "open").length, [items])
   const categoryActive = !!categoryFilters && Object.values(categoryFilters.categories || {}).some(Boolean)
@@ -336,19 +353,66 @@ export default function TaskBasketPage() {
         </div>
       )}
 
-      {/* Body — the table owns its scrolling and fills whatever height is left */}
+      {/* Body — company sidebar on the left (narrows both views), Items or Summary on the right */}
       <div className="px-3 py-3 flex-1 min-h-0 flex flex-col overflow-hidden">
-        <div className="flex flex-col flex-1 min-h-0 border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden">
-        <TaskBasketTable
-          items={visibleItems}
-          loading={loading}
-          selectedIds={selectedIds}
-          onSelectionChange={setSelectedIds}
-          onItemResolved={(id) => setItems((prev) => prev.map((i) => (i.id === id ? { ...i, status: "resolved" } : i)))}
-          onItemDeleted={(id) => setItems((prev) => prev.filter((i) => i.id !== id))}
-        />
-        </div>
+        <CompanyPanels
+          companies={companies}
+          companyIds={filteredItems.map((i) => String(i.company_id))}
+          selected={selectedCompanyIds}
+          onSelect={setSelectedCompanyIds}
+        >
+          <div className="flex shrink-0 items-center gap-1 border-b border-slate-200 bg-white px-3 py-2">
+            {(["items", "summary"] as const).map((v) => (
+              <Button
+                key={v}
+                size="sm"
+                variant="outline"
+                onClick={() => setView(v)}
+                className={cn(PILL_BUTTON_CLASS, view === v && PILL_BUTTON_ACTIVE_CLASS)}
+              >
+                {v === "items" ? "Items" : "Summary"}
+              </Button>
+            ))}
+            <span className="ml-2 text-sm text-slate-500">
+              {visibleItems.length} item{visibleItems.length === 1 ? "" : "s"}
+              {selectedCompanyIds.length ? ` · ${selectedCompanyIds.length} compan${selectedCompanyIds.length === 1 ? "y" : "ies"} selected` : ""}
+            </span>
+            {selectedCompanyIds.length === 1 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className={cn(PILL_BUTTON_CLASS, "ml-auto")}
+                onClick={() => setReportCompanyId(Number(selectedCompanyIds[0]))}
+                disabled={!visibleItems.length}
+              >
+                Send report
+              </Button>
+            )}
+          </div>
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            {view === "summary" ? (
+              <BasketSummary items={visibleItems} onReport={setReportCompanyId} />
+            ) : (
+              <TaskBasketTable
+                items={visibleItems}
+                loading={loading}
+                selectedIds={selectedIds}
+                onSelectionChange={setSelectedIds}
+                onItemResolved={(id) => setItems((prev) => prev.map((i) => (i.id === id ? { ...i, status: "resolved" } : i)))}
+                onItemDeleted={(id) => setItems((prev) => prev.filter((i) => i.id !== id))}
+              />
+            )}
+          </div>
+        </CompanyPanels>
       </div>
+
+      <SendReportDialog
+        open={reportCompanyId !== undefined}
+        onOpenChange={(open) => { if (!open) setReportCompanyId(undefined) }}
+        companyName={reportCompanyId == null ? null : (reportItems[0]?.company_name ?? companyById.get(String(reportCompanyId))?.company_name ?? `Company #${reportCompanyId}`)}
+        items={reportItems}
+        cycleMonth={cycleMonth}
+      />
 
       <BulkResolveDialog
         items={selectedItems}

@@ -747,7 +747,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
   // UploadModal uses for its "Stop Extraction"-capable initial pass) and persists the result
   // through the existing onSave path — same persistence handleSave/handlePreviewSave already use,
   // so a retry is just "re-extract, then save" rather than a separate write path of its own.
-  const handleRetryExtraction = useCallback(async (targetDoc: any) => {
+  const handleRetryExtraction = useCallback(async (targetDoc: any, forceAI: boolean = false) => {
     if (!onSave) return;
     const currentDoc = previewDocuments.find(d => d.documentId === targetDoc?.documentId) || targetDoc;
     if (!currentDoc?.fileUrl) {
@@ -760,7 +760,9 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
         currentDoc.fields || [],
         currentDoc.documentName,
         undefined,
-        currentDoc.fileName
+        currentDoc.fileName,
+        undefined,
+        forceAI
       );
       const extractedData = typeof result.extractedData === 'string'
         ? JSON.parse(result.extractedData)
@@ -1488,49 +1490,20 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
 
     if (readOnly) {
       const viewBtn = linkedDocument && (
-        <Dialog>
-          <div className="relative inline-flex">
-            <DialogTrigger asChild>
-              <Button variant="ghost" size="icon" className={cn(hasMismatchedDocumentType ? "text-red-600 hover:bg-red-50" : "text-green-600 hover:bg-green-50", btnSizeClass)} title={hasMismatchedDocumentType ? "This document's type may not match this stage — click to review" : "View document details"} onClick={handleViewDocument}>
-                <Eye className={iconSizeClass} />
-              </Button>
-            </DialogTrigger>
-            {hasMismatchedDocumentType && (
-              <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white pointer-events-none" />
-            )}
-          </div>
-          <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
-            <DialogHeader className="p-4 border-b">
-              <DialogTitle className="text-lg">
-                <div className="flex items-center justify-between">
-                  <div>{stage?.name && <span>{stage.name}: </span>}{task?.name}{task?.client_name && ` - ${task.client_name}`}</div>
-                  <div className="text-sm font-normal text-muted-foreground">{previewDocuments.length} document{previewDocuments.length !== 1 ? 's' : ''}</div>
-                </div>
-              </DialogTitle>
-            </DialogHeader>
-            <div className="flex-1 overflow-auto p-4">
-              {previewDocuments.length > 0 ? (
-                previewDocuments.map((doc) => (
-                  <div key={doc.documentId} className="border rounded-lg overflow-hidden mb-4">
-                    <div className="p-4 bg-gray-50 border-b">
-                      <h3 className="font-medium">{doc.documentName || 'Document'}</h3>
-                    </div>
-                    <div className="p-4">
-                      <ExtractionPreview documentId={doc.documentId} documentName={doc.documentName} extractedData={doc.extractedData || {}} fields={doc.fields || []} fileUrl={doc.fileUrl} fileName={doc.fileName} onSave={handlePreviewSave} onDelete={handleDeleteDocument} onRetryExtraction={() => handleRetryExtraction(doc)} uploadedAt={doc.created_at} expanded={true} showSaveButton={false} readOnly={true} type={doc.type} file={doc.file} onDataChange={(fieldName, value) => handlePreviewDataChange(doc.documentId, fieldName, value)} />
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="h-full flex items-center justify-center">
-                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /><p className="ml-4 text-muted-foreground">Loading documents...</p>
-                </div>
-              )}
-            </div>
-            <div className="p-4 border-t flex justify-end">
-              <Button variant="default" onClick={() => setIsPreviewOpen(false)}>Close</Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <div className="relative inline-flex">
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(hasMismatchedDocumentType ? "text-red-600 hover:bg-red-50" : "text-green-600 hover:bg-green-50", btnSizeClass)}
+            title={hasMismatchedDocumentType ? "This document's type may not match this stage — click to review" : "View document details"}
+            onClick={handleViewDocument}
+          >
+            <Eye className={iconSizeClass} />
+          </Button>
+          {hasMismatchedDocumentType && (
+            <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white pointer-events-none" />
+          )}
+        </div>
       );
 
       if (isCompact) {
@@ -1580,49 +1553,20 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     }
 
     const viewBtn = linkedDocument && (
-      <Dialog>
-        <div className="relative inline-flex">
-          <DialogTrigger asChild>
-            <Button variant="ghost" size="icon" className={cn(hasMismatchedDocumentType ? "text-red-600 hover:bg-red-50" : "text-green-600 hover:bg-green-50", btnSizeClass)} title={hasMismatchedDocumentType ? "This document's type may not match this stage — click to review" : "View document details"} onClick={handleViewDocument}>
-              <Eye className={iconSizeClass} />
-            </Button>
-          </DialogTrigger>
-          {hasMismatchedDocumentType && (
-            <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white pointer-events-none" />
-          )}
-        </div>
-        <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
-          <DialogHeader className="p-4 border-b">
-            <DialogTitle className="text-lg">
-              <div className="flex items-center justify-between">
-                <div>{stage?.name && <span>{stage.name}: </span>}{task?.name}{task?.client_name && ` - ${task.client_name}`}</div>
-                <div className="text-sm font-normal text-muted-foreground">{previewDocuments.length} document{previewDocuments.length !== 1 ? 's' : ''}</div>
-              </div>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 overflow-auto p-4">
-            {previewDocuments.length > 0 ? (
-              previewDocuments.map((doc) => (
-                <div key={doc.documentId} className="border rounded-lg overflow-hidden mb-4">
-                  <div className="p-4 bg-gray-50 border-b">
-                    <h3 className="font-medium">{doc.documentName || 'Document'}</h3>
-                  </div>
-                  <div className="p-4">
-                    <ExtractionPreview documentId={doc.documentId} documentName={doc.documentName} extractedData={doc.extractedData || {}} fields={doc.fields || []} fileUrl={doc.fileUrl} fileName={doc.fileName} onSave={handlePreviewSave} onDelete={handleDeleteDocument} onRetryExtraction={() => handleRetryExtraction(doc)} uploadedAt={doc.created_at} expanded={true} showSaveButton={!!onSave} readOnly={false} type={doc.type} file={doc.file} onDataChange={(fieldName, value) => handlePreviewDataChange(doc.documentId, fieldName, value)} />
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="h-full flex items-center justify-center">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /><p className="ml-4 text-muted-foreground">Loading documents...</p>
-              </div>
-            )}
-          </div>
-          <div className="p-4 border-t flex justify-end">
-            <Button variant="default" onClick={() => setIsPreviewOpen(false)}>Close</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <div className="relative inline-flex">
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(hasMismatchedDocumentType ? "text-red-600 hover:bg-red-50" : "text-green-600 hover:bg-green-50", btnSizeClass)}
+          title={hasMismatchedDocumentType ? "This document's type may not match this stage — click to review" : "View document details"}
+          onClick={handleViewDocument}
+        >
+          <Eye className={iconSizeClass} />
+        </Button>
+        {hasMismatchedDocumentType && (
+          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white pointer-events-none" />
+        )}
+      </div>
     );
 
     const uploadBtn = requiresUpload && (
@@ -1857,49 +1801,20 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
     const iconSizeClass = "h-3.5 w-3.5";
 
     const viewBtn = linkedDocument && (
-      <Dialog>
-        <div className="relative inline-flex">
-          <DialogTrigger asChild>
-            <Button variant="ghost" size="icon" className={cn(hasMismatchedDocumentType ? "text-red-600 hover:bg-red-50" : "text-green-600 hover:bg-green-50", btnSizeClass)} title={hasMismatchedDocumentType ? "This document's type may not match this stage — click to review" : "View document details"} onClick={handleViewDocument}>
-              <Eye className={iconSizeClass} />
-            </Button>
-          </DialogTrigger>
-          {hasMismatchedDocumentType && (
-            <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white pointer-events-none" />
-          )}
-        </div>
-        <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
-          <DialogHeader className="p-4 border-b">
-            <DialogTitle className="text-lg">
-              <div className="flex items-center justify-between">
-                <div>{stage?.name && <span>{stage.name}: </span>}{task?.name}{task?.client_name && ` - ${task.client_name}`}</div>
-                <div className="text-sm font-normal text-muted-foreground">{previewDocuments.length} document{previewDocuments.length !== 1 ? 's' : ''}</div>
-              </div>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 overflow-auto p-4">
-            {previewDocuments.length > 0 ? (
-              previewDocuments.map((doc) => (
-                <div key={doc.documentId} className="border rounded-lg overflow-hidden mb-4">
-                  <div className="p-4 bg-gray-50 border-b">
-                    <h3 className="font-medium">{doc.documentName || 'Document'}</h3>
-                  </div>
-                  <div className="p-4">
-                    <ExtractionPreview documentId={doc.documentId} documentName={doc.documentName} extractedData={doc.extractedData || {}} fields={doc.fields || []} fileUrl={doc.fileUrl} fileName={doc.fileName} onSave={handlePreviewSave} onDelete={handleDeleteDocument} onRetryExtraction={() => handleRetryExtraction(doc)} uploadedAt={doc.created_at} expanded={true} showSaveButton={!readOnly && !!onSave} readOnly={readOnly} type={doc.type} file={doc.file} onDataChange={(fieldName, value) => handlePreviewDataChange(doc.documentId, fieldName, value)} />
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="h-full flex items-center justify-center">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /><p className="ml-4 text-muted-foreground">Loading documents...</p>
-              </div>
-            )}
-          </div>
-          <div className="p-4 border-t flex justify-end">
-            <Button variant="default" onClick={() => setIsPreviewOpen(false)}>Close</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <div className="relative inline-flex">
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(hasMismatchedDocumentType ? "text-red-600 hover:bg-red-50" : "text-green-600 hover:bg-green-50", btnSizeClass)}
+          title={hasMismatchedDocumentType ? "This document's type may not match this stage — click to review" : "View document details"}
+          onClick={handleViewDocument}
+        >
+          <Eye className={iconSizeClass} />
+        </Button>
+        {hasMismatchedDocumentType && (
+          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white pointer-events-none" />
+        )}
+      </div>
     );
 
     const uploadBtn = !readOnly && requiresUpload && (
@@ -2300,6 +2215,93 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
           }}
         />
       )}
+      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+        <DialogContent className="max-w-[95vw] sm:max-w-[95vw] w-full h-[95vh] flex flex-col p-0 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
+          <DialogHeader className="p-4 border-b flex flex-row items-center justify-between space-y-0 shrink-0">
+            <DialogTitle className="text-lg">
+              <div className="flex items-center gap-2">
+                <span>{stage?.name && `${stage.name}: `}{task?.name}{task?.client_name && ` - ${task.client_name}`}</span>
+                <span className="text-sm font-normal text-muted-foreground">({previewDocuments.length} document{previewDocuments.length !== 1 ? 's' : ''})</span>
+              </div>
+            </DialogTitle>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setIsPreviewOpen(false)}>Close</Button>
+            </div>
+          </DialogHeader>
+
+          {/* Document History / Switcher Tabs if multiple docs */}
+          {previewDocuments.length > 1 && (
+            <div className="flex items-center gap-1.5 px-4 py-2 border-b bg-slate-50 overflow-x-auto shrink-0">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 shrink-0 mr-1">
+                Documents ({previewDocuments.length}):
+              </span>
+              {previewDocuments.map((docEntry: any, idx: number) => {
+                const isSelected = idx === currentPreviewIndex;
+                const dateLabel = docEntry.created_at
+                  ? `Uploaded ${format(new Date(docEntry.created_at), 'dd/MM/yyyy')}`
+                  : `Doc #${idx + 1}`;
+                return (
+                  <button
+                    key={docEntry.documentId || idx}
+                    type="button"
+                    onClick={() => setCurrentPreviewIndex(idx)}
+                    className={cn(
+                      "shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
+                      isSelected
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                    )}
+                  >
+                    {idx === 0 && <span className="font-bold">Current</span>}
+                    <span>{docEntry.documentName ? `${docEntry.documentName} • ` : ''}{dateLabel}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Active document full-height container */}
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {previewDocuments.length > 0 && previewDocuments[currentPreviewIndex] ? (
+              (() => {
+                const currentDoc = previewDocuments[currentPreviewIndex];
+                return (
+                  <ExtractionPreview
+                    key={`${currentDoc.documentId}-${currentDoc.created_at || ''}`}
+                    documentId={currentDoc.documentId}
+                    documentName={currentDoc.documentName}
+                    extractedData={currentDoc.extractedData || {}}
+                    fields={currentDoc.fields || []}
+                    fileUrl={currentDoc.fileUrl}
+                    fileName={currentDoc.fileName}
+                    onSave={!readOnly && onSave ? handlePreviewSave : undefined}
+                    onDelete={!readOnly ? handleDeleteDocument : undefined}
+                    onRetryExtraction={() => handleRetryExtraction(currentDoc, false)}
+                    onRetryExtractionWithAI={() => handleRetryExtraction(currentDoc, true)}
+                    uploadedAt={currentDoc.created_at}
+                    expanded={true}
+                    showSaveButton={!readOnly && !!onSave}
+                    readOnly={readOnly}
+                    type={currentDoc.type}
+                    file={currentDoc.file}
+                    supabase={supabase}
+                    downloadNaming={{
+                      entityName: clientName || taskName || task?.client_name || task?.name,
+                      shortName: currentDoc.documentName
+                    }}
+                    onDataChange={(fieldName, value) => handlePreviewDataChange(currentDoc.documentId, fieldName, value)}
+                  />
+                );
+              })()
+            ) : (
+              <div className="h-full flex items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                <p className="ml-4 text-muted-foreground">Loading documents...</p>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

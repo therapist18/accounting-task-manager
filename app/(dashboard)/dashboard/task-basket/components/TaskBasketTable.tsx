@@ -41,7 +41,7 @@ interface TaskBasketTableProps {
   onSelectionChange: (ids: Set<string>) => void;
 }
 
-const COLUMN_COUNT = 12;
+const COLUMN_COUNT = 13;
 
 // Days an open item has been sitting in the basket — the "Overdue" column and its sort key. Resolved
 // rows have no overdue clock, so they sort to 0 rather than to a negative age.
@@ -61,6 +61,7 @@ const ACCESSORS: Record<string, (item: TaskBasketItem) => string | number> = {
   companyId: (i) => i.company_id,
   module: (i) => TASK_BASKET_MODULE_LABELS[i.module],
   cycle: (i) => i.cycle_month,
+  deadline: (i) => i.deadline || "",
   contacts: (i) => i.contact_summary.length,
   reason: (i) => i.reason,
   triggered: (i) => i.triggered_at,
@@ -79,6 +80,7 @@ const STATS_COLUMNS: StatsColumn<TaskBasketItem>[] = [
   { id: "companyId" },
   { id: "module" },
   { id: "cycle" },
+  { id: "deadline" },
   { id: "contacts" },
   { id: "reason" },
   { id: "triggered" },
@@ -150,11 +152,19 @@ function HistoryList({ history }: { history: TaskBasketHistoryEntry[] }) {
           <span className="font-medium text-slate-700">
             {format(new Date(entry.checked_at), "dd MMM yyyy, HH:mm")}
           </span>
-          {entry.still_pending === false ? (
+          {entry.event === "report_sent" ? (
+            <span className="text-indigo-700">
+              Report sent{entry.channels?.length ? ` by ${entry.channels.join(" + ")}` : ""}
+              {entry.recipients?.length ? ` to ${entry.recipients.join(", ")}` : ""}
+              {entry.file_name ? ` (${entry.file_name})` : ""}
+            </span>
+          ) : entry.still_pending === false ? (
             <span className="text-sky-700">
               {entry.event === "late_reception"
                 ? "Files recorded after the deadline — received late"
-                : "Uploaded after the deadline — received late"}
+                : entry.event === "late_receipts"
+                  ? "All payment receipts received after the deadline — received late"
+                  : "Uploaded after the deadline — received late"}
               {typeof entry.received_accounts === "number" &&
               typeof entry.total_accounts === "number"
                 ? ` (${entry.received_accounts}/${entry.total_accounts} statements received)`
@@ -315,6 +325,15 @@ export default function TaskBasketTable({
                       Cycle
                     </SortTh>
                     <SortTh
+                      id="deadline"
+                      levels={levels}
+                      onSort={toggle}
+                      tone="blue"
+                      className="text-left"
+                    >
+                      Deadline
+                    </SortTh>
+                    <SortTh
                       id="contacts"
                       levels={levels}
                       onSort={toggle}
@@ -423,6 +442,9 @@ export default function TaskBasketTable({
                             {TASK_BASKET_MODULE_LABELS[item.module]}
                           </td>
                           <td className={TD_CLASS}>{item.cycle_month}</td>
+                          <td className={cn(TD_CLASS, "whitespace-nowrap")}>
+                            {item.deadline ? format(new Date(`${item.deadline}T00:00:00`), "dd MMM yyyy") : <span className="text-slate-300">—</span>}
+                          </td>
                           <td className={TD_CLASS}>
                             <ContactCell item={item} />
                           </td>
@@ -439,6 +461,22 @@ export default function TaskBasketTable({
                                     <span className="font-mono">{formatMissingAccount(account)}</span>
                                     {account.status === "noted" && (
                                       <span className="ml-1 text-violet-700">· noted</span>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                            {item.missing_taxes.length > 0 && (
+                              <ul className="mt-1 space-y-0.5">
+                                {item.missing_taxes.map((tax) => (
+                                  <li key={tax.tax} className="text-xs">
+                                    <span className="font-medium text-slate-700">{tax.label}</span>{" "}
+                                    {tax.kra_paid ? (
+                                      <span className="text-green-700">
+                                        paid on KRA{tax.kra_payment_date ? ` ${tax.kra_payment_date}` : ""} · proof missing
+                                      </span>
+                                    ) : (
+                                      <span className="text-red-600">not paid</span>
                                     )}
                                   </li>
                                 ))}
@@ -578,6 +616,34 @@ export default function TaskBasketTable({
                                               </span>
                                             ) : (
                                               <span className="text-red-600"> — missing</span>
+                                            )}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </>
+                                  )}
+                                  {item.deadline && (
+                                    <p className="mt-2 text-sm text-slate-700">
+                                      <span className="font-semibold uppercase tracking-wide text-slate-500">Deadline </span>
+                                      {format(new Date(`${item.deadline}T00:00:00`), "EEEE dd MMM yyyy")}
+                                    </p>
+                                  )}
+                                  {item.missing_taxes.length > 0 && (
+                                    <>
+                                      <p className="mt-2 mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                                        Outstanding receipts ({item.missing_taxes.length})
+                                      </p>
+                                      <ul className="space-y-0.5">
+                                        {item.missing_taxes.map((tax) => (
+                                          <li key={tax.tax} className="text-sm text-slate-700">
+                                            {tax.label}
+                                            {tax.kra_paid ? (
+                                              <span className="text-green-700">
+                                                {" "}— paid on KRA{tax.kra_payment_date ? ` ${tax.kra_payment_date}` : ""}
+                                                {tax.kra_amount != null ? ` (KES ${tax.kra_amount.toLocaleString("en-KE", { minimumFractionDigits: 2 })})` : ""}, proof missing
+                                              </span>
+                                            ) : (
+                                              <span className="text-red-600"> — not paid on KRA, proof missing</span>
                                             )}
                                           </li>
                                         ))}
