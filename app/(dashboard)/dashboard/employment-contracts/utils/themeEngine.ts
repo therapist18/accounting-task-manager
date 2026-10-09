@@ -80,6 +80,10 @@ const BASE_SECTION_STYLES = `
      legible in print/PDF, not just on screen. */
   .ph-entity-company { background: #dbeafe; border-radius: 3px; padding: 0 3px; }
   .ph-entity-employee { background: #dcfce7; border-radius: 3px; padding: 0 3px; }
+  /* Contract terms - values from the profile settings / per-contract fields
+     (dates, notice and probation periods, hours, ...), not tied to either
+     entity's record. */
+  .ph-entity-contract { background: #fef3c7; border-radius: 3px; padding: 0 3px; }
   /* An unresolved token still renders in its entity color (dimmed), so a
      blank spot reads as "this Company/Employee fact is missing" rather than
      losing the color coding entirely once there's nothing to show. */

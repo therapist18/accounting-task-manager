@@ -153,7 +153,10 @@ export function buildStandardPlaceholderValues(
     // ContractPreview.tsx's toolbar button, which writes it into
     // offer.settings_overrides) - defaults to shown, since that's the
     // behavior every contract had before the toggle existed.
-    statutory_deductions_table: s.show_statutory_table === false ? '' : buildStatutoryDeductionsTable(grossSalary, payrollStatutoryLine),
+    // s.statutory_deductions_manual: figures the user typed in (editor's
+    // Statutory Deductions field, offer.settings_overrides) - win over the
+    // payroll line and the computed fallback.
+    statutory_deductions_table: s.show_statutory_table === false ? '' : buildStatutoryDeductionsTable(grossSalary, payrollStatutoryLine, s.statutory_deductions_manual || null),
   };
 
   const generic: Record<string, string> = {};

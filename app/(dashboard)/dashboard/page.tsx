@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { CheckCircle, FileText, Users, Sparkles, LayoutDashboard, ArrowRight, UserPlus, FileUp, ClipboardList, Building2, Inbox } from "lucide-react"
+import { Bell, CheckCircle, FileText, Users, Sparkles, LayoutDashboard, ArrowRight, UserPlus, FileUp, ClipboardList, Building2, Inbox } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { createServerSupabaseClient } from "@/lib/supabase"
@@ -14,6 +14,7 @@ const quickLinks = [
   { label: "Task Basket", href: "/dashboard/task-basket", icon: Inbox, desc: "Companies past a deadline" },
   { label: "Upload File", href: "/dashboard/letters", icon: FileUp, desc: "Import documents" },
   { label: "Departments", href: "/dashboard/departments", icon: Building2, desc: "Manage departments" },
+  { label: "Immigration Notifications", href: "/dashboard/immigration-notifications", icon: Bell, desc: "Approvals, invoices & passes" },
 ]
 
 async function getOpenTaskBasketCount(): Promise<number> {

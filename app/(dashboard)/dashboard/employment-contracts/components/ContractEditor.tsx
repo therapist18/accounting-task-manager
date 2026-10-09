@@ -22,6 +22,9 @@ import type { StatutoryDeductionsBreakdown } from '../utils/statutoryDeductions'
 import { fetchClauses, EcClause } from '../utils/clauseLibraryData';
 import { detectTokens } from '../utils/placeholderDetection';
 import { SearchableSelect } from './SearchableSelect';
+import { fieldSelectOptions } from '../utils/fieldOptions';
+import { StatutoryDeductionsField } from './StatutoryDeductionsField';
+import type { ManualStatutoryFigures } from '../utils/statutoryDeductions';
 import { MasterFieldEditControl, MultiSourceValueControl, SourceValueEditor, linkedMasterFieldIds } from './MasterFieldEditControl';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -368,6 +371,18 @@ export function ContractEditor({
         return { value: o.id, label: profileName ? `${name} - ${profileName}` : name };
       });
   }, [companyOffers, companyEmployees, profiles, employee?.individualId]);
+
+  // Manual statutory figures live in settings_overrides (beside the
+  // show_statutory_table toggle). Any raw-HTML override of the table typed
+  // into the old text input is cleared so it can't shadow them.
+  const handleStatutoryManualChange = (figures: ManualStatutoryFigures | undefined) => {
+    const settingsOverrides = { ...(offer.settings_overrides || {}) };
+    if (figures) settingsOverrides.statutory_deductions_manual = figures;
+    else delete settingsOverrides.statutory_deductions_manual;
+    const placeholderOverrides = { ...(offer.placeholder_overrides || {}) };
+    delete placeholderOverrides.statutory_deductions_table;
+    updateOffer({ settings_overrides: settingsOverrides, placeholder_overrides: placeholderOverrides });
+  };
 
   const handlePlaceholderOverride = (key: string, value: string | undefined) => {
     const next = { ...(offer.placeholder_overrides || {}) };
@@ -893,6 +908,15 @@ export function ContractEditor({
                             companyId={companyId}
                             onOverride={(v) => handlePlaceholderOverride(p.key, v)}
                             onRefresh={refreshMasterFieldValues}
+                            valueCell={p.key === 'statutory_deductions_table' ? (
+                              <StatutoryDeductionsField
+                                grossSalary={placeholderValues.gross_salary || ''}
+                                payrollLine={payrollStatutoryLine}
+                                manual={effectiveSettings.statutory_deductions_manual || null}
+                                hidden={effectiveSettings.show_statutory_table === false}
+                                onManualChange={handleStatutoryManualChange}
+                              />
+                            ) : undefined}
                           />
                         );
                       })}
@@ -943,7 +967,7 @@ function FieldRow({ index, label, token, source, isMissing, children }: {
 // separate card per field.
 // ----------------------------------------------------------------------
 
-const FIELD_TH = 'px-3 py-2.5 text-left text-base font-semibold whitespace-nowrap border-b border-r border-slate-200/80 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200';
+const FIELD_TH = 'px-3 py-2.5 text-left text-base font-semibold whitespace-nowrap border-b border-r border-white/20 dark:border-slate-700 bg-custom-blue dark:bg-blue-900 text-white';
 const FIELD_TD = 'px-3 py-2.5 text-base text-slate-700 dark:text-slate-200 border-b border-r border-slate-200/70 dark:border-slate-800 align-middle';
 const FIELD_COLUMNS = ['#', 'Placeholder Field', 'Data Source', 'Resolved Output', ''];
 
@@ -1085,7 +1109,8 @@ function PlaceholderRow({
   employee,
   companyId,
   onOverride,
-  onRefresh
+  onRefresh,
+  valueCell
 }: {
   index: number;
   placeholder: EcPlaceholder;
@@ -1098,6 +1123,9 @@ function PlaceholderRow({
   companyId: string | null;
   onOverride: (val: string | undefined) => void;
   onRefresh: () => void;
+  // Replaces the default value control for fields with their own editor
+  // (e.g. the statutory deductions table).
+  valueCell?: ReactNode;
 }) {
   const effectiveVal = overrideValue ?? value;
   const sourceLabel = getSourceLabel(p, masterFields);
@@ -1135,7 +1163,9 @@ function PlaceholderRow({
       </td>
 
       <td className={FIELD_TD}>
-        {editingFieldId != null ? (
+        {valueCell ? (
+          valueCell
+        ) : editingFieldId != null ? (
           <SourceValueEditor
             placeholder={p}
             masterFieldId={editingFieldId}
@@ -1159,6 +1189,23 @@ function PlaceholderRow({
             onOverride={p.editable ? onOverride : undefined}
             onSaved={onRefresh}
           />
+        ) : p.editable && fieldSelectOptions(p.key, effectiveVal) ? (
+          (() => {
+            const select = fieldSelectOptions(p.key, effectiveVal)!;
+            return (
+              <SearchableSelect
+                value={select.selected}
+                onChange={(v) => onOverride(v)}
+                placeholder={p.required ? 'Select (required)...' : 'Select...'}
+                searchPlaceholder={`Search ${p.label.toLowerCase()}...`}
+                options={select.options.map((o) => ({ value: o, label: o }))}
+                className={cn(
+                  'h-9 rounded-md',
+                  isOverridden && 'border-indigo-200 bg-indigo-50/40 text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-900/10 dark:text-indigo-100'
+                )}
+              />
+            );
+          })()
         ) : p.editable ? (
           <Input
             className={cn(

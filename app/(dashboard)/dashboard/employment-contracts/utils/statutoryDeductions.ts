@@ -116,7 +116,7 @@ function formatKes(amount: number): string {
 // Renders a breakdown as the same `details-table` markup convention every
 // other clause table in the library uses, regardless of whether it came from
 // a real Payroll run or the local fallback formula.
-function renderStatutoryDeductionsTable(b: StatutoryDeductionsBreakdown): string {
+export function renderStatutoryDeductionsTable(b: StatutoryDeductionsBreakdown): string {
   return `<table class="details-table statutory-deductions-table">
   <tr><td class="label-cell">Gross Salary</td><td>KES ${formatKes(b.grossSalary)}</td></tr>
   <tr><td class="label-cell">Taxable Pay</td><td>KES ${formatKes(b.taxablePay)}</td></tr>
@@ -138,12 +138,66 @@ function renderStatutoryDeductionsTable(b: StatutoryDeductionsBreakdown): string
 // used elsewhere - see project memory on Employment Contracts Placeholders).
 export function buildStatutoryDeductionsTable(
   grossSalaryRaw: string | number | null | undefined,
-  payrollLine?: StatutoryDeductionsBreakdown | null
+  payrollLine?: StatutoryDeductionsBreakdown | null,
+  manual?: ManualStatutoryFigures | null
 ): string {
-  if (payrollLine) return renderStatutoryDeductionsTable(payrollLine);
+  const resolved = resolveStatutoryDeductions(grossSalaryRaw, payrollLine, manual);
+  return resolved ? renderStatutoryDeductionsTable(resolved.breakdown) : '';
+}
+
+// Figures typed in by the user (ContractEditor's Statutory Deductions field)
+// when Payroll has no run and the gross salary couldn't be computed from -
+// or when the computed figures are wrong for this employee. Stored per
+// contract in offer.settings_overrides.statutory_deductions_manual (next to
+// the show_statutory_table toggle). Taxable Pay, total deductions and Net
+// Pay are always derived from these, so the table stays internally
+// consistent; NITA stays out of Net Pay as in computeStatutoryDeductions.
+export interface ManualStatutoryFigures {
+  grossSalary: number;
+  paye: number;
+  shif: number;
+  ahl: number;
+  nssf: number;
+  nita: number;
+}
+
+export function breakdownFromManual(m: ManualStatutoryFigures): StatutoryDeductionsBreakdown {
+  const n = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : parseFloat(String(v ?? '').replace(/,/g, '')) || 0);
+  const grossSalary = n(m.grossSalary);
+  const nssf = n(m.nssf);
+  const shif = n(m.shif);
+  const ahl = n(m.ahl);
+  const paye = n(m.paye);
+  const totalDeductions = nssf + shif + ahl + paye;
+  return {
+    grossSalary,
+    nssf,
+    shif,
+    ahl,
+    taxablePay: Math.max(0, grossSalary - nssf - shif - ahl),
+    paye,
+    nita: n(m.nita),
+    totalDeductions,
+    netPay: grossSalary - totalDeductions,
+  };
+}
+
+export type StatutorySource = 'manual' | 'payroll' | 'computed';
+
+// Which figures the table shows, in precedence order: the user's manual
+// figures, then the real Payroll line, then the local formula from gross
+// salary. null when none is available (no manual entry, no payroll run,
+// no usable gross salary).
+export function resolveStatutoryDeductions(
+  grossSalaryRaw: string | number | null | undefined,
+  payrollLine?: StatutoryDeductionsBreakdown | null,
+  manual?: ManualStatutoryFigures | null
+): { breakdown: StatutoryDeductionsBreakdown; source: StatutorySource } | null {
+  if (manual) return { breakdown: breakdownFromManual(manual), source: 'manual' };
+  if (payrollLine) return { breakdown: payrollLine, source: 'payroll' };
 
   const grossSalary = typeof grossSalaryRaw === 'number' ? grossSalaryRaw : parseFloat(String(grossSalaryRaw || '').replace(/,/g, ''));
-  if (!grossSalary || grossSalary <= 0) return '';
+  if (!grossSalary || grossSalary <= 0) return null;
 
-  return renderStatutoryDeductionsTable(computeStatutoryDeductions(grossSalary));
+  return { breakdown: computeStatutoryDeductions(grossSalary), source: 'computed' };
 }

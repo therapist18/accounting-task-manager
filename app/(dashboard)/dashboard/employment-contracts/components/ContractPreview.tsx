@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ContractThemePanel } from './ContractThemePanel';
 import { ContractThemeSettings, DEFAULT_CONTRACT_THEME, applyThemeToHtml } from '../utils/themeEngine';
+import { removeEmptyLists } from '../utils/htmlCleanup';
 import { applyWordSafeDomFixes } from '@/lib/documentTheme';
 import {
   resolveEffectiveSettings, resolveEffectiveClauses, assembleContractHtml,
@@ -86,14 +87,25 @@ function buildHighlightedPreviewValues(
     // stray empty <span> artifact behind. Entity-color-coding and the
     // missing-value placeholder both only make sense for a scalar value
     // anyway, so these keys always render raw and unwrapped.
-    if (LIST_MARKUP_KEYS.has(key)) return value;
+    //
+    // An empty list value renders nothing in the export - removeEmptyLists
+    // (utils/htmlCleanup.ts) then drops the empty bullet/list/heading it
+    // leaves behind - and a "[Label]" hint in the preview so the gap is
+    // visible while the contract is being put together.
+    if (LIST_MARKUP_KEYS.has(key)) {
+      if (value) return value;
+      return forExport ? '' : `<span class="ph-entity-missing">[${label || key}]</span>`;
+    }
 
     const isMissing = !value;
     const display = isMissing ? (forExport ? MISSING_VALUE_PLACEHOLDER : `[${label || key}]`) : value;
     const missingClass = isMissing ? ' ph-entity-missing' : '';
     if (entity === 'company') return `<span class="ph-entity-company${missingClass}">${display}</span>`;
     if (entity === 'employee') return `<span class="ph-entity-employee${missingClass}">${display}</span>`;
-    return display;
+    // Everything else (contract terms - dates, notice/probation periods,
+    // working hours, salary figures, ...) is highlighted too, in its own
+    // color, so every filled-in value is marked in the preview and export.
+    return `<span class="ph-entity-contract${missingClass}">${display}</span>`;
   };
 
   const highlighted: Record<string, string> = {};
@@ -343,10 +355,22 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   const contentSignature = JSON.stringify({ employeeId: employee?.individualId, offer, jobProfileId: selectedJobProfile?.id, themeSettings });
   const isSaved = savedSignatureRef.current !== null && savedSignatureRef.current === contentSignature;
 
-  const mergedValues = withLetterContext({ ...effectiveSettings, ...employeeValues });
-  const exportMergedValues = withLetterContext({ ...effectiveSettings, ...exportEmployeeValues });
+  // Settings keys with no ec_placeholders row still fill {{tokens}} - give
+  // them the same contract-term highlight as registered fields.
+  const highlightedSettings: Record<string, any> = {};
+  for (const [key, value] of Object.entries(effectiveSettings)) {
+    highlightedSettings[key] = (typeof value === 'string' && value) || typeof value === 'number'
+      ? `<span class="ph-entity-contract">${value}</span>`
+      : value;
+  }
+  const mergedValues = withLetterContext({ ...highlightedSettings, ...employeeValues });
+  const exportMergedValues = withLetterContext({ ...highlightedSettings, ...exportEmployeeValues });
 
-  const themedHtml = bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings), mergedValues) : '';
+  // removeEmptyLists drops the blank bullets / empty lists / orphaned
+  // sub-headings that empty list placeholders leave (see htmlCleanup.ts).
+  // Memoized on the rendered string - it re-parses the document.
+  const themedHtmlRaw = bodyHtml ? replacePlaceholders(applyThemeToHtml(bodyHtml, themeSettings), mergedValues) : '';
+  const themedHtml = useMemo(() => removeEmptyLists(themedHtmlRaw), [themedHtmlRaw]);
 
   // Renamed id="section-x"/href="#section-x" to a "pdf-section-x" namespace,
   // distinct from the live on-screen preview's own id="section-x" elements
@@ -357,12 +381,14 @@ export function ContractPreview({ contractData, setContractData, selectedJobProf
   // resulting PDF's Table of Contents links pointed at nothing. Word export
   // doesn't need this: it's a separate file with no shared DOM to collide
   // with, which is why its bookmarks (see buildOutput below) already worked.
-  const exportThemedHtml = exportBodyHtml
+  const exportThemedHtmlRaw = exportBodyHtml
     ? replacePlaceholders(applyThemeToHtml(exportBodyHtml, themeSettings), exportMergedValues)
         .replace(/id="section-/g, 'id="pdf-section-')
         .replace(/href="#section-/g, 'href="#pdf-section-')
     : '';
-  const wordSafeHtml = exportBodyHtml ? replacePlaceholders(applyThemeToHtml(exportBodyHtml, themeSettings, { wordSafe: true }), exportMergedValues) : '';
+  const exportThemedHtml = useMemo(() => removeEmptyLists(exportThemedHtmlRaw), [exportThemedHtmlRaw]);
+  const wordSafeHtmlRaw = exportBodyHtml ? replacePlaceholders(applyThemeToHtml(exportBodyHtml, themeSettings, { wordSafe: true }), exportMergedValues) : '';
+  const wordSafeHtml = useMemo(() => removeEmptyLists(wordSafeHtmlRaw), [wordSafeHtmlRaw]);
 
   const updateThemeSettings = (settings: ContractThemeSettings) => {
     setThemeOverride(settings);

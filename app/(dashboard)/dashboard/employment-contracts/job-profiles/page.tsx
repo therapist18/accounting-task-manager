@@ -43,6 +43,7 @@ import { EcClause, fetchClauses } from '../utils/clauseLibraryData';
 import { buildDefaultClauseMap } from '../utils/clauseEngine';
 import type { ContractEmployeeInfo } from '../utils/data';
 import { CONTRACT_SECTIONS } from '../utils/contractStructure';
+import { NOTICE_OPTIONS } from '../utils/fieldOptions';
 import { DEFAULT_DEPARTMENT_OPTIONS, EMPLOYMENT_TYPE_OPTIONS, withCurrentValue } from '../utils/profileOptions';
 import { ContractPreview } from '../components/ContractPreview';
 import { DEFAULT_CONTRACT_THEME, type ContractThemeSettings } from '../utils/themeEngine';
@@ -102,7 +103,6 @@ function getProfileVisual(department: string | null) {
 }
 
 const PROBATION_OPTIONS = ['Not Applicable', '1 Month', '3 Months', '6 Months'];
-const NOTICE_OPTIONS = ['1 Week', '2 Weeks', '1 Month', '2 Months', '3 Months'];
 const LEAVE_DAY_OPTIONS = ['7 Days', '14 Days', '21 Days', '30 Days', 'According to Company Policy'];
 const ALLOWANCE_OPTIONS = ['No', 'Optional', 'Yes', 'According to Company Policy'];
 
