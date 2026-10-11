@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
-import { Download, Loader2, RotateCcw, Search } from "lucide-react"
+import { Download, Loader2, Play, RotateCcw, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -13,6 +13,7 @@ import { ColumnVisibilityButton, useColumnVisibility } from "../emails/component
 import { ITEM_COLUMNS, ITEM_VALUE, NotificationsTable } from "./components/NotificationsTable"
 import { exportItemsToExcel } from "./components/exportNotifications"
 import { STATUS_TAB, STATUS_TAB_FALLBACK } from "./components/statusStyles"
+import { LinkEfnsItemDialog } from "./components/LinkEfnsItemDialog"
 
 // Immigration Notifications: everything the EFNS immigration automation has recorded — both the
 // notification updates (approved / issued / invoice / upload required …) and the payment invoices
@@ -43,6 +44,8 @@ export default function ImmigrationNotificationsPage() {
   const [search, setSearch] = useState("")
   const [exportRows, setExportRows] = useState<ImmigrationItem[]>([])
   const [exporting, setExporting] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [linkItem, setLinkItem] = useState<ImmigrationItem | null>(null)
   const columns = useColumnVisibility(ITEM_COLUMNS.map(({ id, label }) => ({ id, label })))
 
   const load = useCallback(async () => {
@@ -99,6 +102,30 @@ export default function ImmigrationNotificationsPage() {
   const tabLabel = permit === ALL ? "All permit types" : permit
   const scopeLabel = `${tabLabel}${statusFilter === ALL ? "" : ` · ${statusFilter}`}`
 
+  const handleRunFiling = async () => {
+    setRunning(true)
+    try {
+      const res = await fetch("/api/immigration-notifications/file-job", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      })
+      const json = await res.json()
+      if (!res.ok || json.success === false) throw new Error(json.error || "Auto-filing run failed")
+      const { processed, filed } = json
+      toast.success(
+        processed === 0
+          ? "Nothing to file — every item has already been looked at"
+          : `Filed ${filed} of ${processed} item${processed === 1 ? "" : "s"}`,
+      )
+      await load()
+    } catch (e: any) {
+      toast.error(e?.message || "Auto-filing run failed")
+    } finally {
+      setRunning(false)
+    }
+  }
+
   const handleExport = async () => {
     setExporting(true)
     try {
@@ -153,6 +180,17 @@ export default function ImmigrationNotificationsPage() {
           <Button variant="outline" size="sm" onClick={load} disabled={loading} className={PILL_BUTTON_CLASS} title="Reload from the database">
             {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <RotateCcw className="h-5 w-5" />}
             Refresh
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRunFiling}
+            disabled={running || loading}
+            className={PILL_BUTTON_CLASS}
+            title="Match each not-yet-filed item to its task and file the PDF onto the matching stage document"
+          >
+            {running ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
+            Run filing
           </Button>
         </div>
       </div>
@@ -210,9 +248,16 @@ export default function ImmigrationNotificationsPage() {
           loading={loading}
           isVisible={columns.isVisible}
           onFilteredChange={setExportRows}
+          onLink={setLinkItem}
           resetKey={`${permit}|${statusFilter}|${q}`}
         />
       </div>
+
+      <LinkEfnsItemDialog
+        item={linkItem}
+        onOpenChange={(open) => !open && setLinkItem(null)}
+        onLinked={load}
+      />
     </div>
   )
 }

@@ -8,10 +8,20 @@
 // way it reads in the WhatsApp group, and the permit-type tabs match what the group already uses.
 
 import { getClientSupabaseInstance } from "@/lib/supabase"
+import type { EfnsFilingRecord, EfnsFilingStatus } from "@/lib/efnsFiling"
 
 export const IMMIGRATION_BUCKET = "immigration"
-const NOTIFICATION_PDF_PREFIX = "daily-extractions/notification_pdfs"
-const PAYMENT_PDF_PREFIX = "daily-extractions/payment_instructions"
+export const NOTIFICATION_PDF_PREFIX = "daily-extractions/notification_pdfs"
+export const PAYMENT_PDF_PREFIX = "daily-extractions/payment_instructions"
+
+// The storage path of an item's source PDF inside the immigration bucket, or null when the row
+// carries no file name. Kept here (not in the mapper) so the filing job can download the exact
+// same object the page links to, without re-deriving the prefix.
+export function immigrationPdfPath(kind: ItemKind, pdfName: string | null | undefined): string | null {
+  if (!pdfName) return null
+  const prefix = kind === "notification" ? NOTIFICATION_PDF_PREFIX : PAYMENT_PDF_PREFIX
+  return `${prefix}/${pdfName}`
+}
 
 export type ItemKind = "notification" | "payment"
 
@@ -38,6 +48,24 @@ export interface ImmigrationItem {
   amount: string
   pdfUrl: string | null
   pdfName: string | null
+  // ── EFNS filing linkage (see lib/efnsFiling.ts + supabase migration 20261015000000) ──
+  // The immigration file number the portal printed, matched against tm_tasks.r_number.
+  fileNumber: string | null
+  // Applicant / company as printed on the portal page — the fallback match keys when file_number
+  // is absent.
+  printableApplicant: string | null
+  printableCompany: string | null
+  // Where this item is in the auto-filing pipeline (null = not looked at yet).
+  filingStatus: EfnsFilingStatus | null
+  // The resolved link: which task/stage/individual/document it was filed to, and how it matched.
+  filing: EfnsFilingRecord | null
+  filedAt: string | null
+}
+
+// Trim a raw column to a printable string, or null when blank.
+const nullableStr = (v: unknown): string | null => {
+  const s = String(v ?? "").trim()
+  return s || null
 }
 
 // ── status ──────────────────────────────────────────────────────────────────
@@ -186,6 +214,12 @@ function mapNotification(row: Record<string, any>): ImmigrationItem {
     amount: "",
     pdfUrl: pdfName ? storageUrl(`${NOTIFICATION_PDF_PREFIX}/${pdfName}`) : null,
     pdfName,
+    fileNumber: nullableStr(row.file_number),
+    printableApplicant: nullableStr(row.printable_applicant),
+    printableCompany: nullableStr(row.printable_company),
+    filingStatus: (row.filing_status as EfnsFilingStatus) ?? null,
+    filing: (row.filing as EfnsFilingRecord) ?? null,
+    filedAt: nullableStr(row.filed_at),
   }
 }
 
@@ -212,6 +246,12 @@ function mapPayment(row: Record<string, any>): ImmigrationItem {
     amount: amount != null && amount !== "" ? String(amount) : "",
     pdfUrl: pdfName ? storageUrl(`${PAYMENT_PDF_PREFIX}/${pdfName}`) : null,
     pdfName,
+    fileNumber: nullableStr(row.file_number),
+    printableApplicant: nullableStr(row.printable_applicant),
+    printableCompany: nullableStr(row.printable_company),
+    filingStatus: (row.filing_status as EfnsFilingStatus) ?? null,
+    filing: (row.filing as EfnsFilingRecord) ?? null,
+    filedAt: nullableStr(row.filed_at),
   }
 }
 

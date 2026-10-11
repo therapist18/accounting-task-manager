@@ -22,6 +22,7 @@ import type { Stage, TimeConfig, StageDocument, DocumentExtraction, EntityOption
 import { createKYCDocument, updateKYCDocument } from "../kycDocuments"
 import { toast } from "@/lib/hooks/use-toast"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { EfnsTriggerPicker } from "./efns-trigger-picker"
 
 type Stage = any; type TimeConfig = any; type StageDocument = any; type DocumentExtraction = any; type EntityOption = any;
 
@@ -334,7 +335,8 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
             linkedKycDocument: doc.linkedKycDocument,
             hasAutomation: !!doc.hasAutomation,
             // UPDATE: We only save targetEntities. automationLinks is removed.
-            targetEntities: doc.targetEntities || []
+            targetEntities: doc.targetEntities || [],
+            efnsTrigger: doc.efnsTrigger ?? null
           };
         })
       );
@@ -1458,6 +1460,8 @@ function DocumentCard({ doc, docIndex, entityOptions, loadingEntities, kycDocume
             </div>
           )}
         </div>
+        <Separator className="my-4" />
+        <EfnsTriggerPicker docId={doc.id} value={doc.efnsTrigger} onChange={(v) => onUpdateDocument(doc.id, { efnsTrigger: v })} />
       </CardContent>
     </Card>
   );

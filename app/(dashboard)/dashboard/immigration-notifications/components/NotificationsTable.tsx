@@ -1,10 +1,11 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Eye } from "lucide-react"
+import { Eye, Link2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { ImmigrationItem } from "@/lib/immigrationNotifications"
+import { EFNS_FILING_BADGE, EFNS_FILING_LABELS } from "@/lib/efnsFiling"
 // The Email Center's table toolkit, so this table sorts, filters, stripes and paginates exactly like
 // every other table in the app.
 import { fmtDateTime } from "../../emails/components/shared"
@@ -23,7 +24,9 @@ export const ITEM_COLUMNS = [
   { id: "date", label: "Date", filter: true },
   { id: "message", label: "Message / Fee", filter: true },
   { id: "created", label: "Recorded", filter: true },
+  { id: "filing", label: "Filing", filter: true },
   { id: "pdf", label: "Document", filter: false },
+  { id: "link", label: "", filter: false },
 ] as const
 
 export type ItemColumnId = (typeof ITEM_COLUMNS)[number]["id"]
@@ -37,7 +40,14 @@ export const ITEM_VALUE: Record<ItemColumnId, (i: ImmigrationItem) => string> = 
   date: (i) => i.date,
   message: (i) => [i.message, i.amount ? `Amount: ${i.amount}` : ""].filter(Boolean).join(" · "),
   created: (i) => fmtDateTime(i.iso),
+  filing: (i) => {
+    if (!i.filingStatus) return "Not processed"
+    const base = EFNS_FILING_LABELS[i.filingStatus]
+    const task = i.filing?.task_id ? ` · Task #${i.filing.task_id}` : ""
+    return `${base}${task}`
+  },
   pdf: (i) => i.pdfName || "",
+  link: () => "",
 }
 
 const SORT_ACCESSORS: Record<string, (i: ImmigrationItem) => string | number> = {
@@ -57,6 +67,7 @@ export function NotificationsTable({
   isVisible,
   onFilteredChange,
   resetKey,
+  onLink,
 }: {
   items: ImmigrationItem[]
   loading: boolean
@@ -65,6 +76,8 @@ export function NotificationsTable({
   onFilteredChange?: (rows: ImmigrationItem[]) => void
   // Changing this (tab / search) jumps back to the first page.
   resetKey?: string
+  // Opens the manual link dialog for a row.
+  onLink?: (item: ImmigrationItem) => void
 }) {
   const [itemsPerPage, setItemsPerPage] = useState(50)
   const [page, setPage] = useState(0)
@@ -113,6 +126,43 @@ export function NotificationsTable({
           </Button>
         ) : (
           <span className="text-slate-400">—</span>
+        )
+      case "filing":
+        if (!i.filingStatus) {
+          return <span className="text-slate-400">Not processed</span>
+        }
+        return (
+          <div className="flex flex-col items-start gap-0.5">
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium",
+                EFNS_FILING_BADGE[i.filingStatus],
+              )}
+            >
+              {EFNS_FILING_LABELS[i.filingStatus]}
+            </span>
+            {i.filing?.task_id && (
+              <span className="text-[11px] text-slate-500">
+                → Task #{i.filing.task_id}
+                {i.filing.individual_id != null ? ` · Ind #${i.filing.individual_id}` : ""}
+              </span>
+            )}
+            {i.filing?.error && <span className="text-[11px] text-red-500 max-w-[220px] line-clamp-2" title={i.filing.error}>{i.filing.error}</span>}
+          </div>
+        )
+      case "link":
+        return (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onLink?.(i)}
+            disabled={!onLink}
+            title={i.filingStatus === "filed" ? "Re-link or file to another task" : "Link this record to a task, stage and individual"}
+            className="h-8 -ml-2 gap-1.5 px-2 font-medium text-blue-600 hover:bg-blue-50 hover:text-blue-700"
+          >
+            <Link2 className="h-4 w-4" />
+            {i.filingStatus === "filed" ? "Re-link" : "Link"}
+          </Button>
         )
       default:
         return ITEM_VALUE[id](i) || <span className="text-slate-400">—</span>

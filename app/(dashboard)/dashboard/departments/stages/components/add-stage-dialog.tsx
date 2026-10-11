@@ -20,7 +20,8 @@ import { DocumentExtraction, Stage, StageDocument, TimeConfig, NewStage, EntityO
 import { createKYCDocument } from "../kycDocuments"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command"
-import { toast } from "@/lib/hooks/use-toast"
+import { EfnsTriggerPicker } from "./efns-trigger-picker"
+import type { EfnsTrigger } from "@/lib/efnsFiling"
 
 type DocumentExtraction = any; type Stage = any; type StageDocument = any; type TimeConfig = any; type NewStage = any; type EntityOption = any; type DepartmentOption = any;
 
@@ -343,7 +344,8 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
                                 kycId: currentKycId,
                                 linkedKycDocument: currentKycId,
                                 hasAutomation: !!doc.hasAutomation,
-                                targetEntities: doc.targetEntities || []
+                                targetEntities: doc.targetEntities || [],
+                                efnsTrigger: doc.efnsTrigger ?? null
                             };
                         })
                     );
@@ -995,7 +997,12 @@ function DocumentCard({ doc, docIndex, onUpdateDocument, onRemoveDocument, onAdd
                 {doc.isSpecial && <div className="space-y-2 p-4 bg-amber-50 border border-amber-300 rounded-lg"><Label className="font-medium flex items-center gap-2 text-amber-800"><Star className="h-4 w-4 text-amber-500" />Target Entities</Label><MultiEntityPicker entities={entityOptions} selectedEntities={doc.targetEntities || []} onSelectionChange={(selected) => onUpdateDocument(doc.id, { targetEntities: selected })} loading={loadingEntities} /></div>}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4"><div className="space-y-2"><Label>Name *</Label><Input value={doc.name || ''} onChange={(e) => onUpdateDocument(doc.id, { name: e.target.value })} disabled={isLinkedDocument} /></div><div className="space-y-2"><Label>Doc Type</Label><Select value={doc.documentType} onValueChange={(v) => onUpdateDocument(doc.id, { documentType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="upload">Upload</SelectItem><SelectItem value="extraction">Extraction</SelectItem><SelectItem value="both">Both</SelectItem></SelectContent></Select></div><div className="space-y-2"><Label>Input Type</Label><Select value={doc.inputType || 'file'} onValueChange={(v) => onUpdateDocument(doc.id, { inputType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="file">File</SelectItem><SelectItem value="message">Message</SelectItem><SelectItem value="both">Both</SelectItem></SelectContent></Select></div><div className="space-y-2"><Label>System Type</Label><Select value={doc.docType || 'normal_doc'} onValueChange={(v) => onUpdateDocument(doc.id, { docType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="form">Form</SelectItem><SelectItem value="normal_doc">Normal Doc</SelectItem></SelectContent></Select></div></div>
                 <div className="space-y-2"><Label>Description</Label><Textarea value={doc.description || ''} onChange={(e) => onUpdateDocument(doc.id, { description: e.target.value })} rows={2} /></div>
-                <div className="flex items-center space-x-2"><Checkbox checked={doc.isRequired} onCheckedChange={(c) => onUpdateDocument(doc.id, { isRequired: !!c })} /><Label>This document is required</Label></div>
+                                    <div className="flex items-center space-x-2"><Checkbox checked={doc.isRequired} onCheckedChange={(c) => onUpdateDocument(doc.id, { isRequired: !!c })} /><Label>This document is required</Label></div>
+
+                                    {/* EFNS auto-filing */}
+                                    <div className="pt-2">
+                                        <EfnsTriggerPicker docId={doc.id} value={doc.efnsTrigger} onChange={(v) => onUpdateDocument(doc.id, { efnsTrigger: v })} />
+                                    </div>
 
                 <Separator className="my-4" />
                 <div className="space-y-4">

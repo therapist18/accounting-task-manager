@@ -1,5 +1,6 @@
 // @ts-nocheck
 import supabase from '@/lib/supabase/client'
+import type { EfnsTrigger } from "@/lib/efnsFiling"
 
 export type StageInputType =
     | 'document'    // Linked to a document (current behavior)
@@ -106,6 +107,8 @@ export interface StageDocument {
     validationMessage?: string
     // New: Whether this field is editable after submission
     isEditableAfterSubmission?: boolean
+    // EFNS auto-filing trigger for this document (set on the stage's document)
+    efnsTrigger?: EfnsTrigger | null
 }
 
 export interface EntityOption {
