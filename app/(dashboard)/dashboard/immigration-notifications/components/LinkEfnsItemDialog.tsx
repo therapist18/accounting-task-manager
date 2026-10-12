@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
-import type { ImmigrationItem } from "@/lib/immigrationNotifications"
+import { RELATIONSHIP_LABEL, type ImmigrationItem } from "@/lib/immigrationNotifications"
 import { EFNS_FILING_LABELS } from "@/lib/efnsFiling"
 import { KIND_BADGE, KIND_LABEL } from "./statusStyles"
 
@@ -29,6 +29,15 @@ interface CandidateTask {
   department_id: number | null
   status: string
   is_terminal?: boolean
+}
+
+// What the server searched: only the item's permit-type job levels, or every task.
+interface SearchScope {
+  mode: "job_level" | "all"
+  permitGroup: string
+  subdepartmentIds: number[] | null
+  // Set when the search is also down to specific classes (e.g. Citizenship → Lawful Residence).
+  classIds?: string[] | null
 }
 
 interface TaskStage {
@@ -64,6 +73,9 @@ export function LinkEfnsItemDialog({
   const [selectedStageId, setSelectedStageId] = useState<string>("")
   const [selectedKycId, setSelectedKycId] = useState<string>("")
   const [filing, setFiling] = useState(false)
+  // Search every task instead of just the permit type's job levels.
+  const [searchAll, setSearchAll] = useState(false)
+  const [scope, setScope] = useState<SearchScope | null>(null)
   const openedForRef = useRef<string>("")
 
   const open = !!item
@@ -74,16 +86,17 @@ export function LinkEfnsItemDialog({
     if (!open || !item) return
     if (openedForRef.current === key) return
     openedForRef.current = key
-    setSearch(item.printableApplicant || item.name || "")
-    setSubmittedSearch(item.printableApplicant || item.name || "")
+    setSearch(item.applicant || "")
+    setSubmittedSearch(item.applicant || "")
+    setSearchAll(false)
     setSelectedTask(null)
     setStages([])
     setSelectedStageId("")
     setSelectedKycId("")
-    void loadSuggestions(item, "")
+    void loadSuggestions(item, "", false)
   }, [open, item, key])
 
-  const loadSuggestions = useCallback(async (target: ImmigrationItem, query: string) => {
+  const loadSuggestions = useCallback(async (target: ImmigrationItem, query: string, all: boolean) => {
     setLoadingSuggestions(true)
     try {
       const params = new URLSearchParams({
@@ -91,8 +104,10 @@ export function LinkEfnsItemDialog({
         id: String(target.id),
       })
       if (query.trim()) params.set("q", query.trim())
+      if (all) params.set("scope", "all")
       const json = await fetchJson(`/api/immigration-notifications/file?${params}`)
       setSuggestions(json.suggestions || [])
+      setScope(json.scope || null)
     } catch (e: any) {
       toast.error(e?.message || "Failed to load matching tasks")
       setSuggestions([])
@@ -104,8 +119,15 @@ export function LinkEfnsItemDialog({
   const handleSearch = useCallback(() => {
     if (!item) return
     setSubmittedSearch(search.trim())
-    void loadSuggestions(item, search)
-  }, [item, search, loadSuggestions])
+    void loadSuggestions(item, search, searchAll)
+  }, [item, search, searchAll, loadSuggestions])
+
+  const toggleSearchAll = useCallback(() => {
+    if (!item) return
+    const next = !searchAll
+    setSearchAll(next)
+    void loadSuggestions(item, submittedSearch, next)
+  }, [item, searchAll, submittedSearch, loadSuggestions])
 
   const selectTask = useCallback(async (task: CandidateTask) => {
     setSelectedTask(task)
@@ -181,7 +203,13 @@ export function LinkEfnsItemDialog({
           </DialogTitle>
           {item && (
             <p className="text-sm text-slate-500 mt-1">
-              {item.name}
+              <span className="font-medium text-slate-700">{item.applicant}</span>
+              <span className="ml-2 text-slate-500">
+                · {RELATIONSHIP_LABEL[item.relationship]}
+                {item.principalName ? ` of ${item.principalName}` : ""}
+                {item.companyName ? ` · ${item.companyName}` : ""}
+              </span>
+              <span className="ml-2">· {item.permitGroup} · {item.status}</span>
               {item.fileNumber ? <span className="ml-2 font-medium text-slate-600">R-N: {item.fileNumber}</span> : null}
               {item.filingStatus ? (
                 <span className="ml-2">· {EFNS_FILING_LABELS[item.filingStatus]}</span>
@@ -210,11 +238,26 @@ export function LinkEfnsItemDialog({
                 Search
               </Button>
               {search !== submittedSearch && (
-                <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => { setSearch(submittedSearch); if (item) void loadSuggestions(item, submittedSearch); }} title="Reset search">
+                <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => { setSearch(submittedSearch); if (item) void loadSuggestions(item, submittedSearch, searchAll); }} title="Reset search">
                   <X className="h-4 w-4" />
                 </Button>
               )}
             </div>
+
+            {scope && (
+              <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+                <span>
+                  {scope.mode === "all" || !scope.subdepartmentIds
+                    ? "Searching all tasks."
+                    : `Searching ${scope.permitGroup} tasks only (its job level${scope.classIds?.length ? " and class" : ""}).`}
+                </span>
+                {scope.subdepartmentIds !== null || scope.mode === "all" ? (
+                  <button type="button" onClick={toggleSearchAll} className="font-medium text-blue-600 hover:underline">
+                    {searchAll ? `Only ${scope.permitGroup} tasks` : "Search all tasks"}
+                  </button>
+                ) : null}
+              </div>
+            )}
 
             {loadingSuggestions ? (
               <div className="flex items-center justify-center py-8 text-sm text-slate-400">
@@ -222,7 +265,9 @@ export function LinkEfnsItemDialog({
               </div>
             ) : suggestions.length === 0 ? (
               <div className="text-sm text-slate-400 italic py-4">
-                No matching tasks found{submittedSearch ? ` for "${submittedSearch}"` : ""}. Try a different R-number or name.
+                No matching tasks found{submittedSearch ? ` for "${submittedSearch}"` : ""}
+                {scope?.mode === "job_level" && scope.subdepartmentIds ? ` among ${scope.permitGroup} tasks` : ""}. Try a different R-number or name
+                {!searchAll && scope?.subdepartmentIds ? ", or search all tasks" : ""}.
               </div>
             ) : (
               <div className="border rounded-lg divide-y max-h-56 overflow-auto">

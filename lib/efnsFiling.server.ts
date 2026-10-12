@@ -20,12 +20,16 @@ import { createServerSupabaseClient } from "@/lib/supabase"
 import {
   IMMIGRATION_BUCKET,
   immigrationPdfPath,
+  parseApplicant,
   paymentPermitGroup,
   shortNotifStatus,
   type ItemKind,
+  type ParsedApplicant,
 } from "@/lib/immigrationNotifications"
 import type { EfnsFilingRecord, EfnsFilingStatus, EfnsMatchedBy } from "@/lib/efnsFiling"
-import { efnsTriggerMatches, isEfnsTriggerSet } from "@/lib/efnsFiling"
+import { efnsTriggerMatches, IMMIGRATION_DEPARTMENT_ID, isEfnsTriggerSet, itemJobLevels, type EfnsJobLevel } from "@/lib/efnsFiling"
+// The same "is this stage N/A for this task's job level / class" rule the task tables use.
+import { isStageApplicableToTask } from "@/app/(dashboard)/dashboard/reports/utils/reportStageLogic"
 
 export type { EfnsFilingRecord, EfnsMatchedBy }
 
@@ -81,16 +85,47 @@ const fetchTask = async (sb: SupabaseClientLike, taskId: number | string) => {
   return data
 }
 
-const fetchDepartmentStages = async (sb: SupabaseClientLike, departmentId: number | string | null | undefined) => {
-  if (departmentId == null || departmentId === "") return []
+const fetchDepartmentStages = async (sb: SupabaseClientLike, departmentId: number | string | null | undefined) =>
+  (await fetchDepartment(sb, departmentId)).stages
+
+/**
+ * A department's stages plus the department (with its job levels) in the shape isStageApplicableToTask
+ * expects, so callers can drop stages that are N/A for a task's job level / class.
+ */
+const fetchDepartment = async (
+  sb: SupabaseClientLike,
+  departmentId: number | string | null | undefined,
+): Promise<{ stages: any[]; departments: any[] }> => {
+  if (departmentId == null || departmentId === "") return { stages: [], departments: [] }
   const { data, error } = await sb
     .from("tm_departments")
-    .select("id, name, stages")
+    .select("id, name, stages, tm_subdepartments(*)")
     .eq("id", departmentId)
     .single()
-  if (error || !data) return []
-  return (data.stages || []) as any[]
+  if (error || !data) return { stages: [], departments: [] }
+  return { stages: (data.stages || []) as any[], departments: [data] }
 }
+
+/** The task's stages that apply to its job level / class (N/A ones dropped). */
+const applicableStages = (stages: any[], task: any, departments: any[]) =>
+  stages.filter((stage) => isStageApplicableToTask(stage, task, departments))
+
+/**
+ * Narrows a tm_tasks query to job levels: their subdepartments, and their classes when every level
+ * names one (a level without a class means "any class", so a mixed list keeps the subdepartment only).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const scopeToJobLevels = (q: any, levels: EfnsJobLevel[] | null) => {
+  if (!levels?.length) return q
+  let scopedQuery = q
+    .eq("department_id", IMMIGRATION_DEPARTMENT_ID)
+    .in("subdepartment_id", [...new Set(levels.map((l) => l.subdepartmentId))])
+  if (levels.every((l) => l.classId)) scopedQuery = scopedQuery.in("class_id", levels.map((l) => l.classId as string))
+  return scopedQuery
+}
+
+/** PostgREST ilike treats % and _ as wildcards; a file number should match literally. */
+const escapeLike = (v: string) => v.replace(/[\\%_]/g, (c) => `\\${c}`)
 
 const fetchKycDisplayName = async (sb: SupabaseClientLike, kycId: string | undefined): Promise<string> => {
   if (!kycId) return "Document"
@@ -122,13 +157,14 @@ export interface EfnsCandidateTask {
   // after open tasks and never auto-filed.
   is_terminal?: boolean
   job_level: any
+  created_at?: string | null
 }
 
 // tm_tasks has no company_name column — company lives in the companies table (by company_id) or in
 // the company_details JSONB, which is why only applicant_name / principal_member_name are matched
 // and the dialog's company line is best-effort.
 const CANDIDATE_SELECT =
-  "id, applicant_name, r_number, principal_member_name, company_details, individual_id, department_id, subdepartment_id, class_id, subclass_id, status, job_level"
+  "id, applicant_name, r_number, principal_member_name, company_details, individual_id, department_id, subdepartment_id, class_id, subclass_id, status, job_level, created_at"
 
 const taskCompanyName = (row: any): string | null => {
   const details = row?.company_details && typeof row.company_details === "object" ? row.company_details : null
@@ -239,12 +275,22 @@ export async function suggestEfnsTasks(input: {
   fileNumber?: string | null
   applicant?: string | null
   company?: string | null
+  /** A dependant's principal: also scored against the task's principal_member_name. */
+  principal?: string | null
   query?: string | null
+  /** The item's permit type (and payment category): only tasks in their job levels are searched. */
+  permitGroup?: string | null
+  category?: string | null
+  /** "all" searches every task, e.g. when the job-level search found nothing. */
+  scope?: "job_level" | "all"
   limit?: number
 }): Promise<EfnsCandidateTask[]> {
   const sb = createServerSupabaseClient()
   const limit = input.limit || 25
   const fileNumber = normalizeText(input.fileNumber)
+  const levels = input.scope === "all" ? null : itemJobLevels(input.permitGroup, input.category)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const scoped = (q: any) => scopeToJobLevels(q, levels)
 
   const withCompany = (rows: any[]) =>
     rows.map((row) => ({
@@ -255,10 +301,8 @@ export async function suggestEfnsTasks(input: {
 
   if (fileNumber) {
     // Case-insensitive exact R-number — the portal's printed file number vs. the registry's.
-    const { data, error } = await sb
-      .from("tm_tasks")
-      .select(CANDIDATE_SELECT)
-      .ilike("r_number", fileNumber)
+    const { data, error } = await scoped(sb.from("tm_tasks").select(CANDIDATE_SELECT))
+      .ilike("r_number", escapeLike(fileNumber))
       .limit(limit)
     if (!error && data && data.length > 0) {
       const openFirst = [...data].sort((a: any, b: any) => Number(isTerminalStatus(a.status)) - Number(isTerminalStatus(b.status)))
@@ -272,14 +316,13 @@ export async function suggestEfnsTasks(input: {
 
   // One .or() only (two chained .or() calls produce duplicate `or=` params that PostgREST may drop);
   // the terminal/open ordering happens in JS — every row already carries `status`.
-  const { data, error } = await sb
-    .from("tm_tasks")
-    .select(CANDIDATE_SELECT)
+  const { data, error } = await scoped(sb.from("tm_tasks").select(CANDIDATE_SELECT))
     .or(tokenOrFilter(normalized))
     .limit(300)
   if (error) return []
 
   const company = normalizeName(input.company)
+  const principal = normalizeName(input.principal)
   const candidates = (data || []) as any[]
   const scored = candidates
     .map((row: any): { score: number; row: any } => ({
@@ -287,7 +330,9 @@ export async function suggestEfnsTasks(input: {
         nameMatchScore(applicantName, row.applicant_name || ""),
         nameMatchScore(applicantName, row.principal_member_name || ""),
         company ? nameMatchScore(company, taskCompanyName(row) || "") : 0,
-      ),
+      ) +
+        // A matching principal / company only breaks ties between plausible applicants.
+        (principal && nameMatchScore(principal, row.principal_member_name || "") > 0 ? 0.05 : 0),
       row,
     }))
     .filter((entry: { score: number; row: any }) => entry.score >= NAME_SCORE_MIN)
@@ -314,8 +359,8 @@ export async function linkStagesForTask(taskId: number | string): Promise<{
   try {
     const task = await fetchTask(sb, taskId)
     const departmentId = task.job_level?.department_id ?? task.department_id
-    const stages = await fetchDepartmentStages(sb, departmentId)
-    const result = stages
+    const { stages, departments } = await fetchDepartment(sb, departmentId)
+    const result = applicableStages(stages, task, departments)
       .filter((s: any) => Array.isArray(s.documents) && s.documents.length > 0)
       .sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0))
       .map((s: any) => ({
@@ -442,9 +487,11 @@ export async function fileEfnsItem(input: FileEfnsItemInput): Promise<FileEfnsIt
       .replace(/[~`!@#$%^&*()+=\[\]{};':"\\|,<>\/?]/g, "_")
       .replace(/_{2,}/g, "_")
       .replace(/^_+|_+$/g, "")
-    const filePath = `individual-documents/${individualId}/${kycId}/${safeName || "efns.pdf"}`
+    // Unique per filing: EFNS names files by applicant + permit + date, so two items (or a re-file)
+    // would otherwise land on the same path and silently replace a document already filed.
+    const filePath = `individual-documents/${individualId}/${kycId}/${Date.now()}_${input.kind}-${input.id}_${safeName || "efns.pdf"}`
     const { error: upErr } = await sb.storage.from("kyc-documents").upload(filePath, blob, {
-      upsert: true,
+      upsert: false,
       cacheControl: "3600",
       contentType: "application/pdf",
     })
@@ -453,11 +500,19 @@ export async function fileEfnsItem(input: FileEfnsItemInput): Promise<FileEfnsIt
     // Insert the document row.
     const { data: docRow, error: insErr } = await sb
       .from("acc_portal_directors_documents")
+      // acc_portal_directors_documents has no status column (writing one fails the insert).
       .insert({
         director_id: individualId,
         document_id: kycId,
         file_path: filePath,
-        status: "active",
+        task_id: task.id,
+        extracted_details: {
+          source: "efns",
+          efns_kind: input.kind,
+          efns_id: input.id,
+          file_number: itemRow.file_number ?? null,
+          matched_by: input.matchedBy,
+        },
         created_at: now,
         updated_at: now,
         uploaded_by: input.byId ?? null,
@@ -564,23 +619,53 @@ export interface EfnsJobResult {
 
 // The permit group + status an item presents, using the same rules the notifications page and the
 // stage-trigger picker use — so a rule configured in Stages Management matches the same item here.
-const itemPermitGroupAndStatus = (kind: ItemKind, row: any): { permitGroup: string; status: string } => {
+// `category` is a payment's application category (null for notifications), which can name a class.
+export const itemPermitGroupAndStatus = (
+  kind: ItemKind,
+  row: any,
+): { permitGroup: string; status: string; category: string | null } => {
   if (kind === "notification") {
     const rawType = String(row.permit_type || row.case_type || "").trim()
     return {
       permitGroup: rawType ? rawType.toUpperCase() : "NOTIFICATION",
       status: shortNotifStatus(String(row.message || "")),
+      category: null,
     }
   }
   const category = String(row.application_category || row.application_name || "").trim()
   return {
     permitGroup: paymentPermitGroup(category),
     status: String(row.invoice_status || "Not Paid").toUpperCase(),
+    category: category || null,
   }
 }
 
-const itemApplicantName = (kind: ItemKind, row: any): string =>
-  String(row.printable_applicant || (kind === "notification" ? row.name : row.applicant_name) || "").trim()
+
+/** How long no_rule / no_match / ambiguous items keep being retried. */
+const RETRY_WINDOW_DAYS = 30
+
+/**
+ * An item arriving more than this long before a task was created belongs to an earlier application
+ * (e.g. last year's permit), so it's never auto-filed onto that task — it can still be linked by hand.
+ */
+const ITEM_BEFORE_TASK_SLACK_MS = 24 * 60 * 60 * 1000
+const arrivedForTask = (row: any, task: EfnsCandidateTask): boolean => {
+  const itemAt = Date.parse(row.created_at || "")
+  const taskAt = Date.parse(task.created_at || "")
+  if (Number.isNaN(itemAt) || Number.isNaN(taskAt)) return true
+  return itemAt >= taskAt - ITEM_BEFORE_TASK_SLACK_MS
+}
+
+/** Who the item is about (applicant + principal / company), as the notifications page shows it. */
+export const itemApplicant = (kind: ItemKind, row: any): ParsedApplicant => {
+  const { permitGroup } = itemPermitGroupAndStatus(kind, row)
+  return parseApplicant(
+    kind === "notification" ? row.name : row.applicant_name || row.application_name,
+    permitGroup,
+    row.printable_applicant,
+    row.printable_company,
+  )
+}
 
 export async function runEfnsFilingJob(options: EfnsJobOptions = {}): Promise<EfnsJobResult> {
   const sb = createServerSupabaseClient()
@@ -595,13 +680,15 @@ export async function runEfnsFilingJob(options: EfnsJobOptions = {}): Promise<Ef
       if (data) targets.push({ kind, row: data })
     }
   } else {
-    // Unlooked-at (null) or previously failed (error) items, newest first.
+    // Unlooked-at (null) or failed (error) items, plus recent ones that had no rule / no task yet —
+    // a stage trigger set up, or a task created, after the item arrived still gets it filed.
+    const retrySince = new Date(Date.now() - RETRY_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString()
     for (const kind of ["notification", "payment"] as ItemKind[]) {
       const table = kind === "notification" ? "immigration_notifications" : "immigration_payments"
       const { data, error } = await sb
         .from(table)
         .select("*")
-        .or("filing_status.is.null,filing_status.eq.error")
+        .or(`filing_status.is.null,filing_status.eq.error,and(filing_status.in.(no_rule,no_match,ambiguous),created_at.gte.${retrySince})`)
         .order("created_at", { ascending: false })
         .limit(limit)
       if (!error && data) for (const row of data) targets.push({ kind, row })
@@ -628,8 +715,9 @@ const processEfnsItem = async (
 ): Promise<EfnsJobItemResult> => {
   const table = kind === "notification" ? "immigration_notifications" : "immigration_payments"
   const id = Number(row.id)
-  const name = itemApplicantName(kind, row) || `#${id}`
-  const { permitGroup, status } = itemPermitGroupAndStatus(kind, row)
+  const who = itemApplicant(kind, row)
+  const name = who.applicant || `#${id}`
+  const { permitGroup, status, category } = itemPermitGroupAndStatus(kind, row)
 
   const writeOutcome = async (
     outcome: EfnsFilingStatus,
@@ -646,8 +734,11 @@ const processEfnsItem = async (
   try {
     const suggestions = await suggestEfnsTasks({
       fileNumber: row.file_number ?? null,
-      applicant: itemApplicantName(kind, row) || null,
-      company: row.printable_company ?? null,
+      applicant: who.applicant || null,
+      company: who.company,
+      principal: who.principal,
+      permitGroup,
+      category,
     })
     const matchedBy: EfnsMatchedBy = row.file_number ? "file_number" : "name"
 
@@ -655,7 +746,8 @@ const processEfnsItem = async (
     // as a candidate so the "Needs a task" list shows it for a manual link) but never receives an
     // automatic filing.
     const candidates = suggestions.map((t) => ({ id: t.id, applicant_name: t.applicant_name, r_number: t.r_number }))
-    const open = suggestions.filter((t) => !t.is_terminal)
+    // Open tasks this item could belong to: not finished, and not created long after the item arrived.
+    const open = suggestions.filter((t) => !t.is_terminal && arrivedForTask(row, t))
 
     if (open.length === 0) {
       return writeOutcome("no_match", { task_id: 0, stage_id: "", matched_by: matchedBy, candidates })
@@ -671,9 +763,10 @@ const processEfnsItem = async (
 
     const task = open[0]
     const departmentId = task.job_level?.department_id ?? task.department_id
-    const stages = await fetchDepartmentStages(sb, departmentId)
+    const { stages, departments } = await fetchDepartment(sb, departmentId)
     const matches: Array<{ stageId: string; stageName: string; kycId: string }> = []
-    for (const stage of stages) {
+    // Only stages that apply to this task's job level / class can take the filing.
+    for (const stage of applicableStages(stages, task, departments)) {
       for (const doc of (stage.documents || [])) {
         if (doc?.kycId && isEfnsTriggerSet(doc.efnsTrigger) && efnsTriggerMatches(doc.efnsTrigger, permitGroup, status)) {
           matches.push({ stageId: stage.id, stageName: stage.name || "", kycId: doc.kycId })

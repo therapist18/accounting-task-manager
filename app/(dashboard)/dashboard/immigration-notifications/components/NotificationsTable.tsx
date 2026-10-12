@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Eye, Link2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import type { ImmigrationItem } from "@/lib/immigrationNotifications"
+import { RELATIONSHIP_LABEL, type ImmigrationItem } from "@/lib/immigrationNotifications"
 import { EFNS_FILING_BADGE, EFNS_FILING_LABELS } from "@/lib/efnsFiling"
 // The Email Center's table toolkit, so this table sorts, filters, stripes and paginates exactly like
 // every other table in the app.
@@ -18,6 +18,8 @@ import { KIND_BADGE, KIND_LABEL, STATUS_BADGE, STATUS_BADGE_FALLBACK } from "./s
 // or a From/To range for the date columns); hide-able ones are listed in the Columns button.
 export const ITEM_COLUMNS = [
   { id: "name", label: "Applicant", filter: true },
+  { id: "relationship", label: "Relationship", filter: true },
+  { id: "principal", label: "Principal / Company", filter: true },
   { id: "kind", label: "Record", filter: true },
   { id: "applicationType", label: "Application type", filter: true },
   { id: "status", label: "Status", filter: true },
@@ -33,7 +35,10 @@ export type ItemColumnId = (typeof ITEM_COLUMNS)[number]["id"]
 
 // What each column shows (and sorts / filters / exports on).
 export const ITEM_VALUE: Record<ItemColumnId, (i: ImmigrationItem) => string> = {
-  name: (i) => i.name,
+  // The applicant alone; who they're a dependant of / applied under is in the next two columns.
+  name: (i) => i.applicant,
+  relationship: (i) => RELATIONSHIP_LABEL[i.relationship],
+  principal: (i) => i.principalName || i.companyName || "",
   kind: (i) => KIND_LABEL[i.kind],
   applicationType: (i) => i.applicationType,
   status: (i) => i.status,
@@ -48,6 +53,12 @@ export const ITEM_VALUE: Record<ItemColumnId, (i: ImmigrationItem) => string> = 
   },
   pdf: (i) => i.pdfName || "",
   link: () => "",
+}
+
+const RELATIONSHIP_BADGE: Record<ImmigrationItem["relationship"], string> = {
+  principal: "border-blue-200 bg-blue-50 text-blue-700",
+  dependant: "border-violet-200 bg-violet-50 text-violet-700",
+  company: "border-amber-200 bg-amber-50 text-amber-700",
 }
 
 const SORT_ACCESSORS: Record<string, (i: ImmigrationItem) => string | number> = {
@@ -99,7 +110,31 @@ export function NotificationsTable({
   const cell = (i: ImmigrationItem, id: ItemColumnId) => {
     switch (id) {
       case "name":
-        return <span className="font-semibold text-slate-900">{ITEM_VALUE.name(i)}</span>
+        return <span className="font-semibold text-slate-900" title={i.name}>{ITEM_VALUE.name(i)}</span>
+      case "relationship":
+        return (
+          <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-sm font-medium", RELATIONSHIP_BADGE[i.relationship])}>
+            {RELATIONSHIP_LABEL[i.relationship]}
+          </span>
+        )
+      case "principal":
+        if (i.principalName) {
+          return (
+            <span className="text-slate-700">
+              <span className="text-xs text-slate-400">Principal · </span>
+              {i.principalName}
+            </span>
+          )
+        }
+        if (i.companyName) {
+          return (
+            <span className="text-slate-700">
+              <span className="text-xs text-slate-400">Company · </span>
+              {i.companyName}
+            </span>
+          )
+        }
+        return <span className="text-slate-400">—</span>
       case "kind":
         return (
           <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-sm font-medium", KIND_BADGE[i.kind])}>
@@ -112,6 +147,15 @@ export function NotificationsTable({
             {i.status}
           </span>
         )
+      case "message": {
+        // One line, so long portal messages don't stretch the row; the full text is on hover.
+        const text = ITEM_VALUE.message(i)
+        return text ? (
+          <span className="block max-w-[320px] truncate" title={text}>{text}</span>
+        ) : (
+          <span className="text-slate-400">—</span>
+        )
+      }
       case "pdf":
         return i.pdfUrl ? (
           <Button
@@ -188,7 +232,8 @@ export function NotificationsTable({
                   className={cn(
                     "text-left min-w-[140px]",
                     c.id === "name" && "min-w-[240px]",
-                    c.id === "message" && "min-w-[260px]",
+                    c.id === "principal" && "min-w-[240px]",
+                    c.id === "message" && "w-[340px] min-w-[260px] max-w-[340px]",
                     i === columns.length - 1 && "border-r-0",
                   )}
                 >

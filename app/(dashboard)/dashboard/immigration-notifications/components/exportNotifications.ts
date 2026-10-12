@@ -1,4 +1,4 @@
-import type { ImmigrationItem } from "@/lib/immigrationNotifications"
+import { RELATIONSHIP_LABEL, type ImmigrationItem } from "@/lib/immigrationNotifications"
 import { exportRowsToExcel, timestampedFilename, type ExcelColumn } from "../../emails/components/excelExport"
 
 // The rows exactly as filtered and sorted on screen, through the app's shared styled-workbook
@@ -22,7 +22,9 @@ const STATUS_ARGB: Record<string, string> = {
 export async function exportItemsToExcel(rows: ImmigrationItem[], scopeLabel: string) {
   const columns: ExcelColumn<ImmigrationItem>[] = [
     { header: "#", width: 6, align: "center", value: (_r, i) => String(i + 1) },
-    { header: "Applicant", width: 34, value: (r) => r.name },
+    { header: "Applicant", width: 34, value: (r) => r.applicant },
+    { header: "Relationship", width: 18, value: (r) => RELATIONSHIP_LABEL[r.relationship] },
+    { header: "Principal / Company", width: 34, value: (r) => r.principalName || r.companyName || "" },
     { header: "Record", width: 14, value: (r) => (r.kind === "payment" ? "Payment" : "Notification") },
     { header: "Application type", width: 26, value: (r) => r.applicationType },
     { header: "Status", width: 20, value: (r) => r.status, color: (r) => STATUS_ARGB[r.statusKey] ?? null },

@@ -85,3 +85,52 @@ export const EFNS_FILING_BADGE: Record<EfnsFilingStatus, string> = {
   ambiguous: "border-amber-200 bg-amber-50 text-amber-700",
   error: "border-red-200 bg-red-50 text-red-700",
 }
+
+// ── permit type → job level ─────────────────────────────────────────────────
+// Which IMMIGRATION job levels (tm_departments 1 → tm_subdepartments, and a class where the portal
+// says which) an EFNS item belongs to, so matching only looks at tasks of the right kind — a Special
+// Pass notice is only ever filed to a KSP task. Few and stable, so kept in code.
+export const IMMIGRATION_DEPARTMENT_ID = 1
+
+/** A job level under IMMIGRATION; `classId` narrows it to one class (tm_tasks.class_id is a string). */
+export interface EfnsJobLevel {
+  subdepartmentId: number
+  classId?: string
+}
+
+// Citizenship (subdepartment 5) classes the payment categories name.
+const CITIZENSHIP = 5
+const LAWFUL_RESIDENCE: EfnsJobLevel = { subdepartmentId: CITIZENSHIP, classId: "1750687875460" }
+
+export const EFNS_PERMIT_JOB_LEVELS: Record<string, EfnsJobLevel[]> = {
+  PERMIT: [{ subdepartmentId: 1 }], // KEP
+  "SPECIAL PASS": [{ subdepartmentId: 3 }], // KSP
+  "DEPENDANT PASS": [{ subdepartmentId: 2 }], // KDP
+  "STUDENT PASS": [{ subdepartmentId: 4 }], // KPP
+  FNS: [{ subdepartmentId: 6 }], // Foreign National Certificate (ALIEN)
+  "VISITOR'S PASS": [{ subdepartmentId: 8 }], // Extension of Visitor's Pass
+  "RE-ENTRY PASS": [{ subdepartmentId: 7 }], // Re-Entry Pass
+  "PERMANENT RESIDENCE": [{ subdepartmentId: 10 }], // PR
+  CITIZENSHIP: [{ subdepartmentId: CITIZENSHIP }], // Citizenship, any class
+  "LAWFUL RESIDENT": [LAWFUL_RESIDENCE], // Citizenship → Lawful Residence
+}
+
+// Payment categories (immigration_payments.application_category, lower-cased) that name a class
+// more precisely than their permit type does. Checked before EFNS_PERMIT_JOB_LEVELS.
+export const EFNS_CATEGORY_JOB_LEVELS: Record<string, EfnsJobLevel[]> = {
+  "lawful residents": [LAWFUL_RESIDENCE],
+  "citizenship by marriage": [{ subdepartmentId: CITIZENSHIP, classId: "1750687876588" }],
+  "children & dependants": [{ subdepartmentId: CITIZENSHIP, classId: "1750687876148" }],
+  "persons with disability": [{ subdepartmentId: CITIZENSHIP, classId: "1750687878156" }],
+}
+
+/**
+ * The job levels an item's tasks live in: its payment category's when that names one, otherwise its
+ * permit type's; null when neither is mapped (search everything).
+ */
+export function itemJobLevels(permitGroup: string | null | undefined, category?: string | null): EfnsJobLevel[] | null {
+  const byCategory = EFNS_CATEGORY_JOB_LEVELS[String(category || "").trim().toLowerCase()]
+  if (byCategory?.length) return byCategory
+  const byGroup = EFNS_PERMIT_JOB_LEVELS[String(permitGroup || "").trim().toUpperCase()]
+  return byGroup?.length ? byGroup : null
+}

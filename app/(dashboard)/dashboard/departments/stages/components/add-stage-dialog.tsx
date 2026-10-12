@@ -20,6 +20,7 @@ import { DocumentExtraction, Stage, StageDocument, TimeConfig, NewStage, EntityO
 import { createKYCDocument } from "../kycDocuments"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command"
+import { toast } from "@/lib/hooks/use-toast"
 import { EfnsTriggerPicker } from "./efns-trigger-picker"
 import type { EfnsTrigger } from "@/lib/efnsFiling"
 

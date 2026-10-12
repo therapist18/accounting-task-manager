@@ -4,13 +4,18 @@ import { createServerSupabaseClient } from "@/lib/supabase"
 import type { ItemKind } from "@/lib/immigrationNotifications"
 import {
   fileEfnsItem,
+  itemApplicant,
+  itemPermitGroupAndStatus,
   linkStagesForTask,
   suggestEfnsTasks,
 } from "@/lib/efnsFiling.server"
+import { itemJobLevels } from "@/lib/efnsFiling"
 
 // /api/immigration-notifications/file
 //
-//   GET ?kind=notification&id=123            → candidate tasks for the item's manual link dialog
+//   GET ?kind=notification&id=123            → candidate tasks for the item's manual link dialog,
+//                                              only in the job levels of the item's permit type
+//       &scope=all                           → search every task instead
 //       &taskId=5                            → the stages a picked task can take a filing on
 //       &q=...                               → narrow the candidate search
 //
@@ -28,6 +33,7 @@ export async function GET(req: NextRequest) {
   const id = Number(sp.get("id") || "0")
   const taskId = sp.get("taskId")
   const query = sp.get("q")
+  const scope = sp.get("scope") === "all" ? "all" : "job_level"
 
   try {
     if (taskId) {
@@ -51,15 +57,34 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: `Item ${kind} ${id} not found` }, { status: 404 })
     }
 
-    const applicantName = (row.printable_applicant || row.name || row.applicant_name || "").trim()
+    // Who the item is about (a dependant, or someone applying under a company) and its permit type,
+    // which decides the job levels searched.
+    const who = itemApplicant(kind, row)
+    const { permitGroup, status, category } = itemPermitGroupAndStatus(kind, row)
+    const levels = itemJobLevels(permitGroup, category)
     const suggestions = await suggestEfnsTasks({
       fileNumber: row.file_number ?? null,
-      applicant: applicantName || null,
-      company: row.printable_company ?? null,
-      query,
+      // A typed search replaces the applicant; the file number still applies.
+      applicant: query?.trim() || who.applicant || null,
+      company: who.company,
+      principal: who.principal,
+      permitGroup,
+      category,
+      scope,
     })
 
-    return NextResponse.json({ success: true, item: { kind, id, name: applicantName }, suggestions })
+    return NextResponse.json({
+      success: true,
+      item: { kind, id, name: who.applicant, relationship: who.relationship, principal: who.principal, company: who.company, permitGroup, status },
+      // What was searched, so the dialog can say so and offer "search all tasks".
+      scope: {
+        mode: scope,
+        permitGroup,
+        subdepartmentIds: scope === "all" || !levels ? null : [...new Set(levels.map((l) => l.subdepartmentId))],
+        classIds: scope === "all" || !levels?.every((l) => l.classId) ? null : levels.map((l) => l.classId),
+      },
+      suggestions,
+    })
   } catch (e: any) {
     console.error("[api/immigration-notifications/file] GET", e)
     return NextResponse.json({ success: false, error: e?.message || "Failed to load filing options" }, { status: 502 })

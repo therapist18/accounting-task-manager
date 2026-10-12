@@ -48,6 +48,13 @@ export interface ImmigrationItem {
   amount: string
   pdfUrl: string | null
   pdfName: string | null
+  // Who the record is about, read from `name` (see parseApplicant): the applicant themselves, whether
+  // they applied as a principal, as someone's dependant, or under a company / sponsor, and that
+  // principal or company.
+  applicant: string
+  relationship: ApplicantRelationship
+  principalName: string | null
+  companyName: string | null
   // ── EFNS filing linkage (see lib/efnsFiling.ts + supabase migration 20261015000000) ──
   // The immigration file number the portal printed, matched against tm_tasks.r_number.
   fileNumber: string | null
@@ -128,7 +135,7 @@ const PAYMENT_PERMIT_GROUP: Record<string, string> = {
   "dependent's pass": "DEPENDANT PASS",
   "dependant pass": "DEPENDANT PASS",
   "dependant's pass": "DEPENDANT PASS",
-  "children & dependants": "DEPENDANT PASS",
+  "children & dependants": "CITIZENSHIP", // Citizenship → Children & Dependants class
   "special pass": "SPECIAL PASS",
   "foreign national application": "FNS",
   "foreign national certificate": "FNS",
@@ -137,7 +144,7 @@ const PAYMENT_PERMIT_GROUP: Record<string, string> = {
   "re-entry pass application": "RE-ENTRY PASS",
   "lawful residents": "LAWFUL RESIDENT",
   "citizenship by marriage": "CITIZENSHIP",
-  "persons with disability": "OTHER",
+  "persons with disability": "CITIZENSHIP", // Citizenship → Persons with Disability class
 }
 
 export const PERMIT_GROUP_PREFERRED = [
@@ -150,6 +157,7 @@ export const PERMIT_GROUP_PREFERRED = [
   "VISITOR'S PASS",
   "RE-ENTRY PASS",
   "LAWFUL RESIDENT",
+  "STUDENT PASS",
   "OTHER",
 ]
 
@@ -168,6 +176,69 @@ export function sortPermitGroups(groups: string[]): string[] {
     if (ib !== -1) return 1
     return a.localeCompare(b)
   })
+}
+
+// ── applicant / relationship ────────────────────────────────────────────────
+// The record's name says more than one person: the portal and the automation write
+//   "PATEL DINESHCHANDRA HARMANBHAIDependant: PATEL RAKSHABEN JAYESHKUMAR"  principal + dependant
+//   "JMR INFOTECH INDIA PVT. LTD (MOHAMMED KALAM)"                        company / sponsor (applicant)
+//   "Date Generated: 2026-10-01 10:00:00 (JANE DOE)"                       a date, then the applicant
+//   "JANE DOE"                                                             the applicant
+// parseApplicant splits that into who the record is about (the applicant — the person its document
+// belongs to) and their relationship.
+
+export type ApplicantRelationship = "principal" | "dependant" | "company"
+
+export const RELATIONSHIP_LABEL: Record<ApplicantRelationship, string> = {
+  principal: "Principal",
+  dependant: "Dependant",
+  company: "Company applicant",
+}
+
+export interface ParsedApplicant {
+  applicant: string
+  relationship: ApplicantRelationship
+  principal: string | null
+  company: string | null
+}
+
+const COMPANY_HINT =
+  /\b(ltd|limited|plc|inc|llc|llp|pvt|private|co|company|corp|corporation|group|holdings?|enterprises?|international|ventures|industries|services|solutions|consult\w*|bank|school|academy|university|college|church|ministry|foundation|trust|society|association|hospital|embassy|agency|organi[sz]ation)\b\.?/i
+
+/**
+ * Who a record is about. `permitGroup` settles the one ambiguous shape: "OUTER (APPLICANT)" where
+ * OUTER isn't a company is the principal on a dependant's pass, otherwise the applicant's sponsor.
+ * The printable page's own applicant / company (EFNS stores them for new records) win when present,
+ * except that a dependant written into the name stays a dependant.
+ */
+export function parseApplicant(
+  raw: unknown,
+  permitGroup?: string | null,
+  printableApplicant?: string | null,
+  printableCompany?: string | null,
+): ParsedApplicant {
+  const text = String(raw ?? "").replace(/\s+/g, " ").trim()
+
+  const dependant = /^(.*?)\s*Dependant\s*:\s*(.+)$/i.exec(text)
+  if (dependant && dependant[1].trim() && dependant[2].trim()) {
+    return { applicant: dependant[2].trim(), relationship: "dependant", principal: dependant[1].trim(), company: null }
+  }
+
+  let applicant = text
+  let outer: string | null = null
+  const paren = /^(.*\S)\s*\(([^()]+)\)\s*$/.exec(text)
+  if (paren) {
+    applicant = paren[2].trim()
+    outer = /^date\s+generated/i.test(paren[1].trim()) ? null : paren[1].trim()
+  }
+  if (printableApplicant?.trim()) applicant = printableApplicant.trim()
+  if (printableCompany?.trim() && printableCompany.trim().toLowerCase() !== applicant.toLowerCase()) outer = printableCompany.trim()
+
+  if (!outer) return { applicant: applicant || text, relationship: "principal", principal: null, company: null }
+  if (!COMPANY_HINT.test(outer) && String(permitGroup || "").toUpperCase() === "DEPENDANT PASS") {
+    return { applicant, relationship: "dependant", principal: outer, company: null }
+  }
+  return { applicant, relationship: "company", principal: null, company: outer }
 }
 
 // ── mapping ─────────────────────────────────────────────────────────────────
@@ -197,6 +268,7 @@ function mapNotification(row: Record<string, any>): ImmigrationItem {
   const rawType = String(row.permit_type || row.case_type || "").trim()
   const permitGroup = rawType ? rawType.toUpperCase() : "NOTIFICATION"
   const pdfName = row.pdf_file_name ? String(row.pdf_file_name) : null
+  const who = parseApplicant(row.name, permitGroup, row.printable_applicant, row.printable_company)
   return {
     key: `n-${row.id}`,
     kind: "notification",
@@ -214,6 +286,10 @@ function mapNotification(row: Record<string, any>): ImmigrationItem {
     amount: "",
     pdfUrl: pdfName ? storageUrl(`${NOTIFICATION_PDF_PREFIX}/${pdfName}`) : null,
     pdfName,
+    applicant: who.applicant,
+    relationship: who.relationship,
+    principalName: who.principal,
+    companyName: who.company,
     fileNumber: nullableStr(row.file_number),
     printableApplicant: nullableStr(row.printable_applicant),
     printableCompany: nullableStr(row.printable_company),
@@ -229,13 +305,15 @@ function mapPayment(row: Record<string, any>): ImmigrationItem {
   const status = String(row.invoice_status || "Not Paid")
   const pdfName = row.payment_instructions_file_name ? String(row.payment_instructions_file_name) : null
   const amount = row.payment_amount ?? row.amount
+  const permitGroup = paymentPermitGroup(category)
+  const who = parseApplicant(row.applicant_name || row.application_name, permitGroup, row.printable_applicant, row.printable_company)
   return {
     key: `p-${row.id}`,
     kind: "payment",
     id: typeof row.id === "number" ? row.id : null,
     name: String(row.applicant_name || row.application_name || "Unknown"),
     applicationType: category || "Payment",
-    permitGroup: paymentPermitGroup(category),
+    permitGroup,
     status,
     statusKey: status.toUpperCase(),
     date: display,
@@ -246,6 +324,10 @@ function mapPayment(row: Record<string, any>): ImmigrationItem {
     amount: amount != null && amount !== "" ? String(amount) : "",
     pdfUrl: pdfName ? storageUrl(`${PAYMENT_PDF_PREFIX}/${pdfName}`) : null,
     pdfName,
+    applicant: who.applicant,
+    relationship: who.relationship,
+    principalName: who.principal,
+    companyName: who.company,
     fileNumber: nullableStr(row.file_number),
     printableApplicant: nullableStr(row.printable_applicant),
     printableCompany: nullableStr(row.printable_company),
