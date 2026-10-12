@@ -20,6 +20,9 @@ const PUBLIC_PATHS = [
   // Called by Google Pub/Sub, which has no session cookie. The route authenticates itself with
   // ?token=PUBSUB_WEBHOOK_SECRET and rejects the request when the secret is unset.
   "/api/gmail/webhook",
+  // Called by the EFNS automation after each run (no session cookie). The route authenticates with
+  // the x-efns-secret header (EFNS_FILING_SECRET) and rejects every request while that is unset.
+  "/api/immigration-notifications/file-job/efns",
 ];
 
 function isPublicPath(pathname: string): boolean {

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Eye, Link2 } from "lucide-react"
+import { Eye, Link2, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { RELATIONSHIP_LABEL, type ImmigrationItem } from "@/lib/immigrationNotifications"
@@ -79,6 +79,7 @@ export function NotificationsTable({
   onFilteredChange,
   resetKey,
   onLink,
+  onDelete,
 }: {
   items: ImmigrationItem[]
   loading: boolean
@@ -89,6 +90,8 @@ export function NotificationsTable({
   resetKey?: string
   // Opens the manual link dialog for a row.
   onLink?: (item: ImmigrationItem) => void
+  // Opens the delete (and re-capture) dialog for a row.
+  onDelete?: (item: ImmigrationItem) => void
 }) {
   const [itemsPerPage, setItemsPerPage] = useState(50)
   const [page, setPage] = useState(0)
@@ -196,6 +199,7 @@ export function NotificationsTable({
         )
       case "link":
         return (
+          <div className="flex items-center gap-1">
           <Button
             variant="ghost"
             size="sm"
@@ -207,6 +211,18 @@ export function NotificationsTable({
             <Link2 className="h-4 w-4" />
             {i.filingStatus === "filed" ? "Re-link" : "Link"}
           </Button>
+          {onDelete && i.id != null && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onDelete(i)}
+              title="Delete this record (optionally re-capture it from EFNS)"
+              className="h-8 w-8 p-0 text-slate-400 hover:bg-red-50 hover:text-red-600"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
+          </div>
         )
       default:
         return ITEM_VALUE[id](i) || <span className="text-slate-400">—</span>

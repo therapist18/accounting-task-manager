@@ -1018,3 +1018,96 @@ const processEfnsItem = async (
     return { kind, id, name, status: "error", error: e?.message || "Auto-filing failed" }
   }
 }
+export interface EfnsFieldPreview {
+  /** "filed": the values saved on the filed document. "preview": what filing would fill. "none": no doc type. */
+  source: "filed" | "preview" | "none"
+  kycId: string | null
+  docTypeName: string | null
+  stageName: string | null
+  taskId: number | null
+  /** The document type's fields (acc_portal_kyc.fields), as configured. */
+  fields: any[]
+  values: Record<string, string>
+  /** Why there's no doc type ("no_rule") or no fields on it ("no_fields"). */
+  note?: "no_rule" | "no_fields" | null
+}
+
+/**
+ * The fields to show for an item in the Immigration Notifications preview — its document type's, not
+ * the row's columns. A filed item shows the values saved on its filed document. An unfiled one shows
+ * the type its status's "Filled from EFNS" rule picks (for the item's permit type's job levels; first
+ * in stage order when several do) with the values filing would read off its PDF. No AI either way.
+ */
+export async function previewEfnsDocumentFields(kind: ItemKind, id: number): Promise<EfnsFieldPreview> {
+  const sb = createServerSupabaseClient()
+  const empty: EfnsFieldPreview = { source: "none", kycId: null, docTypeName: null, stageName: null, taskId: null, fields: [], values: {}, note: "no_rule" }
+  const table = kind === "notification" ? "immigration_notifications" : "immigration_payments"
+  const { data: itemRow } = await sb.from(table).select("*").eq("id", id).maybeSingle()
+  if (!itemRow) return empty
+
+  const kycInfo = async (kycId: string) => {
+    const { data } = await sb.from("acc_portal_kyc").select("name, display_name, fields").eq("id", kycId).maybeSingle()
+    return { name: (data?.display_name || data?.name || null) as string | null, fields: Array.isArray(data?.fields) ? data.fields : [] }
+  }
+
+  // Filed: the document's own type and saved values.
+  const filing = itemRow.filing_status === "filed" ? itemRow.filing : null
+  if (filing?.document_id) {
+    const { data: doc } = await sb
+      .from("acc_portal_directors_documents")
+      .select("document_id, extracted_details")
+      .eq("id", filing.document_id)
+      .maybeSingle()
+    const kycId = doc?.document_id || filing.kyc_document_id
+    if (kycId) {
+      const info = await kycInfo(kycId)
+      const values = doc?.extracted_details && typeof doc.extracted_details === "object" ? doc.extracted_details : {}
+      return {
+        source: "filed",
+        kycId,
+        docTypeName: info.name,
+        stageName: filing.stage_name || null,
+        taskId: filing.task_id ?? null,
+        fields: info.fields,
+        values,
+        note: info.fields.length ? null : "no_fields",
+      }
+    }
+  }
+
+  // Not filed: the stage document the rules pick for this status on the permit type's job levels.
+  const { permitGroup, status, category, feeType } = itemPermitGroupAndStatus(kind, itemRow)
+  const levels = itemJobLevels(permitGroup, category) || []
+  const { stages, departments } = await fetchDepartment(sb, IMMIGRATION_DEPARTMENT_ID)
+  const pseudoTasks = levels.map((l) => ({
+    job_level: { department_id: IMMIGRATION_DEPARTMENT_ID, subdepartment_id: l.subdepartmentId, class_id: l.classId ?? null, subclass_id: null },
+  }))
+  const appliesToLevels = (fn: (task: any) => boolean) => (pseudoTasks.length ? pseudoTasks.some(fn) : true)
+
+  let pick: { kycId: string; stageName: string; orderNum: number } | null = null
+  for (const stage of stages) {
+    if (!appliesToLevels((t) => isStageApplicableToTask(stage, t, departments))) continue
+    for (const doc of stage.documents || []) {
+      if (
+        doc?.kycId &&
+        isEfnsTriggerSet(doc.efnsTrigger) &&
+        efnsTriggerMatches(doc.efnsTrigger, status, feeType) &&
+        appliesToLevels((t) => documentAppliesToTask(doc, t)) &&
+        (!pick || (stage.order_num || 0) < pick.orderNum)
+      ) {
+        pick = { kycId: doc.kycId, stageName: stage.name || "", orderNum: stage.order_num || 0 }
+      }
+    }
+  }
+  if (!pick) return empty
+
+  const info = await kycInfo(pick.kycId)
+  const base = { kycId: pick.kycId, docTypeName: info.name, stageName: pick.stageName, taskId: null, fields: info.fields }
+  if (!info.fields.length) return { ...base, source: "preview", values: {}, note: "no_fields" }
+
+  const pdfPath = immigrationPdfPath(kind, kind === "notification" ? itemRow.pdf_file_name : itemRow.payment_instructions_file_name)
+  const download = pdfPath ? await sb.storage.from(IMMIGRATION_BUCKET).download(pdfPath) : null
+  const pdf = download?.data ? new Uint8Array(await download.data.arrayBuffer()) : null
+  const fill = await fillEfnsDocumentFields(info.fields, pdf, kind, itemRow)
+  return { ...base, source: "preview", values: fill.values, note: null }
+}

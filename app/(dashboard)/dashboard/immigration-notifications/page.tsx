@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
-import { Download, Loader2, Play, RotateCcw, Search } from "lucide-react"
+import { CheckCircle2, Download, Loader2, Play, RefreshCcw, RotateCcw, Search, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -14,6 +14,17 @@ import { ITEM_COLUMNS, ITEM_VALUE, NotificationsTable } from "./components/Notif
 import { exportItemsToExcel } from "./components/exportNotifications"
 import { STATUS_TAB, STATUS_TAB_FALLBACK } from "./components/statusStyles"
 import { LinkEfnsItemDialog } from "./components/LinkEfnsItemDialog"
+import { DeleteEfnsItemDialog } from "./components/DeleteEfnsItemDialog"
+
+interface SyncRequest {
+  id: number
+  status: "pending" | "running" | "done" | "error"
+  targets: unknown[]
+  created_at: string
+  finished_at: string | null
+  result: { recaptured: number; missing: number } | null
+  error: string | null
+}
 
 // Immigration Notifications: everything the EFNS immigration automation has recorded — both the
 // notification updates (approved / issued / invoice / upload required …) and the payment invoices
@@ -46,6 +57,9 @@ export default function ImmigrationNotificationsPage() {
   const [exporting, setExporting] = useState(false)
   const [running, setRunning] = useState(false)
   const [linkItem, setLinkItem] = useState<ImmigrationItem | null>(null)
+  const [deleteItem, setDeleteItem] = useState<ImmigrationItem | null>(null)
+  // The latest requested sync (re-capture of deleted records by the EFNS automation).
+  const [syncRequest, setSyncRequest] = useState<SyncRequest | null>(null)
   const columns = useColumnVisibility(ITEM_COLUMNS.map(({ id, label }) => ({ id, label })))
 
   const load = useCallback(async () => {
@@ -62,6 +76,50 @@ export default function ImmigrationNotificationsPage() {
   useEffect(() => {
     load()
   }, [load])
+
+  const loadSyncRequest = useCallback(async () => {
+    try {
+      const res = await fetch("/api/immigration-notifications/resync")
+      const json = await res.json()
+      return ((json.requests || [])[0] as SyncRequest | undefined) ?? null
+    } catch {
+      return null
+    }
+  }, [])
+
+  useEffect(() => {
+    loadSyncRequest().then(setSyncRequest)
+  }, [loadSyncRequest])
+
+  // While a re-capture is queued or running, check on it every 10s; reload the list when it lands.
+  const syncActive = syncRequest?.status === "pending" || syncRequest?.status === "running"
+  useEffect(() => {
+    if (!syncActive) return
+    const timer = setInterval(async () => {
+      const latest = await loadSyncRequest()
+      if (!latest) return
+      setSyncRequest((prev) => {
+        if (prev && prev.id === latest.id && prev.status !== latest.status && (latest.status === "done" || latest.status === "error")) {
+          if (latest.status === "done") {
+            toast.success(`Re-capture finished: ${latest.result?.recaptured ?? 0} back, ${latest.result?.missing ?? 0} not found on the portal`)
+          } else {
+            toast.error(`Re-capture failed: ${latest.error || "unknown error"}`)
+          }
+          // File what came back straight away (the EFNS automation also triggers this when it is
+          // configured to; running it twice is harmless — filed items are skipped).
+          void fetch("/api/immigration-notifications/file-job", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          })
+            .catch(() => {})
+            .finally(() => void load())
+        }
+        return latest
+      })
+    }, 10000)
+    return () => clearInterval(timer)
+  }, [syncActive, loadSyncRequest, load])
 
   const generatedAt = useMemo(() => items.reduce((max, i) => (i.iso > max ? i.iso : max), ""), [items])
   const notificationCount = useMemo(() => items.filter((i) => i.kind === "notification").length, [items])
@@ -177,6 +235,24 @@ export default function ImmigrationNotificationsPage() {
             {exporting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />}
             Export
           </Button>
+          {syncRequest && (syncActive || (syncRequest.finished_at && Date.now() - new Date(syncRequest.finished_at).getTime() < 30 * 60 * 1000)) && (
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-3 h-9 text-sm font-medium",
+                syncRequest.status === "error"
+                  ? "border-red-200 bg-red-50 text-red-700"
+                  : syncRequest.status === "done"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-amber-200 bg-amber-50 text-amber-700",
+              )}
+              title={syncRequest.error || "Records deleted with “Re-capture” are fetched again by the EFNS automation (WhatsApp off)"}
+            >
+              {syncRequest.status === "pending" && <><RefreshCcw className="h-4 w-4" /> Re-capture queued ({syncRequest.targets.length}) · waiting for EFNS</>}
+              {syncRequest.status === "running" && <><Loader2 className="h-4 w-4 animate-spin" /> Re-capturing {syncRequest.targets.length} record{syncRequest.targets.length === 1 ? "" : "s"}…</>}
+              {syncRequest.status === "done" && <><CheckCircle2 className="h-4 w-4" /> Re-captured {syncRequest.result?.recaptured ?? 0}/{syncRequest.targets.length}</>}
+              {syncRequest.status === "error" && <><XCircle className="h-4 w-4" /> Re-capture failed</>}
+            </span>
+          )}
           <Button variant="outline" size="sm" onClick={load} disabled={loading} className={PILL_BUTTON_CLASS} title="Reload from the database">
             {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <RotateCcw className="h-5 w-5" />}
             Refresh
@@ -249,6 +325,7 @@ export default function ImmigrationNotificationsPage() {
           isVisible={columns.isVisible}
           onFilteredChange={setExportRows}
           onLink={setLinkItem}
+          onDelete={setDeleteItem}
           resetKey={`${permit}|${statusFilter}|${q}`}
         />
       </div>
@@ -257,6 +334,15 @@ export default function ImmigrationNotificationsPage() {
         item={linkItem}
         onOpenChange={(open) => !open && setLinkItem(null)}
         onLinked={load}
+      />
+
+      <DeleteEfnsItemDialog
+        item={deleteItem}
+        onOpenChange={(open) => !open && setDeleteItem(null)}
+        onDeleted={async (queued) => {
+          await load()
+          if (queued) setSyncRequest(await loadSyncRequest())
+        }}
       />
     </div>
   )
