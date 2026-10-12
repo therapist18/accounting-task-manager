@@ -16,7 +16,8 @@ import { itemJobLevels } from "@/lib/efnsFiling"
 //   GET ?kind=notification&id=123            → candidate tasks for the item's manual link dialog,
 //                                              only in the job levels of the item's permit type
 //       &scope=all                           → search every task instead
-//       &taskId=5                            → the stages a picked task can take a filing on
+//       &taskId=5                            → the stages a picked task can take a filing on, plus the
+//                                               one the stages' EFNS rules pick for the item (suggested)
 //       &q=...                               → narrow the candidate search
 //
 //   POST { kind, id, taskId, stageId, kycId }
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
 
   try {
     if (taskId) {
-      const link = await linkStagesForTask(taskId)
+      const link = await linkStagesForTask(taskId, kind && id ? { kind, id } : null)
       return NextResponse.json({ success: true, ...link })
     }
 

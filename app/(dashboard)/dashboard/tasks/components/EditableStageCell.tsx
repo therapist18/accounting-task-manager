@@ -755,6 +755,28 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
       return;
     }
     try {
+      // Documents filed from EFNS re-fill from their PDF's labels and EFNS record on the server (no
+      // AI); "Re-extract with AI" still runs the normal extraction on them.
+      if (!forceAI && currentDoc.document?.metadata?.source === 'efns') {
+        const res = await fetch('/api/immigration-notifications/file/refill', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ documentId: currentDoc.documentId }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.success) throw new Error(json.error || 'Failed to re-fill the document');
+        const extractedData = json.values || {};
+        await onSave(stage.id, task.id, 'completed', { extractedData, documentId: currentDoc.documentId });
+        setPreviewDocuments(prev => prev.map(d => d.documentId === currentDoc.documentId ? { ...d, extractedData } : d));
+        toast({
+          title: 'Fields re-filled',
+          description: json.missing?.length ? `Not on the document: ${json.missing.join(', ')}` : 'All fields filled from the document.',
+          variant: 'success'
+        });
+        if (onFetchData) await onFetchData();
+        return;
+      }
+
       const result = await performExtraction(
         currentDoc.fileUrl,
         currentDoc.fields || [],
@@ -2269,6 +2291,7 @@ export default function EditableStageCell({ stage, stages = [], task, value, onS
                   <ExtractionPreview
                     key={`${currentDoc.documentId}-${currentDoc.created_at || ''}`}
                     documentId={currentDoc.documentId}
+                    kycDocumentId={currentDoc.kycDoc?.id}
                     documentName={currentDoc.documentName}
                     extractedData={currentDoc.extractedData || {}}
                     fields={currentDoc.fields || []}

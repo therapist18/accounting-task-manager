@@ -72,6 +72,11 @@ export function LinkEfnsItemDialog({
   const [loadingStages, setLoadingStages] = useState(false)
   const [selectedStageId, setSelectedStageId] = useState<string>("")
   const [selectedKycId, setSelectedKycId] = useState<string>("")
+  // The stage the "Filled from EFNS" rules picked for this item on the selected task — shown as a
+  // summary; the full stage list only opens when there's no pick or the operator overrides it.
+  const [suggested, setSuggested] = useState<{ stageId: string; kycId: string; stageName: string } | null>(null)
+  const [suggestionNote, setSuggestionNote] = useState<string | null>(null)
+  const [choosingStage, setChoosingStage] = useState(false)
   const [filing, setFiling] = useState(false)
   // Search every task instead of just the permit type's job levels.
   const [searchAll, setSearchAll] = useState(false)
@@ -134,14 +139,30 @@ export function LinkEfnsItemDialog({
     setStages([])
     setSelectedStageId("")
     setSelectedKycId("")
+    setSuggested(null)
+    setSuggestionNote(null)
+    setChoosingStage(false)
     setLoadingStages(true)
     try {
-      const json = await fetchJson(`/api/immigration-notifications/file?taskId=${task.id}`)
+      const params = new URLSearchParams({ taskId: String(task.id) })
+      if (item) {
+        params.set("kind", item.kind)
+        params.set("id", String(item.id))
+      }
+      const json = await fetchJson(`/api/immigration-notifications/file?${params}`)
       const list: TaskStage[] = json.stages || []
       setStages(list)
-      if (list.length === 1 && list[0].documents[0]?.kycId) {
-        setSelectedStageId(list[0].stageId)
-        setSelectedKycId(list[0].documents[0].kycId)
+      if (json.suggested?.stageId && json.suggested?.kycId) {
+        setSuggested(json.suggested)
+        setSelectedStageId(json.suggested.stageId)
+        setSelectedKycId(json.suggested.kycId)
+      } else {
+        setSuggestionNote(json.suggestionNote || "no_rule")
+        setChoosingStage(true)
+        if (list.length === 1 && list[0].documents[0]?.kycId) {
+          setSelectedStageId(list[0].stageId)
+          setSelectedKycId(list[0].documents[0].kycId)
+        }
       }
     } catch (e: any) {
       toast.error(e?.message || "Failed to load the task's stages")
@@ -149,7 +170,7 @@ export function LinkEfnsItemDialog({
     } finally {
       setLoadingStages(false)
     }
-  }, [])
+  }, [item])
 
   const selectStage = useCallback((stageId: string) => {
     setSelectedStageId(stageId)
@@ -308,9 +329,47 @@ export function LinkEfnsItemDialog({
                 <div className="flex items-center justify-center py-6 text-sm text-slate-400">
                   <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading the task's stages…
                 </div>
+              ) : suggested && !choosingStage ? (
+                <div className="flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2.5">
+                  <div className="text-sm">
+                    <span className="block font-medium text-slate-800">{suggested.stageName}</span>
+                    <span className="block text-xs text-slate-500">
+                      {stages.find((s) => s.stageId === suggested.stageId)?.documents.find((d) => d.kycId === suggested.kycId)?.name || "Stage document"}
+                      {" · "}picked by the stage's “Filled from EFNS” rule
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setChoosingStage(true)}
+                    className="shrink-0 text-xs font-medium text-blue-600 hover:underline"
+                  >
+                    Choose a different stage
+                  </button>
+                </div>
               ) : stages.length === 0 ? (
                 <div className="text-sm text-slate-400 italic py-4">This task's department has no stages with configured documents.</div>
               ) : (
+                <>
+                {suggestionNote && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">
+                    {suggestionNote === "all_filled"
+                      ? "Every stage whose EFNS rule takes this status is already filled on this task — pick one to file to anyway."
+                      : "No stage document's “Filled from EFNS” rule takes this item's status on this task's job level — pick one manually (or add the rule in the stage settings)."}
+                  </p>
+                )}
+                {suggested && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedStageId(suggested.stageId)
+                      setSelectedKycId(suggested.kycId)
+                      setChoosingStage(false)
+                    }}
+                    className="text-xs font-medium text-blue-600 hover:underline"
+                  >
+                    ← Back to the rule's pick ({suggested.stageName})
+                  </button>
+                )}
                 <div className="border rounded-lg divide-y max-h-64 overflow-auto">
                   <RadioGroup value={selectedStageId} onValueChange={selectStage} className="gap-0">
                     {stages.map((s) => (
@@ -348,6 +407,7 @@ export function LinkEfnsItemDialog({
                     ))}
                   </RadioGroup>
                 </div>
+                </>
               )}
             </section>
           )}

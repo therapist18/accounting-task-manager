@@ -27,6 +27,7 @@ import {
   type ParsedApplicant,
 } from "@/lib/immigrationNotifications"
 import type { EfnsFilingRecord, EfnsFilingStatus, EfnsMatchedBy } from "@/lib/efnsFiling"
+import { fillEfnsDocumentFields } from "@/lib/efnsDocumentFields.server"
 import { efnsTriggerMatches, IMMIGRATION_DEPARTMENT_ID, isEfnsTriggerSet, itemJobLevels, type EfnsJobLevel } from "@/lib/efnsFiling"
 // The same "is this stage N/A for this task's job level / class" rule the task tables use.
 import { isStageApplicableToTask } from "@/app/(dashboard)/dashboard/reports/utils/reportStageLogic"
@@ -117,11 +118,17 @@ const documentAppliesToTask = (doc: any, task: any): boolean => {
   const classId = task.job_level?.class_id ?? task.class_id
   const subclassId = task.job_level?.subclass_id ?? task.subclass_id
   const same = (a: unknown, b: unknown) => a != null && b != null && String(a) === String(b)
-  return targets.some((t) =>
-    same(t.subdept_id, subdeptId) &&
-    (t.class_id == null || same(t.class_id, classId)) &&
-    (t.subclass_id == null || same(t.subclass_id, subclassId)),
-  )
+  // The stage settings save each target as { job_level: { subdepartment_id, class_id, subclass_id } };
+  // older entries kept flat subdept_id / class_id / subclass_id.
+  return targets.some((t) => {
+    const level = t?.job_level && typeof t.job_level === "object" ? t.job_level : t
+    const tSubdept = level.subdepartment_id ?? level.subdept_id
+    return (
+      same(tSubdept, subdeptId) &&
+      (level.class_id == null || same(level.class_id, classId)) &&
+      (level.subclass_id == null || same(level.subclass_id, subclassId))
+    )
+  })
 }
 
 /** The task's stages that apply to its job level / class (N/A ones dropped). */
@@ -133,12 +140,14 @@ const applicableStages = (stages: any[], task: any, departments: any[]) =>
  * names one (a level without a class means "any class", so a mixed list keeps the subdepartment only).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+// Reads the task's job_level JSON, not its department_id / subdepartment_id / class_id columns: tasks
+// created from the enquiry dialog (since Feb 2026) only fill job_level, while every task has it.
 const scopeToJobLevels = (q: any, levels: EfnsJobLevel[] | null) => {
   if (!levels?.length) return q
   let scopedQuery = q
-    .eq("department_id", IMMIGRATION_DEPARTMENT_ID)
-    .in("subdepartment_id", [...new Set(levels.map((l) => l.subdepartmentId))])
-  if (levels.every((l) => l.classId)) scopedQuery = scopedQuery.in("class_id", levels.map((l) => l.classId as string))
+    .eq("job_level->>department_id", String(IMMIGRATION_DEPARTMENT_ID))
+    .in("job_level->>subdepartment_id", [...new Set(levels.map((l) => String(l.subdepartmentId)))])
+  if (levels.every((l) => l.classId)) scopedQuery = scopedQuery.in("job_level->>class_id", levels.map((l) => l.classId as string))
   return scopedQuery
 }
 
@@ -182,7 +191,13 @@ export interface EfnsCandidateTask {
 // the company_details JSONB, which is why only applicant_name / principal_member_name are matched
 // and the dialog's company line is best-effort.
 const CANDIDATE_SELECT =
-  "id, applicant_name, r_number, principal_member_name, company_details, individual_id, department_id, subdepartment_id, class_id, subclass_id, status, job_level, created_at"
+  "id, applicant_name, applicant_details, r_number, principal_member_name, company_details, individual_id, department_id, subdepartment_id, class_id, subclass_id, status, job_level, created_at"
+
+/** The task's applicant: applicant_name, or applicant_details.name on tasks that only fill that. */
+const taskApplicantName = (row: any): string | null => {
+  const details = row?.applicant_details && typeof row.applicant_details === "object" ? row.applicant_details : null
+  return (row?.applicant_name || details?.name || null) as string | null
+}
 
 const taskCompanyName = (row: any): string | null => {
   const details = row?.company_details && typeof row.company_details === "object" ? row.company_details : null
@@ -278,7 +293,7 @@ const NAME_SCORE_MIN = 0.01
 const tokenOrFilter = (normalized: string): string =>
   identityTokens(normalized)
     .slice(0, 6)
-    .map((t) => `applicant_name.ilike.%${t}%,principal_member_name.ilike.%${t}%`)
+    .map((t) => `applicant_name.ilike.%${t}%,applicant_details->>name.ilike.%${t}%,principal_member_name.ilike.%${t}%`)
     .join(",")
 
 /**
@@ -313,17 +328,33 @@ export async function suggestEfnsTasks(input: {
   const withCompany = (rows: any[]) =>
     rows.map((row) => ({
       ...(row as Record<string, unknown>),
+      applicant_name: taskApplicantName(row),
       company_name: taskCompanyName(row),
       is_terminal: isTerminalStatus(row.status),
     })) as EfnsCandidateTask[]
 
   if (fileNumber) {
-    // Case-insensitive exact R-number — the portal's printed file number vs. the registry's.
-    const { data, error } = await scoped(sb.from("tm_tasks").select(CANDIDATE_SELECT))
-      .ilike("r_number", escapeLike(fileNumber))
-      .limit(limit)
-    if (!error && data && data.length > 0) {
-      const openFirst = [...data].sort((a: any, b: any) => Number(isTerminalStatus(a.status)) - Number(isTerminalStatus(b.status)))
+    // The portal's printed file number ("File R") is the person's R-number: kept on the registry
+    // individual (registry_individuals.r_number) and, once learned, on the task. Some stored values
+    // carry a trailing line break, hence the prefix match plus an exact check on the trimmed value.
+    const { data: people } = await sb
+      .from("registry_individuals")
+      .select("id, r_number")
+      .ilike("r_number", `${escapeLike(fileNumber)}%`)
+      .limit(50)
+    const individualIds = (people || [])
+      .filter((p: any) => normalizeText(p.r_number) === fileNumber)
+      .map((p: any) => p.id)
+    const [byIndividual, byTask] = await Promise.all([
+      individualIds.length
+        ? scoped(sb.from("tm_tasks").select(CANDIDATE_SELECT)).in("individual_id", individualIds).limit(limit)
+        : Promise.resolve({ data: [] as any[] }),
+      scoped(sb.from("tm_tasks").select(CANDIDATE_SELECT)).ilike("r_number", escapeLike(fileNumber)).limit(limit),
+    ])
+    const byId = new Map<string, any>()
+    for (const row of [...(byIndividual.data || []), ...(byTask.data || [])]) byId.set(String(row.id), row)
+    if (byId.size > 0) {
+      const openFirst = [...byId.values()].sort((a: any, b: any) => Number(isTerminalStatus(a.status)) - Number(isTerminalStatus(b.status)))
       return withCompany(openFirst)
     }
   }
@@ -345,7 +376,7 @@ export async function suggestEfnsTasks(input: {
   const scored = candidates
     .map((row: any): { score: number; row: any } => ({
       score: Math.max(
-        nameMatchScore(applicantName, row.applicant_name || ""),
+        nameMatchScore(applicantName, taskApplicantName(row) || ""),
         nameMatchScore(applicantName, row.principal_member_name || ""),
         company ? nameMatchScore(company, taskCompanyName(row) || "") : 0,
       ) +
@@ -364,7 +395,11 @@ export async function suggestEfnsTasks(input: {
 }
 
 /** The stages (with their configured documents) a task could take an EFNS filing on. */
-export async function linkStagesForTask(taskId: number | string): Promise<{
+export async function linkStagesForTask(
+  taskId: number | string,
+  /** The item being linked: its stage document is then pre-chosen from the stages' EFNS rules. */
+  item?: { kind: ItemKind; id: number } | null,
+): Promise<{
   task: EfnsCandidateTask | null
   stages: Array<{
     stageId: string
@@ -372,6 +407,10 @@ export async function linkStagesForTask(taskId: number | string): Promise<{
     orderNum: number
     documents: Array<{ kycId: string; name: string; isRequired?: boolean }>
   }>
+  /** What the rules pick for the item (null without an item, or when no rule takes it). */
+  suggested: { stageId: string; kycId: string; stageName: string } | null
+  /** Why nothing was suggested: "no_rule" or "all_filled". */
+  suggestionNote?: string | null
 }> {
   const sb = createServerSupabaseClient()
   try {
@@ -389,10 +428,27 @@ export async function linkStagesForTask(taskId: number | string): Promise<{
           .filter((d: any) => !!d.kycId && documentAppliesToTask(d, task))
           .map((d: any) => ({ kycId: d.kycId, name: d.name || "Document", isRequired: d.isRequired })),
       }))
+    let suggested: { stageId: string; kycId: string; stageName: string } | null = null
+    let suggestionNote: string | null = null
+    if (item) {
+      const table = item.kind === "notification" ? "immigration_notifications" : "immigration_payments"
+      const { data: itemRow } = await sb.from(table).select("*").eq("id", item.id).maybeSingle()
+      if (itemRow) {
+        const { status, feeType } = itemPermitGroupAndStatus(item.kind, itemRow)
+        const resolved = await resolveEfnsStage(sb, task, status, feeType)
+        if (resolved.outcome === "match") {
+          suggested = { stageId: resolved.match.stageId, kycId: resolved.match.kycId, stageName: resolved.match.stageName }
+        } else {
+          suggestionNote = resolved.outcome
+        }
+      }
+    }
     return {
+      suggested,
+      suggestionNote,
       task: {
         id: task.id,
-        applicant_name: task.applicant_name ?? null,
+        applicant_name: taskApplicantName(task),
         r_number: task.r_number ?? null,
         company_name: taskCompanyName(task),
         individual_id: task.individual_id ?? null,
@@ -406,7 +462,7 @@ export async function linkStagesForTask(taskId: number | string): Promise<{
       stages: result,
     }
   } catch {
-    return { task: null, stages: [] }
+    return { task: null, stages: [], suggested: null }
   }
 }
 
@@ -515,6 +571,16 @@ export async function fileEfnsItem(input: FileEfnsItemInput): Promise<FileEfnsIt
     })
     if (upErr) return recordError(baseFiling, `Failed to store PDF: ${upErr.message}`)
 
+    // Fill the document type's fields (acc_portal_kyc.fields) from the PDF's own labels and the item
+    // row — no AI. A type with no fields yet just gets an empty extracted_details.
+    const { data: kycRow } = await sb.from("acc_portal_kyc").select("fields").eq("id", kycId).maybeSingle()
+    const fill = await fillEfnsDocumentFields(
+      Array.isArray(kycRow?.fields) ? kycRow.fields : [],
+      new Uint8Array(await blob.arrayBuffer()),
+      input.kind,
+      itemRow,
+    )
+
     // Insert the document row.
     const { data: docRow, error: insErr } = await sb
       .from("acc_portal_directors_documents")
@@ -524,12 +590,16 @@ export async function fileEfnsItem(input: FileEfnsItemInput): Promise<FileEfnsIt
         document_id: kycId,
         file_path: filePath,
         task_id: task.id,
-        extracted_details: {
+        // Field values only (keyed by field name, like any extracted document): the preview's Save /
+        // Re-extract rewrite this column wholesale, so where the document came from lives in metadata.
+        extracted_details: fill.values,
+        metadata: {
           source: "efns",
           efns_kind: input.kind,
           efns_id: input.id,
           file_number: itemRow.file_number ?? null,
           matched_by: input.matchedBy,
+          fields: { sources: fill.sources, missing: fill.missing, pdf_labels: fill.pdfLabels },
         },
         created_at: now,
         updated_at: now,
@@ -574,11 +644,30 @@ export async function fileEfnsItem(input: FileEfnsItemInput): Promise<FileEfnsIt
       updated_at: now,
     }
     if (input.byId) taskUpdate.updated_by_id = input.byId
+    // Learn the task's file number from what it was just filed with, so later notices for the same
+    // file match it exactly (r_number) instead of by name. Never overwrites one already set.
+    if (!String(task.r_number ?? "").trim() && String(itemRow.file_number ?? "").trim()) {
+      taskUpdate.r_number = String(itemRow.file_number).trim()
+    }
     const advancedStatus = computeAdvancedTaskStatus(task.status, input.stageId)
     if (advancedStatus) taskUpdate.status = advancedStatus
 
     const { error: taskUpdErr } = await sb.from("tm_tasks").update(taskUpdate).eq("id", task.id)
     if (taskUpdErr) return recordError(baseFiling, `Failed to update task: ${taskUpdErr.message}`)
+
+    // …and on the individual the document was filed against, when the registry has none yet.
+    const learnedFileNumber = String(itemRow.file_number ?? "").trim()
+    if (learnedFileNumber) {
+      await sb
+        .from("registry_individuals")
+        .update({ r_number: learnedFileNumber })
+        .eq("id", individualId)
+        .or("r_number.is.null,r_number.eq.")
+        .then(
+          () => {},
+          () => {},
+        )
+    }
 
     // Record the link on the item.
     const filing: EfnsFilingRecord = {
@@ -661,6 +750,102 @@ export const itemPermitGroupAndStatus = (
   }
 }
 
+
+export type EfnsStageResolution =
+  | { outcome: "match"; match: { stageId: string; stageName: string; kycId: string; orderNum: number } }
+  | { outcome: "no_rule" }
+  | { outcome: "all_filled"; stageNames: string[] }
+
+/**
+ * The stage document an item files to on this task, from the stages' "Filled from EFNS" rules: a
+ * document whose rule takes the item's status (and fee type), on a stage and document that apply to
+ * the task's job level / class. When several stages take it (e.g. "Online Received Notification 1"
+ * and "… 2" both take APPLICATION RECEIVED) it's the first one, in stage order, this task hasn't
+ * filled yet — so the second received notice lands in the second stage. `task` is a full tm_tasks row.
+ */
+export async function resolveEfnsStage(
+  sb: SupabaseClientLike,
+  task: any,
+  status: string,
+  feeType: string | null,
+): Promise<EfnsStageResolution> {
+  const departmentId = task.job_level?.department_id ?? task.department_id
+  const { stages, departments } = await fetchDepartment(sb, departmentId)
+  const matches: Array<{ stageId: string; stageName: string; kycId: string; orderNum: number }> = []
+  for (const stage of applicableStages(stages, task, departments)) {
+    for (const doc of stage.documents || []) {
+      if (
+        doc?.kycId &&
+        isEfnsTriggerSet(doc.efnsTrigger) &&
+        efnsTriggerMatches(doc.efnsTrigger, status, feeType) &&
+        documentAppliesToTask(doc, task)
+      ) {
+        matches.push({ stageId: stage.id, stageName: stage.name || "", kycId: doc.kycId, orderNum: stage.order_num || 0 })
+      }
+    }
+  }
+  if (matches.length === 0) return { outcome: "no_rule" }
+  const unfilled = matches
+    .filter((m) => {
+      const entry = task.stages?.[m.stageId]
+      return !(entry?.status === "completed" || entry?.completedAt || Object.keys(entry?.documents || {}).length > 0)
+    })
+    .sort((a, b) => a.orderNum - b.orderNum)
+  if (matches.length === 1) return { outcome: "match", match: matches[0] }
+  if (unfilled.length === 0) return { outcome: "all_filled", stageNames: matches.map((m) => m.stageName) }
+  return { outcome: "match", match: unfilled[0] }
+}
+
+/**
+ * Re-fills a filed EFNS document's fields from its PDF and EFNS item — for documents filed before
+ * their type had fields, or after the fields changed. Values it finds replace the stored ones; fields
+ * it can't fill keep whatever is there (an operator's own entry survives). No AI.
+ */
+export async function refillEfnsDocumentFields(documentId: string): Promise<{
+  success: boolean
+  values?: Record<string, string>
+  missing?: string[]
+  error?: string
+}> {
+  const sb = createServerSupabaseClient()
+  const { data: doc, error } = await sb
+    .from("acc_portal_directors_documents")
+    .select("id, document_id, file_path, extracted_details, metadata")
+    .eq("id", documentId)
+    .maybeSingle()
+  if (error || !doc) return { success: false, error: error?.message || "Document not found" }
+  const meta = doc.metadata && typeof doc.metadata === "object" ? doc.metadata : {}
+  if (meta.source !== "efns" || !meta.efns_kind || !meta.efns_id) {
+    return { success: false, error: "Not a document filed from EFNS" }
+  }
+
+  const table = meta.efns_kind === "notification" ? "immigration_notifications" : "immigration_payments"
+  const [{ data: itemRow }, { data: kycRow }, download] = await Promise.all([
+    sb.from(table).select("*").eq("id", meta.efns_id).maybeSingle(),
+    sb.from("acc_portal_kyc").select("fields").eq("id", doc.document_id).maybeSingle(),
+    sb.storage.from("kyc-documents").download(doc.file_path),
+  ])
+  const pdf = download.data ? new Uint8Array(await download.data.arrayBuffer()) : null
+  const fill = await fillEfnsDocumentFields(
+    Array.isArray(kycRow?.fields) ? kycRow.fields : [],
+    pdf,
+    meta.efns_kind,
+    itemRow || {},
+  )
+
+  const existing = doc.extracted_details && typeof doc.extracted_details === "object" ? doc.extracted_details : {}
+  const values = { ...existing, ...fill.values }
+  const { error: updErr } = await sb
+    .from("acc_portal_directors_documents")
+    .update({
+      extracted_details: values,
+      metadata: { ...meta, fields: { sources: fill.sources, missing: fill.missing, pdf_labels: fill.pdfLabels } },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", documentId)
+  if (updErr) return { success: false, error: updErr.message }
+  return { success: true, values, missing: fill.missing }
+}
 
 /** How long no_rule / no_match / ambiguous items keep being retried. */
 const RETRY_WINDOW_DAYS = 30
@@ -796,50 +981,20 @@ const processEfnsItem = async (
     }
 
     const task = open[0]
-    const departmentId = task.job_level?.department_id ?? task.department_id
-    const { stages, departments } = await fetchDepartment(sb, departmentId)
-    const matches: Array<{ stageId: string; stageName: string; kycId: string; orderNum: number }> = []
-    // Only stages that apply to this task's job level / class can take the filing.
-    for (const stage of applicableStages(stages, task, departments)) {
-      for (const doc of (stage.documents || [])) {
-        if (
-          doc?.kycId &&
-          isEfnsTriggerSet(doc.efnsTrigger) &&
-          efnsTriggerMatches(doc.efnsTrigger, status, feeType) &&
-          documentAppliesToTask(doc, task)
-        ) {
-          matches.push({ stageId: stage.id, stageName: stage.name || "", kycId: doc.kycId, orderNum: stage.order_num || 0 })
-        }
-      }
-    }
-
-    if (matches.length === 0) {
+    const resolved = await resolveEfnsStage(sb, await fetchTask(sb, task.id), status, feeType)
+    if (resolved.outcome === "no_rule") {
       return writeOutcome("no_rule", { task_id: task.id, stage_id: "", matched_by: matchedBy })
     }
-
-    // Several stages can take the same item (e.g. "Online Received Notification 1" and "… 2" both
-    // take APPLICATION RECEIVED): it goes to the first one, in stage order, that this task hasn't
-    // filled yet — so the second received notice lands in the second stage.
-    let match = matches[0]
-    if (matches.length > 1) {
-      const full = await fetchTask(sb, task.id)
-      const unfilled = matches
-        .filter((m) => {
-          const entry = full.stages?.[m.stageId]
-          return !(entry?.status === "completed" || entry?.completedAt || Object.keys(entry?.documents || {}).length > 0)
-        })
-        .sort((a, b) => a.orderNum - b.orderNum)
-      if (unfilled.length === 0) {
-        return writeOutcome("ambiguous", {
-          task_id: task.id,
-          stage_id: "",
-          matched_by: matchedBy,
-          candidates: [{ id: task.id, applicant_name: task.applicant_name, r_number: task.r_number }],
-          error: `Every stage that takes ${status} (${matches.map((m) => m.stageName).join(", ")}) is already filled on this task`,
-        })
-      }
-      match = unfilled[0]
+    if (resolved.outcome === "all_filled") {
+      return writeOutcome("ambiguous", {
+        task_id: task.id,
+        stage_id: "",
+        matched_by: matchedBy,
+        candidates: [{ id: task.id, applicant_name: task.applicant_name, r_number: task.r_number }],
+        error: `Every stage that takes ${status} (${resolved.stageNames.join(", ")}) is already filled on this task`,
+      })
     }
+    const match = resolved.match
 
     const filed = await fileEfnsItem({
       kind,

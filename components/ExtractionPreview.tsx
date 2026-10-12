@@ -108,6 +108,9 @@ interface ExtractionPreviewProps {
   type?: string;
   file?: any;
   documentId?: string;
+  /** The document type (acc_portal_kyc id) to load fields from when none are passed. Callers whose
+   * documentId is the uploaded document's row id must pass this; it otherwise falls back to documentId. */
+  kycDocumentId?: string;
   extractionStatus?: 'pending' | 'success' | 'failed' | 'success';
   getStylesByType?: (type: string) => {
     getBgColor: () => string;
@@ -267,6 +270,7 @@ export const ExtractionPreview = ({
   type,
   file,
   documentId,
+  kycDocumentId,
   extractionStatus,
   getStylesByType = (type) => ({
     getBgColor: () => 'bg-white',
@@ -322,8 +326,9 @@ export const ExtractionPreview = ({
 
   useEffect(() => {
     const resolveFields = async () => {
-      if ((!fields || fields.length === 0) && documentId) {
-        const fetchedFields = await fetchDocumentFieldsFromKYC(documentId, supabase);
+      const fieldsSourceId = kycDocumentId || documentId;
+      if ((!fields || fields.length === 0) && fieldsSourceId) {
+        const fetchedFields = await fetchDocumentFieldsFromKYC(fieldsSourceId, supabase);
         setResolvedFields(fetchedFields || []);
       } else {
         setResolvedFields(fields || []);
@@ -331,7 +336,7 @@ export const ExtractionPreview = ({
     };
 
     resolveFields();
-  }, [fields, documentId, supabase]);
+  }, [fields, documentId, kycDocumentId, supabase]);
 
   const [localData, setLocalData] = useState<Record<string, any>>(() => {
     const initialData: Record<string, any> = {};

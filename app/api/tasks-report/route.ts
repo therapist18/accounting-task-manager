@@ -245,26 +245,41 @@ export async function GET(req: NextRequest) {
     // 1362 tasks, 63 of them flipping "is this task in department 1" specifically) — filtering
     // on the raw column here silently dropped all of them from the mobile report even though
     // the web dashboard counts them.
-    let taskQuery = supabase
-      .from("tm_tasks")
-      .select(`
+    // Case-detail columns the web task manager's table shows (see ENHANCED_TABLE_HEADERS_IMMIGRATION
+    // in dashboard/tasks/overall-view/tableUtils.tsx): job description, nationality and the
+    // cancellation audit fields. Selected defensively — if any of these doesn't exist on this
+    // deployment's schema the whole select errors, so we fall back to the base column set and the
+    // report still renders (just without the extras) rather than failing outright.
+    const BASE_TASK_COLUMNS = `
         id, applicant_name, status, r_number, passport_number,
         date_initiated, department_id, subdepartment_id, class_id, subclass_id,
         job_level, stages, task_manager_id, task_assistant_id, officer_id,
         participants_details, renewal_status, individual_id, company_id,
         applicant_details, processing_requirements_documents, issuance_requirements_documents,
         source_document_id
-      `)
-      .eq("job_level->>department_id", deptId)
-      .order("created_at", { ascending: false });
+      `;
+    const TASK_DETAIL_COLUMNS = "job_description, nationality, cancellation_details";
 
-    if (subDeptId) {
-      taskQuery = taskQuery.eq("job_level->>subdepartment_id", subDeptId);
+    const buildTaskQuery = (columns: string): any => {
+      let q = supabase
+        .from("tm_tasks")
+        .select(columns)
+        .eq("job_level->>department_id", deptId)
+        .order("created_at", { ascending: false });
+      if (subDeptId) {
+        q = q.eq("job_level->>subdepartment_id", subDeptId);
+      }
+      return q;
+    };
+
+    let { data: tasks, error: tasksErr } = await buildTaskQuery(`${BASE_TASK_COLUMNS}, ${TASK_DETAIL_COLUMNS}`);
+    if (tasksErr) {
+      console.warn("[tasks-report] detail columns unavailable, retrying without them:", tasksErr.message);
+      const retry = await buildTaskQuery(BASE_TASK_COLUMNS);
+      tasks = retry.data;
+      tasksErr = retry.error;
     }
-
-    const { data: tasks, error: tasksErr } = await taskQuery;
     if (tasksErr) throw tasksErr;
-
     // company_name is not a real tm_tasks column — it's join-computed everywhere else in
     // the web app (DepartmentTasksManager/reports fetchTasks) from the task's "sponsor"/
     // "company" participant, falling back to a company lookup table by id. Mirror that
@@ -627,6 +642,10 @@ export async function GET(req: NextRequest) {
         is_overdue: isOverdue,
         exceeded_minutes: exceededMinutes,
         renewal_status: task.renewal_status || "New",
+        job_description: task.job_description || "",
+        nationality: task.nationality || task.applicant_details?.nationality || "",
+        cancellation_reason: task.cancellation_details?.reason || "",
+        cancellation_date: task.cancellation_details?.cancelled_at || null,
         current_stage_name: currentStageName,
         current_stage_follow_up: currentStageFollowUp,
         task_manager: taskManager,

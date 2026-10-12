@@ -213,6 +213,17 @@ export function NotificationsTable({
     }
   }
 
+  // Sticky columns: # and Applicant pin to the left, the Link action to the right, so a row stays
+  // identifiable and actionable while the wide middle scrolls. Body cells inherit the row's (zebra /
+  // hover) background so scrolled content doesn't show through.
+  const stickyClass = (id: string, head: boolean) => {
+    const base = head ? "sticky z-40" : "sticky z-10 bg-inherit"
+    if (id === "#") return cn(base, "left-0")
+    if (id === "name") return cn(base, "left-16 shadow-[inset_-1px_0_0_rgb(226_232_240)]")
+    if (id === "link") return cn(base, "right-0 shadow-[inset_1px_0_0_rgb(226_232_240)]")
+    return ""
+  }
+
   return (
     <>
       <div className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
@@ -220,7 +231,7 @@ export function NotificationsTable({
         <table className="w-full min-w-[1500px] border-separate border-spacing-0 text-base">
           <thead className="sticky top-0 z-30 bg-white shadow-xs">
             <tr>
-              <SortTh tone="blue" id="#" levels={levels} onSort={toggle} className="w-16 text-center">#</SortTh>
+              <SortTh tone="blue" id="#" levels={levels} onSort={toggle} className={cn("w-16 min-w-16 max-w-16 text-center", stickyClass("#", true))}>#</SortTh>
               {columns.map((c, i) => (
                 <SortTh
                   key={c.id}
@@ -235,6 +246,7 @@ export function NotificationsTable({
                     c.id === "principal" && "min-w-[240px]",
                     c.id === "message" && "w-[340px] min-w-[260px] max-w-[340px]",
                     i === columns.length - 1 && "border-r-0",
+                    stickyClass(c.id, true),
                   )}
                 >
                   {c.label}
@@ -253,9 +265,9 @@ export function NotificationsTable({
             )}
             {pageRows.map((i, index) => (
               <tr key={i.key} className={cn("transition-colors", zebraRow(index))}>
-                <td className={cn(TD_CLASS, "text-center text-slate-400 tabular-nums")}>{start + index + 1}</td>
+                <td className={cn(TD_CLASS, "text-center text-slate-400 tabular-nums", stickyClass("#", false))}>{start + index + 1}</td>
                 {columns.map((c, ci) => (
-                  <td key={c.id} className={cn(TD_CLASS, ci === columns.length - 1 && "border-r-0")}>
+                  <td key={c.id} className={cn(TD_CLASS, ci === columns.length - 1 && "border-r-0", stickyClass(c.id, false))}>
                     {cell(i, c.id)}
                   </td>
                 ))}
