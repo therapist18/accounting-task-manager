@@ -5,31 +5,47 @@
 // Statuses and permit groups are exactly the Immigration Notifications page's (and the EFNS WhatsApp
 // group's): see lib/immigrationNotifications.ts.
 
-import { PERMIT_GROUP_PREFERRED, STATUS_PREFERRED } from "@/lib/immigrationNotifications"
+import { STATUS_PREFERRED } from "@/lib/immigrationNotifications"
 
 /**
- * Set on a stage document (StageDocument.efnsTrigger): EFNS items of one of these permit groups AND
- * one of these statuses fill this document, and complete its stage. An empty list matches nothing,
- * so a half-set trigger never files anything.
+ * Set on a stage document (StageDocument.efnsTrigger): EFNS items with one of these statuses fill this
+ * document, and complete its stage. Which tasks (job levels) that applies to isn't part of the rule:
+ * the item's permit type already decides the job levels its task is searched in
+ * (EFNS_PERMIT_JOB_LEVELS), and only stages / documents applicable to that task's job level are
+ * considered. An empty status list matches nothing.
  */
 export interface EfnsTrigger {
-  permitGroups: string[]
   statuses: string[]
+  /** Older rules stored permit types here too; they're ignored now. */
+  permitGroups?: string[]
+  /**
+   * Payments only, optional: the fee type the invoice / receipt is for ("Processing Fee",
+   * "Issuance Fee"), so a processing receipt and an issuance receipt — both PAID — fill different
+   * documents. Empty or missing = any fee type (and notifications, which have none, still match).
+   */
+  feeTypes?: string[]
 }
 
-/** Choices for the stage dialog. */
-export const EFNS_PERMIT_GROUPS = PERMIT_GROUP_PREFERRED
 /** Notification statuses plus the payment ones (invoice NOT PAID / receipt PAID). */
 export const EFNS_STATUSES = STATUS_PREFERRED
+/** immigration_payments.fee_type values. */
+export const EFNS_FEE_TYPES = ["Processing Fee", "Issuance Fee"]
 
 export function isEfnsTriggerSet(trigger: EfnsTrigger | null | undefined): trigger is EfnsTrigger {
-  return !!trigger && trigger.permitGroups?.length > 0 && trigger.statuses?.length > 0
+  return !!trigger && trigger.statuses?.length > 0
 }
 
-export function efnsTriggerMatches(trigger: EfnsTrigger | null | undefined, permitGroup: string, status: string): boolean {
+export function efnsTriggerMatches(
+  trigger: EfnsTrigger | null | undefined,
+  status: string,
+  feeType?: string | null,
+): boolean {
   if (!isEfnsTriggerSet(trigger)) return false
   const norm = (s: string) => s.trim().toUpperCase()
-  return trigger.permitGroups.some((g) => norm(g) === norm(permitGroup)) && trigger.statuses.some((s) => norm(s) === norm(status))
+  if (!trigger.statuses.some((s) => norm(s) === norm(status))) return false
+  // A fee-type condition only applies to items that have a fee type (payments).
+  if (trigger.feeTypes?.length && feeType) return trigger.feeTypes.some((t) => norm(t) === norm(feeType))
+  return true
 }
 
 /** Filing outcomes stored on immigration_notifications / immigration_payments.filing_status. */

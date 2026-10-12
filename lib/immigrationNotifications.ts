@@ -209,15 +209,26 @@ const COMPANY_HINT =
  * Who a record is about. `permitGroup` settles the one ambiguous shape: "OUTER (APPLICANT)" where
  * OUTER isn't a company is the principal on a dependant's pass, otherwise the applicant's sponsor.
  * The printable page's own applicant / company (EFNS stores them for new records) win when present,
- * except that a dependant written into the name stays a dependant.
+ * except that a dependant written into the name stays a dependant. When the page names a dependant,
+ * the record is theirs and its "Applicant Name" is their principal.
  */
 export function parseApplicant(
   raw: unknown,
   permitGroup?: string | null,
   printableApplicant?: string | null,
   printableCompany?: string | null,
+  printableDependant?: string | null,
 ): ParsedApplicant {
   const text = String(raw ?? "").replace(/\s+/g, " ").trim()
+
+  if (printableDependant?.trim()) {
+    return {
+      applicant: printableDependant.trim(),
+      relationship: "dependant",
+      principal: printableApplicant?.trim() || text || null,
+      company: null,
+    }
+  }
 
   const dependant = /^(.*?)\s*Dependant\s*:\s*(.+)$/i.exec(text)
   if (dependant && dependant[1].trim() && dependant[2].trim()) {
@@ -268,7 +279,7 @@ function mapNotification(row: Record<string, any>): ImmigrationItem {
   const rawType = String(row.permit_type || row.case_type || "").trim()
   const permitGroup = rawType ? rawType.toUpperCase() : "NOTIFICATION"
   const pdfName = row.pdf_file_name ? String(row.pdf_file_name) : null
-  const who = parseApplicant(row.name, permitGroup, row.printable_applicant, row.printable_company)
+  const who = parseApplicant(row.name, permitGroup, row.printable_applicant, row.printable_company, row.printable_dependant)
   return {
     key: `n-${row.id}`,
     kind: "notification",
@@ -306,7 +317,7 @@ function mapPayment(row: Record<string, any>): ImmigrationItem {
   const pdfName = row.payment_instructions_file_name ? String(row.payment_instructions_file_name) : null
   const amount = row.payment_amount ?? row.amount
   const permitGroup = paymentPermitGroup(category)
-  const who = parseApplicant(row.applicant_name || row.application_name, permitGroup, row.printable_applicant, row.printable_company)
+  const who = parseApplicant(row.applicant_name || row.application_name, permitGroup, row.printable_applicant, row.printable_company, row.printable_dependant)
   return {
     key: `p-${row.id}`,
     kind: "payment",

@@ -106,6 +106,24 @@ const fetchDepartment = async (
   return { stages: (data.stages || []) as any[], departments: [data] }
 }
 
+/**
+ * Whether a stage document applies to the task: a special document with target entities only applies
+ * to those job levels / classes / subclasses (the "Target Entities" picker in Stages Management).
+ */
+const documentAppliesToTask = (doc: any, task: any): boolean => {
+  const targets: any[] = doc?.isSpecial && Array.isArray(doc.targetEntities) ? doc.targetEntities : []
+  if (targets.length === 0) return true
+  const subdeptId = task.job_level?.subdepartment_id ?? task.subdepartment_id
+  const classId = task.job_level?.class_id ?? task.class_id
+  const subclassId = task.job_level?.subclass_id ?? task.subclass_id
+  const same = (a: unknown, b: unknown) => a != null && b != null && String(a) === String(b)
+  return targets.some((t) =>
+    same(t.subdept_id, subdeptId) &&
+    (t.class_id == null || same(t.class_id, classId)) &&
+    (t.subclass_id == null || same(t.subclass_id, subclassId)),
+  )
+}
+
 /** The task's stages that apply to its job level / class (N/A ones dropped). */
 const applicableStages = (stages: any[], task: any, departments: any[]) =>
   stages.filter((stage) => isStageApplicableToTask(stage, task, departments))
@@ -368,7 +386,7 @@ export async function linkStagesForTask(taskId: number | string): Promise<{
         stageName: s.name || "Untitled stage",
         orderNum: s.order_num || 0,
         documents: (s.documents as any[])
-          .filter((d: any) => !!d.kycId)
+          .filter((d: any) => !!d.kycId && documentAppliesToTask(d, task))
           .map((d: any) => ({ kycId: d.kycId, name: d.name || "Document", isRequired: d.isRequired })),
       }))
     return {
@@ -619,17 +637,19 @@ export interface EfnsJobResult {
 
 // The permit group + status an item presents, using the same rules the notifications page and the
 // stage-trigger picker use — so a rule configured in Stages Management matches the same item here.
-// `category` is a payment's application category (null for notifications), which can name a class.
+// `category` is a payment's application category (null for notifications), which can name a class;
+// `feeType` its fee type ("Processing Fee" / "Issuance Fee"), which stage triggers can require.
 export const itemPermitGroupAndStatus = (
   kind: ItemKind,
   row: any,
-): { permitGroup: string; status: string; category: string | null } => {
+): { permitGroup: string; status: string; category: string | null; feeType: string | null } => {
   if (kind === "notification") {
     const rawType = String(row.permit_type || row.case_type || "").trim()
     return {
       permitGroup: rawType ? rawType.toUpperCase() : "NOTIFICATION",
       status: shortNotifStatus(String(row.message || "")),
       category: null,
+      feeType: null,
     }
   }
   const category = String(row.application_category || row.application_name || "").trim()
@@ -637,6 +657,7 @@ export const itemPermitGroupAndStatus = (
     permitGroup: paymentPermitGroup(category),
     status: String(row.invoice_status || "Not Paid").toUpperCase(),
     category: category || null,
+    feeType: String(row.fee_type || "").trim() || null,
   }
 }
 
@@ -664,6 +685,7 @@ export const itemApplicant = (kind: ItemKind, row: any): ParsedApplicant => {
     permitGroup,
     row.printable_applicant,
     row.printable_company,
+    row.printable_dependant,
   )
 }
 
@@ -717,7 +739,7 @@ const processEfnsItem = async (
   const id = Number(row.id)
   const who = itemApplicant(kind, row)
   const name = who.applicant || `#${id}`
-  const { permitGroup, status, category } = itemPermitGroupAndStatus(kind, row)
+  const { permitGroup, status, category, feeType } = itemPermitGroupAndStatus(kind, row)
 
   const writeOutcome = async (
     outcome: EfnsFilingStatus,
@@ -746,6 +768,18 @@ const processEfnsItem = async (
     // as a candidate so the "Needs a task" list shows it for a manual link) but never receives an
     // automatic filing.
     const candidates = suggestions.map((t) => ({ id: t.id, applicant_name: t.applicant_name, r_number: t.r_number }))
+
+    // Without a job level for the permit type, the task search spanned every task, so nothing
+    // guarantees the task is the right kind — leave it for a person to link.
+    if (!itemJobLevels(permitGroup, category)) {
+      return writeOutcome("no_match", {
+        task_id: 0,
+        stage_id: "",
+        matched_by: matchedBy,
+        candidates,
+        error: `Permit type "${permitGroup}" isn't linked to a job level, so it isn't filed automatically`,
+      })
+    }
     // Open tasks this item could belong to: not finished, and not created long after the item arrived.
     const open = suggestions.filter((t) => !t.is_terminal && arrivedForTask(row, t))
 
@@ -764,12 +798,17 @@ const processEfnsItem = async (
     const task = open[0]
     const departmentId = task.job_level?.department_id ?? task.department_id
     const { stages, departments } = await fetchDepartment(sb, departmentId)
-    const matches: Array<{ stageId: string; stageName: string; kycId: string }> = []
+    const matches: Array<{ stageId: string; stageName: string; kycId: string; orderNum: number }> = []
     // Only stages that apply to this task's job level / class can take the filing.
     for (const stage of applicableStages(stages, task, departments)) {
       for (const doc of (stage.documents || [])) {
-        if (doc?.kycId && isEfnsTriggerSet(doc.efnsTrigger) && efnsTriggerMatches(doc.efnsTrigger, permitGroup, status)) {
-          matches.push({ stageId: stage.id, stageName: stage.name || "", kycId: doc.kycId })
+        if (
+          doc?.kycId &&
+          isEfnsTriggerSet(doc.efnsTrigger) &&
+          efnsTriggerMatches(doc.efnsTrigger, status, feeType) &&
+          documentAppliesToTask(doc, task)
+        ) {
+          matches.push({ stageId: stage.id, stageName: stage.name || "", kycId: doc.kycId, orderNum: stage.order_num || 0 })
         }
       }
     }
@@ -777,16 +816,31 @@ const processEfnsItem = async (
     if (matches.length === 0) {
       return writeOutcome("no_rule", { task_id: task.id, stage_id: "", matched_by: matchedBy })
     }
+
+    // Several stages can take the same item (e.g. "Online Received Notification 1" and "… 2" both
+    // take APPLICATION RECEIVED): it goes to the first one, in stage order, that this task hasn't
+    // filled yet — so the second received notice lands in the second stage.
+    let match = matches[0]
     if (matches.length > 1) {
-      return writeOutcome("ambiguous", {
-        task_id: task.id,
-        stage_id: "",
-        matched_by: matchedBy,
-        candidates: [{ id: task.id, applicant_name: task.applicant_name, r_number: task.r_number }],
-      })
+      const full = await fetchTask(sb, task.id)
+      const unfilled = matches
+        .filter((m) => {
+          const entry = full.stages?.[m.stageId]
+          return !(entry?.status === "completed" || entry?.completedAt || Object.keys(entry?.documents || {}).length > 0)
+        })
+        .sort((a, b) => a.orderNum - b.orderNum)
+      if (unfilled.length === 0) {
+        return writeOutcome("ambiguous", {
+          task_id: task.id,
+          stage_id: "",
+          matched_by: matchedBy,
+          candidates: [{ id: task.id, applicant_name: task.applicant_name, r_number: task.r_number }],
+          error: `Every stage that takes ${status} (${matches.map((m) => m.stageName).join(", ")}) is already filled on this task`,
+        })
+      }
+      match = unfilled[0]
     }
 
-    const match = matches[0]
     const filed = await fileEfnsItem({
       kind,
       id,

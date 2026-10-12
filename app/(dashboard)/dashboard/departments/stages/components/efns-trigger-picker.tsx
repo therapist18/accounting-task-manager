@@ -8,7 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Inbox } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { EFNS_PERMIT_GROUPS, EFNS_STATUSES, isEfnsTriggerSet, type EfnsTrigger } from "@/lib/efnsFiling"
+import { EFNS_FEE_TYPES, EFNS_STATUSES, isEfnsTriggerSet, type EfnsTrigger } from "@/lib/efnsFiling"
 
 interface Props {
   docId: string
@@ -41,9 +41,10 @@ function Chips({ options, selected, onToggle }: { options: string[]; selected: s
 
 export function EfnsTriggerPicker({ docId, value, onChange }: Props) {
   const enabled = !!value
-  const trigger: EfnsTrigger = value ?? { permitGroups: [], statuses: [] }
-  const toggle = (key: keyof EfnsTrigger, v: string) => {
-    const list = trigger[key]
+  // Saved rules may still carry permitGroups from before; they're dropped on the next change.
+  const { permitGroups: _ignored, ...trigger }: EfnsTrigger = value ?? { statuses: [] }
+  const toggle = (key: "statuses" | "feeTypes", v: string) => {
+    const list = trigger[key] ?? []
     onChange({ ...trigger, [key]: list.includes(v) ? list.filter((x) => x !== v) : [...list, v] })
   }
 
@@ -53,7 +54,7 @@ export function EfnsTriggerPicker({ docId, value, onChange }: Props) {
         <Checkbox
           id={`doc-efns-${docId}`}
           checked={enabled}
-          onCheckedChange={(c) => onChange(c ? { permitGroups: [], statuses: [] } : null)}
+          onCheckedChange={(c) => onChange(c ? { statuses: [] } : null)}
           className="mt-1 data-[state=checked]:border-emerald-600 data-[state=checked]:bg-emerald-600"
         />
         <div>
@@ -61,23 +62,25 @@ export function EfnsTriggerPicker({ docId, value, onChange }: Props) {
             <Inbox className="h-4 w-4 text-emerald-600" /> Filled from EFNS
           </Label>
           <p className="text-xs text-muted-foreground">
-            EFNS notifications / invoices with one of these permit types and statuses are saved to the task as this
-            document, and the stage is completed.
+            EFNS notifications / invoices with one of these statuses are saved to the task as this document, and the
+            stage is completed. They're only filed to tasks whose job level this stage (and document) applies to.
           </p>
         </div>
       </div>
       {enabled && (
         <div className="space-y-3 pl-7">
           <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-gray-700">Permit type</Label>
-            <Chips options={EFNS_PERMIT_GROUPS} selected={trigger.permitGroups} onToggle={(v) => toggle("permitGroups", v)} />
-          </div>
-          <div className="space-y-1.5">
             <Label className="text-xs font-medium text-gray-700">Status</Label>
             <Chips options={EFNS_STATUSES} selected={trigger.statuses} onToggle={(v) => toggle("statuses", v)} />
           </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-gray-700">
+              Fee type <span className="font-normal text-muted-foreground">(payments only — leave empty for any)</span>
+            </Label>
+            <Chips options={EFNS_FEE_TYPES} selected={trigger.feeTypes ?? []} onToggle={(v) => toggle("feeTypes", v)} />
+          </div>
           {!isEfnsTriggerSet(trigger) && (
-            <p className="text-xs text-amber-700">Pick at least one permit type and one status — until then nothing is filed here.</p>
+            <p className="text-xs text-amber-700">Pick at least one status — until then nothing is filed here.</p>
           )}
         </div>
       )}
