@@ -254,35 +254,25 @@ export async function GET(req: NextRequest) {
     // module's deptScopedTasks filter ever runs. Some tasks have a NULL raw department_id
     // column but a populated job_level.department_id — filtering on the raw column silently
     // dropped them from the mobile report even though the web dashboard counts them.
-    // Case-detail columns the web task manager's table shows (job description, nationality,
-    // cancellation audit) are selected defensively: if any is missing on this deployment the
-    // select errors, so we fall back to the base column set and the report still renders.
-    const BASE_TASK_COLUMNS = `
-        id, applicant_name, status, r_number, passport_number,
-        date_initiated, department_id, subdepartment_id, class_id, subclass_id,
-        job_level, stages, task_manager_id, task_assistant_id, officer_id,
-        participants_details, renewal_status, individual_id, company_id,
-        applicant_details, processing_requirements_documents, issuance_requirements_documents,
-        source_document_id
-      `;
-    const TASK_DETAIL_COLUMNS = "job_description, nationality, cancellation_details";
-
-    const buildTaskQuery = (columns: string): any => {
+    //
+    // `select('*')`, never an explicit column list: this route used to name every column it
+    // needed (id, applicant_name, …, task_manager_id, task_assistant_id, officer_id, …), and
+    // PostgREST rejects the whole query when ANY named column is missing on the deployment —
+    // 42703 "column tm_tasks.task_manager_id does not exist" → every department's report 500s.
+    // fetchTasks() in taskManagerData.ts (and every dashboard page) just does .select('*') on
+    // tm_tasks, so the dashboard keeps working while the mobile report broke. Ownership is
+    // derived from participants_details below anyway (exactly as fetchTasks() does) — nothing
+    // here ever read task_manager_id / task_assistant_id / officer_id.
+    const buildTaskQuery = (): any => {
       let q = supabase
         .from("tm_tasks")
-        .select(columns)
+        .select("*")
         .eq("job_level->>department_id", deptId)
         .order("created_at", { ascending: false });
       if (subDeptId) {
         q = q.eq("job_level->>subdepartment_id", subDeptId);
       }
       return q;
-    };
-    const loadTasks = async () => {
-      const first = await buildTaskQuery(`${BASE_TASK_COLUMNS}, ${TASK_DETAIL_COLUMNS}`);
-      if (!first.error) return first;
-      console.warn("[tasks-report] detail columns unavailable, retrying without them:", first.error.message);
-      return buildTaskQuery(BASE_TASK_COLUMNS);
     };
 
     // Everything below is independent, so it's fetched in one parallel round trip instead of
@@ -301,7 +291,7 @@ export async function GET(req: NextRequest) {
       // Officer/Manager tabs mirror the web Reports module: the department's actual roster
       // (tm_role_assignments), so an officer with zero current tasks still shows up.
       supabase.from("tm_role_assignments").select("role, user_id, department_id").eq("department_id", Number(deptId)),
-      loadTasks(),
+      buildTaskQuery(),
       // company_name isn't a real tm_tasks column; it's resolved from participants / this table.
       supabase.from("acc_portal_company_duplicate").select("id, company_name, company_prefix"),
       supabase.from("tm_users").select("id, name"),
