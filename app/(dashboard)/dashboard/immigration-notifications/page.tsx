@@ -15,6 +15,7 @@ import { exportItemsToExcel } from "./components/exportNotifications"
 import { STATUS_TAB, STATUS_TAB_FALLBACK } from "./components/statusStyles"
 import { LinkEfnsItemDialog } from "./components/LinkEfnsItemDialog"
 import { DeleteEfnsItemDialog } from "./components/DeleteEfnsItemDialog"
+import type { FieldPreview } from "./components/DocumentPreviewDialog"
 
 interface SyncRequest {
   id: number
@@ -58,20 +59,40 @@ export default function ImmigrationNotificationsPage() {
   const [running, setRunning] = useState(false)
   const [linkItem, setLinkItem] = useState<ImmigrationItem | null>(null)
   const [deleteItem, setDeleteItem] = useState<ImmigrationItem | null>(null)
+  // Every row's document-type fields, loaded with the list so the preview opens with them.
+  const [fieldPreviews, setFieldPreviews] = useState<Record<string, FieldPreview>>({})
   // The latest requested sync (re-capture of deleted records by the EFNS automation).
   const [syncRequest, setSyncRequest] = useState<SyncRequest | null>(null)
   const columns = useColumnVisibility(ITEM_COLUMNS.map(({ id, label }) => ({ id, label })))
 
+  const loadFieldPreviews = useCallback(async () => {
+    try {
+      const res = await fetch("/api/immigration-notifications/fields")
+      const json = await res.json()
+      if (!res.ok || !json.success) return
+      const types = (json.types || {}) as Record<string, { name: string | null; fields: FieldPreview["fields"] }>
+      const map: Record<string, FieldPreview> = {}
+      for (const [key, p] of Object.entries(json.items || {}) as Array<[string, any]>) {
+        const type = p.kycId ? types[p.kycId] : null
+        map[key] = { ...p, docTypeName: type?.name ?? null, fields: type?.fields ?? [] }
+      }
+      setFieldPreviews(map)
+    } catch {
+      // The preview falls back to the row's own details.
+    }
+  }, [])
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setItems(await fetchImmigrationItems())
+      const [list] = await Promise.all([fetchImmigrationItems(), loadFieldPreviews()])
+      setItems(list)
     } catch (e: any) {
       toast.error(e?.message || "Failed to load immigration notifications")
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [loadFieldPreviews])
 
   useEffect(() => {
     load()
@@ -326,6 +347,7 @@ export default function ImmigrationNotificationsPage() {
           onFilteredChange={setExportRows}
           onLink={setLinkItem}
           onDelete={setDeleteItem}
+          fieldPreviews={fieldPreviews}
           resetKey={`${permit}|${statusFilter}|${q}`}
         />
       </div>

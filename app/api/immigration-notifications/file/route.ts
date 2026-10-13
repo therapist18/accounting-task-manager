@@ -20,9 +20,11 @@ import { itemJobLevels } from "@/lib/efnsFiling"
 //                                               one the stages' EFNS rules pick for the item (suggested)
 //       &q=...                               → narrow the candidate search
 //
-//   POST { kind, id, taskId, stageId, kycId }
+//   POST { kind, id, taskId, stageId, kycId, mode? }
 //       files the item's PDF onto the task's stage against the task's individual (matched_by:
-//       'manual'), and records the link back on the item.
+//       'manual', linked_by: 'staff'), and records the link back on the item. On a stage that already
+//       has a document, mode "replace" (default) takes that type's document off the stage and "add"
+//       keeps it alongside.
 
 export async function GET(req: NextRequest) {
   const session = await getServerAppSession()
@@ -105,6 +107,7 @@ export async function POST(req: NextRequest) {
       taskId?: number | string
       stageId?: string
       kycId?: string
+      mode?: "replace" | "add"
     }
 
     if (!body.kind || !body.id || !body.taskId || !body.stageId) {
@@ -120,6 +123,7 @@ export async function POST(req: NextRequest) {
       taskId: body.taskId,
       stageId: body.stageId,
       kycId: body.kycId,
+      mode: body.mode === "add" ? "add" : "replace",
       matchedBy: "manual",
       byId: session.user.id,
     })

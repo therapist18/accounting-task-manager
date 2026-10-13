@@ -199,6 +199,19 @@ export async function fillEfnsDocumentFields(
       console.warn("[efns-fields] could not read PDF text:", (e as Error)?.message)
     }
   }
+  return fillFromLabels(fields, pdfLabels, kind, itemRow)
+}
+
+/**
+ * The same fill from labels already read off the PDF (e.g. the item's cached pdf_labels column), so
+ * a whole list can be previewed without re-reading every PDF.
+ */
+export function fillFromLabels(
+  fields: KycField[] | null | undefined,
+  pdfLabels: Record<string, string>,
+  kind: ItemKind,
+  itemRow: any,
+): EfnsFieldFill {
   const rowValues = itemRowValues(kind, itemRow)
 
   const values: Record<string, string> = {}

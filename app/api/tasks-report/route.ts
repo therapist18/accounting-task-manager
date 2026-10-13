@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase";
 import { calculateStageDate } from "../../(dashboard)/dashboard/tasks/utils/dateUtils";
 
-const REPORT_ID = "d0d23f1c-8073-46fa-9cef-681dc7ca2d44";
+// (The report used to be pinned to one memorized report, d0d23f1c-…, i.e. department 1; it is
+// now chosen per request with ?departmentId=, defaulting to DEFAULT_DEPARTMENT_ID below.)
 
 // Specific named-stage dates the mobile Officer Report surfaces per task, in addition to
 // whichever stage is currently in progress (computed further down).
@@ -183,6 +184,32 @@ function isAuthorizedMobileRequest(req: NextRequest): boolean {
   return provided === expected;
 }
 
+// Department shown when the caller doesn't ask for one (the Immigration department the mobile
+// report was built for).
+const DEFAULT_DEPARTMENT_ID = "1";
+
+// Built reports are reused briefly per (department, sub-unit): opening the same department
+// again, or several phones asking at once, doesn't rebuild the whole thing. Per server
+// instance only — a cold start just rebuilds.
+const REPORT_CACHE_TTL_MS = 60_000;
+const reportCache = new Map<string, { at: number; payload: any }>();
+
+/** PostgREST puts .in() lists in the URL, so long id lists are fetched in slices. */
+async function selectIn(supabase: any, table: string, column: string, ids: Array<string | number>, columns = "*"): Promise<any[]> {
+  const unique = Array.from(new Set(ids.map(String))).filter(Boolean);
+  if (unique.length === 0) return [];
+  const CHUNK = 200;
+  const parts = await Promise.all(
+    Array.from({ length: Math.ceil(unique.length / CHUNK) }, (_, i) =>
+      supabase.from(table).select(columns).in(column, unique.slice(i * CHUNK, (i + 1) * CHUNK)),
+    ),
+  );
+  return parts.flatMap((p: any) => {
+    if (p.error) throw p.error;
+    return p.data || [];
+  });
+}
+
 export async function GET(req: NextRequest) {
   try {
     if (!isAuthorizedMobileRequest(req)) {
@@ -190,66 +217,46 @@ export async function GET(req: NextRequest) {
     }
 
     const supabase = createServerSupabaseClient();
+
+    // ?departments=1 → the department picker: every department with its task count.
+    if (req.nextUrl.searchParams.get("departments")) {
+      const [{ data: depts, error: deptErr }, { data: jobLevels }] = await Promise.all([
+        supabase.from("tm_departments").select("id, name").order("id", { ascending: true }),
+        supabase.from("tm_tasks").select("job_level"),
+      ]);
+      if (deptErr) throw deptErr;
+      const counts = new Map<string, number>();
+      (jobLevels || []).forEach((t: any) => {
+        const d = String(t.job_level?.department_id ?? "");
+        if (d) counts.set(d, (counts.get(d) || 0) + 1);
+      });
+      return NextResponse.json(
+        {
+          defaultDepartmentId: DEFAULT_DEPARTMENT_ID,
+          departments: (depts || []).map((d: any) => ({ id: String(d.id), name: d.name || `Department ${d.id}`, taskCount: counts.get(String(d.id)) || 0 })),
+        },
+        { headers: { "Cache-Control": "private, max-age=300" } },
+      );
+    }
+
     const subDeptId = req.nextUrl.searchParams.get("subDeptId") || null;
+    const deptId = req.nextUrl.searchParams.get("departmentId") || DEFAULT_DEPARTMENT_ID;
 
-    const { data: report, error: reportErr } = await supabase
-      .from("tm_memorized_reports")
-      .select("id, name, department_id, configuration")
-      .eq("id", REPORT_ID)
-      .single();
-
-    if (reportErr || !report) {
-      return NextResponse.json({ error: "Report not found" }, { status: 404 });
+    const cacheKey = `${deptId}|${subDeptId ?? ""}`;
+    const cached = reportCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < REPORT_CACHE_TTL_MS) {
+      return NextResponse.json(cached.payload, { headers: { "Cache-Control": "private, max-age=60", "X-Report-Cache": "hit" } });
     }
-
-    const deptId = report.department_id?.toString();
-    if (!deptId) {
-      return NextResponse.json({ error: "Report has no department" }, { status: 400 });
-    }
-
-    const { data: department } = await supabase
-      .from("tm_departments")
-      .select("id, name, stages, tm_subdepartments(id, name, stages, classes)")
-      .eq("id", deptId)
-      .single();
-
-    const subDeptNameMap = new Map<string, string>();
-    const subDeptsById = new Map<string, any>();
-    ((department as any)?.tm_subdepartments || []).forEach((s: any) => {
-      subDeptNameMap.set(String(s.id), s.name || "");
-      subDeptsById.set(String(s.id), s);
-    });
-
-    // Officer/Manager tabs on the web Reports module aren't built from whoever happens to
-    // have a task right now — they're the department's actual roster, sourced from
-    // tm_role_assignments (see lib/shared-user-assignment-service.ts's getDepartmentUsers /
-    // userService.getAllUserData), so a newly-assigned officer with zero current tasks
-    // still shows up. Mirror that here instead of only surfacing officers/managers who
-    // already appear in this department's tasks.
-    const { data: roleAssignments } = await supabase
-      .from("tm_role_assignments")
-      .select("role, user_id, department_id")
-      .eq("department_id", Number(deptId));
-    const officerRosterIds = new Set<string>();
-    const managerRosterIds = new Set<string>();
-    (roleAssignments || []).forEach((a: any) => {
-      if (a.role === "officer") officerRosterIds.add(String(a.user_id));
-      if (a.role === "manager") managerRosterIds.add(String(a.user_id));
-    });
 
     // Filtered by job_level->>department_id, NOT the raw department_id column — mirrors
     // fetchTasks() in taskManagerData.ts, which overwrites task.department_id from
     // task.job_level.department_id with no fallback to the raw column before the web Reports
     // module's deptScopedTasks filter ever runs. Some tasks have a NULL raw department_id
-    // column but a populated job_level.department_id (77 department-mismatches found across
-    // 1362 tasks, 63 of them flipping "is this task in department 1" specifically) — filtering
-    // on the raw column here silently dropped all of them from the mobile report even though
-    // the web dashboard counts them.
-    // Case-detail columns the web task manager's table shows (see ENHANCED_TABLE_HEADERS_IMMIGRATION
-    // in dashboard/tasks/overall-view/tableUtils.tsx): job description, nationality and the
-    // cancellation audit fields. Selected defensively — if any of these doesn't exist on this
-    // deployment's schema the whole select errors, so we fall back to the base column set and the
-    // report still renders (just without the extras) rather than failing outright.
+    // column but a populated job_level.department_id — filtering on the raw column silently
+    // dropped them from the mobile report even though the web dashboard counts them.
+    // Case-detail columns the web task manager's table shows (job description, nationality,
+    // cancellation audit) are selected defensively: if any is missing on this deployment the
+    // select errors, so we fall back to the base column set and the report still renders.
     const BASE_TASK_COLUMNS = `
         id, applicant_name, status, r_number, passport_number,
         date_initiated, department_id, subdepartment_id, class_id, subclass_id,
@@ -271,22 +278,61 @@ export async function GET(req: NextRequest) {
       }
       return q;
     };
+    const loadTasks = async () => {
+      const first = await buildTaskQuery(`${BASE_TASK_COLUMNS}, ${TASK_DETAIL_COLUMNS}`);
+      if (!first.error) return first;
+      console.warn("[tasks-report] detail columns unavailable, retrying without them:", first.error.message);
+      return buildTaskQuery(BASE_TASK_COLUMNS);
+    };
 
-    let { data: tasks, error: tasksErr } = await buildTaskQuery(`${BASE_TASK_COLUMNS}, ${TASK_DETAIL_COLUMNS}`);
-    if (tasksErr) {
-      console.warn("[tasks-report] detail columns unavailable, retrying without them:", tasksErr.message);
-      const retry = await buildTaskQuery(BASE_TASK_COLUMNS);
-      tasks = retry.data;
-      tasksErr = retry.error;
-    }
+    // Everything below is independent, so it's fetched in one parallel round trip instead of
+    // one query after another.
+    const [
+      { data: department },
+      { data: roleAssignments },
+      { data: tasks, error: tasksErr },
+      { data: companyRows },
+      { data: users },
+      { data: scannerUsers },
+      { data: classRequirementRows },
+      { data: kycDocs },
+    ] = await Promise.all([
+      supabase.from("tm_departments").select("id, name, stages, tm_subdepartments(id, name, stages, classes)").eq("id", deptId).single(),
+      // Officer/Manager tabs mirror the web Reports module: the department's actual roster
+      // (tm_role_assignments), so an officer with zero current tasks still shows up.
+      supabase.from("tm_role_assignments").select("role, user_id, department_id").eq("department_id", Number(deptId)),
+      loadTasks(),
+      // company_name isn't a real tm_tasks column; it's resolved from participants / this table.
+      supabase.from("acc_portal_company_duplicate").select("id, company_name, company_prefix"),
+      supabase.from("tm_users").select("id, name"),
+      // Roster ids / stage officer ids reference scanner_users, which doesn't always have a
+      // tm_users row — used as a name fallback below.
+      supabase.from("scanner_users").select("id, first_name, last_name, username"),
+      // Report Required Documents defaults + expected time per job level for this department.
+      supabase.from("tm_class_requirements").select("job_level, report_doc_defaults, expected_total_time_minutes").eq("job_level->>department_id", deptId),
+      // KYC field config for every document type (a stage's linked document can be of any type).
+      supabase.from("acc_portal_kyc").select("id, fields, name, display_name"),
+    ]);
     if (tasksErr) throw tasksErr;
-    // company_name is not a real tm_tasks column — it's join-computed everywhere else in
-    // the web app (DepartmentTasksManager/reports fetchTasks) from the task's "sponsor"/
-    // "company" participant, falling back to a company lookup table by id. Mirror that
-    // here rather than trusting a column that doesn't exist in production.
-    const { data: companyRows } = await supabase
-      .from("acc_portal_company_duplicate")
-      .select("id, company_name, company_prefix");
+    if (!department) {
+      return NextResponse.json({ error: "Department not found" }, { status: 404 });
+    }
+    const report = { id: `department-${deptId}`, name: (department as any).name || `Department ${deptId}` };
+
+    const subDeptNameMap = new Map<string, string>();
+    const subDeptsById = new Map<string, any>();
+    ((department as any)?.tm_subdepartments || []).forEach((s: any) => {
+      subDeptNameMap.set(String(s.id), s.name || "");
+      subDeptsById.set(String(s.id), s);
+    });
+
+    const officerRosterIds = new Set<string>();
+    const managerRosterIds = new Set<string>();
+    (roleAssignments || []).forEach((a: any) => {
+      if (a.role === "officer") officerRosterIds.add(String(a.user_id));
+      if (a.role === "manager") managerRosterIds.add(String(a.user_id));
+    });
+
     const companiesMap = new Map<number, { name: string; prefix: string }>();
     (companyRows || []).forEach((c: any) =>
       companiesMap.set(Number(c.id), { name: c.company_name || "", prefix: c.company_prefix || "" })
@@ -315,43 +361,13 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // There is no standalone tm_stages table backing the live app — stagesdb.ts's
-    // createStage/updateStage/deleteStage/updateStageOrder all read and write a `stages`
-    // JSONB column directly on tm_departments. Querying a tm_stages table (as this route
-    // did before) silently returned zero rows for every department, which is why officer
-    // grouping and every named stage date resolved to nothing.
+    // Stages live in the `stages` JSONB column on tm_departments (there is no tm_stages table).
     const stages = ((department as any)?.stages || [])
       .slice()
       .sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0));
 
-    console.log(
-      "[tasks-report] deptId=%s stages=%o",
-      deptId,
-      (stages || []).map((s: any) => ({ id: s.id, name: s.name, follow_up: s.follow_up }))
-    );
-    console.log(
-      "[tasks-report] NAMED_STAGE_DATES lookup:",
-      NAMED_STAGE_DATES.map(({ id, key }) => ({
-        key,
-        id,
-        found: (stages || []).some((s: any) => s.id === id),
-      }))
-    );
-
-    const { data: users } = await supabase
-      .from("tm_users")
-      .select("id, name");
-
     const usersMap = new Map<string, string>();
     (users || []).forEach((u: any) => usersMap.set(String(u.id), u.name || "Unknown"));
-
-    // tm_role_assignments.user_id (the officer/manager roster) and stageData.officer_ids
-    // reference the auth identity in scanner_users, which doesn't always have a matching
-    // tm_users row — without this fallback, roster members resolved names as "Unknown"/
-    // fell through to the "Unallocated" bucket even though they ARE a real, named officer.
-    const { data: scannerUsers } = await supabase
-      .from("scanner_users")
-      .select("id, first_name, last_name, username");
     (scannerUsers || []).forEach((u: any) => {
       const key = String(u.id);
       if (usersMap.has(key)) return;
@@ -359,19 +375,9 @@ export async function GET(req: NextRequest) {
       if (name) usersMap.set(key, name);
     });
 
-    // Report Required Documents — the same defaults the web Reports module shows as
-    // "report_doc" columns, aggregated across every job level in this department
-    // (tm_class_requirements.report_doc_defaults), deduped by documentId.
-    const { data: classRequirementRows } = await supabase
-      .from("tm_class_requirements")
-      .select("job_level, report_doc_defaults, expected_total_time_minutes")
-      .eq("job_level->>department_id", deptId);
-
     const reportDocDefaultsMap = new Map<string, any>();
-    // Mirrors expectedTimeByJobLevel in the web Reports module: expected_total_time_minutes
-    // keyed by the exact same {department_id, subdepartment_id, class_id, subclass_id} shape
-    // a task's own job_level is canonicalized into below, so a task's key always looks up its
-    // own class requirements row.
+    // Mirrors expectedTimeByJobLevel in the web Reports module: keyed by the same canonical
+    // {department_id, subdepartment_id, class_id, subclass_id} shape as each task's job_level.
     const expectedMinutesByJobLevelKey = new Map<string, number>();
     const jobLevelKey = (jl: any) => JSON.stringify({
       department_id: Number(jl?.department_id ?? deptId),
@@ -392,46 +398,43 @@ export async function GET(req: NextRequest) {
     const reportDocDefaults = Array.from(reportDocDefaultsMap.values())
       .sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
 
-    // KYC field config for every document type — needed both for the Report Required
-    // Documents' isImmigrationDate lookup and for calculateStageDate's document-field
-    // resolution below (a stage's linked document can be of any document type, not just
-    // the ones configured as report_doc_defaults, so this must be unfiltered — mirrors
-    // fetchAllKycFields() in the web app).
-    const { data: kycDocs } = await supabase
-      .from("acc_portal_kyc")
-      .select("id, fields, name, display_name");
     const kycFieldsMap = new Map<string, any[]>();
     (kycDocs || []).forEach((k: any) => kycFieldsMap.set(String(k.id), k.fields || []));
 
-    // All uploaded documents, unfiltered — needed to resolve a stage's linked document by
-    // its own id (task.source_document_id / stageData.documents reference document row
-    // ids directly, not director_id/company_id). Mirrors fetchAllDocuments() in the web
-    // app, which is similarly unfiltered.
-    const { data: allDocumentsRaw } = await supabase
-      .from("acc_portal_directors_documents")
-      .select("*");
-    const allDocumentsById = new Map<string, any>();
-    (allDocumentsRaw || []).forEach((d: any) => allDocumentsById.set(String(d.id), d));
-
-    // Uploaded-document pools, scoped to the individuals/companies actually present among
-    // this department's tasks (mirrors fetchUploadedDocumentsForTasks in the web app).
+    // Only the documents these tasks actually link to (task.source_document_id and each stage's
+    // stageData.documents stubs) — previously the WHOLE acc_portal_directors_documents table
+    // was downloaded on every request just to look these few up.
+    const linkedDocIds = new Set<string>();
+    // Uploaded-document pools, scoped to the individuals / companies in this department's
+    // tasks (mirrors fetchUploadedDocumentsForTasks in the web app).
     const individualIds = new Set<number>();
     const companyIds = new Set<number>();
     (tasks || []).forEach((t: any) => {
+      Object.values(t.source_document_id || {}).forEach((ref: any) => {
+        (Array.isArray(ref) ? ref : [ref]).forEach((d: any) => {
+          const id = typeof d === "string" || typeof d === "number" ? d : d?.id;
+          if (id != null) linkedDocIds.add(String(id));
+        });
+      });
+      Object.values(t.stages || {}).forEach((sd: any) => {
+        if (sd?.documents && typeof sd.documents === "object") {
+          Object.values(sd.documents).forEach((stub: any) => { if (stub?.id != null) linkedDocIds.add(String(stub.id)); });
+        }
+      });
       if (t.individual_id) individualIds.add(Number(t.individual_id));
       if (t.applicant_details?.id && t.applicant_details?.type !== "company") individualIds.add(Number(t.applicant_details.id));
       if (t.company_id) companyIds.add(Number(t.company_id));
       if (t.applicant_details?.id && t.applicant_details?.type === "company") companyIds.add(Number(t.applicant_details.id));
     });
 
-    const [{ data: individualDocs }, { data: companyDocs }] = await Promise.all([
-      individualIds.size > 0
-        ? supabase.from("acc_portal_directors_documents").select("*").in("director_id", Array.from(individualIds))
-        : Promise.resolve({ data: [] as any[] }),
-      companyIds.size > 0
-        ? supabase.from("acc_portal_kyc_uploads").select("*").in("company_id", Array.from(companyIds))
-        : Promise.resolve({ data: [] as any[] }),
+    const [linkedDocs, individualDocs, companyDocs] = await Promise.all([
+      selectIn(supabase, "acc_portal_directors_documents", "id", Array.from(linkedDocIds)),
+      selectIn(supabase, "acc_portal_directors_documents", "director_id", Array.from(individualIds)),
+      selectIn(supabase, "acc_portal_kyc_uploads", "company_id", Array.from(companyIds)),
     ]);
+    const allDocumentsById = new Map<string, any>();
+    linkedDocs.forEach((d: any) => allDocumentsById.set(String(d.id), d));
+    individualDocs.forEach((d: any) => allDocumentsById.set(String(d.id), d));
 
     const individualDocsMap = new Map<number, any[]>();
     (individualDocs || []).forEach((d: any) => {
@@ -851,7 +854,7 @@ export async function GET(req: NextRequest) {
       ? [{ clientName: "Tasks Awaiting Client Response", count: awaitingClientTasks.length, tasks: clean(awaitingClientTasks) }]
       : [];
 
-    return NextResponse.json({
+    const payload = {
       report: { id: report.id, name: report.name },
       department: department ? { name: department.name } : null,
       // Full sub-unit roster for this department (not just sub-units that happen to have a
@@ -876,7 +879,9 @@ export async function GET(req: NextRequest) {
         // byOfficer/byManager/byClient are unchanged for existing consumers.
         byOfficerHandled: Array.from(officerHandledGroups.values()),
       },
-    });
+    };
+    reportCache.set(cacheKey, { at: Date.now(), payload });
+    return NextResponse.json(payload, { headers: { "Cache-Control": "private, max-age=60" } });
   } catch (error) {
     console.error("GET /api/tasks-report:", error);
     return NextResponse.json(

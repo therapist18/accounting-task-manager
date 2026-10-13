@@ -46,6 +46,15 @@ export async function middleware(request: NextRequest) {
 
   const sessionCookie = request.cookies.get(AUTH_SESSION_COOKIE_NAME)?.value;
   if (!sessionCookie) {
+    // API callers expect JSON, not the /login HTML page. Redirecting them makes fetch follow the
+    // redirect and hand back HTML with a 200, which clients then mis-parse (e.g. `res.accounts`
+    // coming through as undefined and crashing on `.filter`). Answer with a 401 JSON body instead.
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        { success: false, error: "Not authenticated" },
+        { status: 401 },
+      );
+    }
     const loginUrl = new URL("/login", request.url);
     return NextResponse.redirect(loginUrl);
   }

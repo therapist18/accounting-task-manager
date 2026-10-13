@@ -45,6 +45,16 @@ interface TaskStage {
   stageName: string
   orderNum: number
   documents: Array<{ kycId: string; name: string; isRequired?: boolean }>
+  // Already has a document / is complete: the link then replaces it or goes alongside.
+  filled?: boolean
+  completedAt?: string | null
+  existing?: Array<{ documentId: string; kycId: string | null; name: string; fileName: string | null; linkedAt: string | null; linkedBy: string | null }>
+}
+
+const shortDate = (iso: string | null | undefined) => {
+  if (!iso) return ""
+  const d = new Date(iso)
+  return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-GB")
 }
 
 const fetchJson = async (url: string) => {
@@ -77,6 +87,8 @@ export function LinkEfnsItemDialog({
   const [suggested, setSuggested] = useState<{ stageId: string; kycId: string; stageName: string } | null>(null)
   const [suggestionNote, setSuggestionNote] = useState<string | null>(null)
   const [choosingStage, setChoosingStage] = useState(false)
+  // On a stage that already has a document: replace it (default) or add this one alongside.
+  const [linkMode, setLinkMode] = useState<"replace" | "add">("replace")
   const [filing, setFiling] = useState(false)
   // Search every task instead of just the permit type's job levels.
   const [searchAll, setSearchAll] = useState(false)
@@ -142,6 +154,7 @@ export function LinkEfnsItemDialog({
     setSuggested(null)
     setSuggestionNote(null)
     setChoosingStage(false)
+    setLinkMode("replace")
     setLoadingStages(true)
     try {
       const params = new URLSearchParams({ taskId: String(task.id) })
@@ -197,11 +210,19 @@ export function LinkEfnsItemDialog({
           taskId: selectedTask.id,
           stageId: selectedStageId,
           kycId: selectedKycId,
+          mode: linkMode,
         }),
       })
       const json = await res.json()
       if (!res.ok || json?.success === false) throw new Error(json?.error || "Filing failed")
-      toast.success(`Filed to ${selectedTask.applicant_name || `task #${selectedTask.id}`}`)
+      const who = selectedTask.applicant_name || `task #${selectedTask.id}`
+      toast.success(
+        json?.filing?.mode === "replace"
+          ? `Filed to ${who} — replaced the stage's previous document`
+          : json?.filing?.mode === "add"
+            ? `Filed to ${who} — added alongside the stage's document`
+            : `Filed to ${who}`,
+      )
       onLinked()
       onOpenChange(false)
     } catch (e: any) {
@@ -209,7 +230,7 @@ export function LinkEfnsItemDialog({
     } finally {
       setFiling(false)
     }
-  }, [item, selectedTask, selectedStageId, selectedKycId, onLinked, onOpenChange])
+  }, [item, selectedTask, selectedStageId, selectedKycId, linkMode, onLinked, onOpenChange])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -377,7 +398,14 @@ export function LinkEfnsItemDialog({
                         <div className="flex items-center gap-3">
                           <RadioGroupItem id={`stage-${s.stageId}`} value={s.stageId} />
                           <Label htmlFor={`stage-${s.stageId}`} className="flex-1 cursor-pointer">
-                            <span className="block font-medium text-slate-800 text-sm">{s.stageName}</span>
+                            <span className="block font-medium text-slate-800 text-sm">
+                              {s.stageName}
+                              {s.filled && (
+                                <span className="ml-2 rounded-full border border-violet-200 bg-violet-50 px-1.5 py-px text-[10px] font-semibold text-violet-700 align-middle">
+                                  Already filled
+                                </span>
+                              )}
+                            </span>
                             <span className="block text-xs text-slate-500">
                               {s.documents.map((d) => d.name).join(", ") || "No documents"}
                             </span>
@@ -412,7 +440,51 @@ export function LinkEfnsItemDialog({
             </section>
           )}
 
-          {selectedStage && (
+          {selectedStage?.filled && (
+            <section className="rounded-lg border border-violet-200 bg-violet-50/60 p-3 space-y-2.5">
+              <p className="text-sm text-violet-900">
+                <span className="font-semibold">{selectedStage.stageName}</span> already has
+                {selectedStage.existing?.length ? "" : " been completed"}
+                {selectedStage.completedAt ? ` (completed ${shortDate(selectedStage.completedAt)})` : ""}
+                {selectedStage.existing?.length ? ":" : "."}
+              </p>
+              {!!selectedStage.existing?.length && (
+                <ul className="space-y-1">
+                  {selectedStage.existing.map((e) => (
+                    <li key={e.documentId} className="text-xs text-slate-700 flex flex-wrap items-center gap-x-2">
+                      <span className="font-medium">{e.name}</span>
+                      {e.fileName && <span className="text-slate-500 truncate max-w-[340px]" title={e.fileName}>{e.fileName}</span>}
+                      {e.linkedAt && <span className="text-slate-400">linked {shortDate(e.linkedAt)}</span>}
+                      <span className={cn("rounded-full px-1.5 py-px text-[10px] font-semibold", e.linkedBy === "auto" ? "bg-sky-100 text-sky-700" : "bg-slate-200 text-slate-700")}>
+                        {e.linkedBy === "auto" ? "Auto-linked" : "Staff"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <RadioGroup value={linkMode} onValueChange={(v) => setLinkMode(v === "add" ? "add" : "replace")} className="gap-1.5">
+                <div className="flex items-start gap-2">
+                  <RadioGroupItem id="link-mode-replace" value="replace" className="mt-0.5" />
+                  <Label htmlFor="link-mode-replace" className="font-normal leading-snug cursor-pointer text-sm">
+                    <span className="font-medium">Replace</span>
+                    <span className="block text-xs text-slate-500">
+                      This PDF becomes the stage's document; the existing one comes off the stage but stays in the individual's documents.
+                    </span>
+                  </Label>
+                </div>
+                <div className="flex items-start gap-2">
+                  <RadioGroupItem id="link-mode-add" value="add" className="mt-0.5" />
+                  <Label htmlFor="link-mode-add" className="font-normal leading-snug cursor-pointer text-sm">
+                    <span className="font-medium">Add alongside</span>
+                    <span className="block text-xs text-slate-500">Keep the existing document and add this one next to it.</span>
+                  </Label>
+                </div>
+              </RadioGroup>
+              <p className="text-[11px] text-violet-700">The stage keeps its original completion date.</p>
+            </section>
+          )}
+
+          {selectedStage && !selectedStage.filled && (
             <p className="text-xs text-slate-500 -mt-2">
               The PDF will be filed against the task's individual ({selectedTask?.individual_id ? `#${selectedTask.individual_id}` : "unknown"}) as the{" "}
               <span className="font-medium">{selectedStage.documents.find((d) => d.kycId === selectedKycId)?.name || "selected"}</span> document on{" "}

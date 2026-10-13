@@ -11,7 +11,7 @@ import { EFNS_FILING_BADGE, EFNS_FILING_LABELS } from "@/lib/efnsFiling"
 import { fmtDateTime } from "../../emails/components/shared"
 import { Pagination } from "../../emails/components/Pagination"
 import { SortTh, TableLoading, TD_CLASS, useColumnFilters, useTableSort, zebraRow } from "../../emails/components/table"
-import { DocumentPreviewDialog } from "./DocumentPreviewDialog"
+import { DocumentPreviewDialog, type FieldPreview } from "./DocumentPreviewDialog"
 import { KIND_BADGE, KIND_LABEL, STATUS_BADGE, STATUS_BADGE_FALLBACK } from "./statusStyles"
 
 // Every column, in display order. `filter` columns get a header filter (a checklist of their values,
@@ -80,6 +80,7 @@ export function NotificationsTable({
   resetKey,
   onLink,
   onDelete,
+  fieldPreviews,
 }: {
   items: ImmigrationItem[]
   loading: boolean
@@ -92,6 +93,8 @@ export function NotificationsTable({
   onLink?: (item: ImmigrationItem) => void
   // Opens the delete (and re-capture) dialog for a row.
   onDelete?: (item: ImmigrationItem) => void
+  // Each row's document-type fields (loaded with the list), keyed by item key.
+  fieldPreviews?: Record<string, FieldPreview>
 }) {
   const [itemsPerPage, setItemsPerPage] = useState(50)
   const [page, setPage] = useState(0)
@@ -192,6 +195,18 @@ export function NotificationsTable({
               <span className="text-[11px] text-slate-500">
                 → Task #{i.filing.task_id}
                 {i.filing.individual_id != null ? ` · Ind #${i.filing.individual_id}` : ""}
+              </span>
+            )}
+            {i.filingStatus === "filed" && i.filing && (
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-px text-[10px] font-semibold",
+                  (i.filing.linked_by ?? (i.filing.matched_by === "manual" ? "staff" : "auto")) === "auto" ? "bg-sky-100 text-sky-700" : "bg-slate-200 text-slate-700",
+                )}
+                title={i.filing.mode === "replace" ? "Replaced the stage’s previous document" : i.filing.mode === "add" ? "Added alongside the stage’s document" : undefined}
+              >
+                {(i.filing.linked_by ?? (i.filing.matched_by === "manual" ? "staff" : "auto")) === "auto" ? "Auto-linked" : "Linked by staff"}
+                {i.filing.mode === "replace" ? " · replaced" : i.filing.mode === "add" ? " · added" : ""}
               </span>
             )}
             {i.filing?.error && <span className="text-[11px] text-red-500 max-w-[220px] line-clamp-2" title={i.filing.error}>{i.filing.error}</span>}
@@ -305,6 +320,7 @@ export function NotificationsTable({
 
       <DocumentPreviewDialog
         item={previewItem}
+        preview={previewItem ? fieldPreviews?.[previewItem.key] ?? null : null}
         onOpenChange={(open) => !open && setPreviewItem(null)}
       />
     </>

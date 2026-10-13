@@ -377,6 +377,18 @@ export async function api<T = any>(url: string, init?: RequestInit): Promise<T> 
     ...init,
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   })
+  // JSON is part of this client's contract. A non-JSON body (most commonly the /login page when the
+  // session has expired and middleware followed a redirect) used to parse as `{}` and be handed back
+  // as if it were a real payload, so the caller crashed later on some `undefined.filter(...)`. Fail
+  // here with a clear message instead of returning a payload with no fields.
+  const contentType = res.headers.get("content-type") ?? ""
+  if (!contentType.includes("application/json")) {
+    throw new Error(
+      res.status === 401 || res.status === 403 || res.redirected
+        ? "Your session has expired. Please sign in again."
+        : `Request failed (${res.status})`
+    )
+  }
   const json = await res.json().catch(() => ({}))
   if (!res.ok || json.success === false) throw new Error(json.error || `Request failed (${res.status})`)
   return json as T

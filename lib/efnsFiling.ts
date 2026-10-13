@@ -49,15 +49,28 @@ export function efnsTriggerMatches(
 }
 
 /** Filing outcomes stored on immigration_notifications / immigration_payments.filing_status. */
-export type EfnsFilingStatus = "filed" | "no_rule" | "no_match" | "ambiguous" | "error"
+export type EfnsFilingStatus = "filed" | "no_rule" | "no_match" | "ambiguous" | "already_filled" | "error"
 
 export const EFNS_FILING_LABELS: Record<EfnsFilingStatus, string> = {
   filed: "Filed to task",
   no_rule: "No stage set for it",
   no_match: "Needs a task",
   ambiguous: "Needs a task (several match)",
+  // The task's stage already has a document / is complete: auto-filing never replaces one, so it
+  // waits for someone to link it by hand (Replace or Add alongside). Not retried automatically.
+  already_filled: "Stage already filled",
   error: "Filing failed",
 }
+
+/** Who linked a document: the auto-filing job or a staff member (the manual link dialog). */
+export type EfnsLinkedBy = "auto" | "staff"
+
+/**
+ * What a manual link does on a stage that already has a document: "replace" takes the existing
+ * document(s) of that type off the stage (they stay in the individual's documents), "add" keeps
+ * them and adds this one alongside. "new" is a link onto an empty stage.
+ */
+export type EfnsLinkMode = "new" | "replace" | "add"
 
 /** Statuses that wait for someone to pick the task by hand. */
 export const EFNS_NEEDS_TASK: EfnsFilingStatus[] = ["no_match", "ambiguous"]
@@ -87,6 +100,11 @@ export interface EfnsFilingRecord {
   } | null
   matched_by: EfnsMatchedBy
   by_id?: string | null
+  /** Audit: linked by the auto-filing job or by staff, and how it went onto the stage. */
+  linked_by?: EfnsLinkedBy
+  mode?: EfnsLinkMode
+  /** Documents a "replace" took off the stage. */
+  replaced_document_ids?: Array<string | number>
   // Set for no_match/ambiguous: the tasks that looked plausible, so the "Needs a task" list can
   // show them without re-running the whole match.
   candidates?: Array<{ id: number | string; applicant_name?: string | null; r_number?: string | null }>
@@ -99,6 +117,7 @@ export const EFNS_FILING_BADGE: Record<EfnsFilingStatus, string> = {
   no_rule: "border-slate-200 bg-slate-50 text-slate-600",
   no_match: "border-amber-200 bg-amber-50 text-amber-700",
   ambiguous: "border-amber-200 bg-amber-50 text-amber-700",
+  already_filled: "border-violet-200 bg-violet-50 text-violet-700",
   error: "border-red-200 bg-red-50 text-red-700",
 }
 

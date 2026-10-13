@@ -26,8 +26,8 @@ import {
   type ItemKind,
   type ParsedApplicant,
 } from "@/lib/immigrationNotifications"
-import type { EfnsFilingRecord, EfnsFilingStatus, EfnsMatchedBy } from "@/lib/efnsFiling"
-import { fillEfnsDocumentFields } from "@/lib/efnsDocumentFields.server"
+import type { EfnsFilingRecord, EfnsFilingStatus, EfnsLinkedBy, EfnsLinkMode, EfnsMatchedBy } from "@/lib/efnsFiling"
+import { fillEfnsDocumentFields, fillFromLabels, readPdfLabels } from "@/lib/efnsDocumentFields.server"
 import { efnsTriggerMatches, IMMIGRATION_DEPARTMENT_ID, isEfnsTriggerSet, itemJobLevels, type EfnsJobLevel } from "@/lib/efnsFiling"
 // The same "is this stage N/A for this task's job level / class" rule the task tables use.
 import { isStageApplicableToTask } from "@/app/(dashboard)/dashboard/reports/utils/reportStageLogic"
@@ -406,6 +406,18 @@ export async function linkStagesForTask(
     stageName: string
     orderNum: number
     documents: Array<{ kycId: string; name: string; isRequired?: boolean }>
+    /** The stage already has a document or is complete — a link then replaces or adds alongside. */
+    filled: boolean
+    completedAt: string | null
+    /** What's on the stage now. */
+    existing: Array<{
+      documentId: string
+      kycId: string | null
+      name: string
+      fileName: string | null
+      linkedAt: string | null
+      linkedBy: string | null
+    }>
   }>
   /** What the rules pick for the item (null without an item, or when no rule takes it). */
   suggested: { stageId: string; kycId: string; stageName: string } | null
@@ -420,14 +432,34 @@ export async function linkStagesForTask(
     const result = applicableStages(stages, task, departments)
       .filter((s: any) => Array.isArray(s.documents) && s.documents.length > 0)
       .sort((a: any, b: any) => (a.order_num || 0) - (b.order_num || 0))
-      .map((s: any) => ({
-        stageId: s.id,
-        stageName: s.name || "Untitled stage",
-        orderNum: s.order_num || 0,
-        documents: (s.documents as any[])
-          .filter((d: any) => !!d.kycId && documentAppliesToTask(d, task))
-          .map((d: any) => ({ kycId: d.kycId, name: d.name || "Document", isRequired: d.isRequired })),
-      }))
+      .map((s: any) => {
+        const entry = task.stages?.[s.id] || null
+        return {
+          stageId: s.id,
+          stageName: s.name || "Untitled stage",
+          orderNum: s.order_num || 0,
+          documents: (s.documents as any[])
+            .filter((d: any) => !!d.kycId && documentAppliesToTask(d, task))
+            .map((d: any) => ({ kycId: d.kycId, name: d.name || "Document", isRequired: d.isRequired })),
+          filled: stageEntryFilled(entry),
+          completedAt: (entry?.completedAt as string) || null,
+          existing: Object.values(entry?.documents || {}).map((d: any) => ({
+            documentId: String(d?.linked_document_id ?? d?.id ?? ""),
+            kycId: d?.document_id ?? null,
+            name: d?.name || "Document",
+            fileName: null as string | null,
+            linkedAt: d?.linked_at ?? null,
+            linkedBy: d?.linked_by ?? (d?.source === "efns" ? "auto" : "staff"),
+          })),
+        }
+      })
+    // The existing documents' file names, so the dialog can say what a replace takes off.
+    const existingIds = [...new Set(result.flatMap((s) => s.existing.map((e) => e.documentId)).filter(Boolean))]
+    if (existingIds.length) {
+      const { data: rows } = await sb.from("acc_portal_directors_documents").select("id, file_path").in("id", existingIds)
+      const names = new Map<string, string | null>((rows || []).map((r: any) => [String(r.id), String(r.file_path || "").split("/").pop() || null]))
+      for (const stage of result) for (const e of stage.existing) e.fileName = names.get(e.documentId) ?? null
+    }
     let suggested: { stageId: string; kycId: string; stageName: string } | null = null
     let suggestionNote: string | null = null
     if (item) {
@@ -476,6 +508,11 @@ export interface FileEfnsItemInput {
   kycId?: string
   matchedBy: EfnsMatchedBy
   byId?: string | null
+  /**
+   * Manual links only — what to do when the stage already has a document: "replace" (the default)
+   * or "add" alongside. Auto-filing never files onto a filled stage.
+   */
+  mode?: Exclude<EfnsLinkMode, "new">
 }
 
 export interface FileEfnsItemResult {
@@ -483,6 +520,26 @@ export interface FileEfnsItemResult {
   filing: EfnsFilingRecord
   documentId?: number
   error?: string
+  /** Auto-filing stopped because the stage already has a document / is complete. */
+  alreadyFilled?: boolean
+}
+
+/** Whether a task's stage entry already has a document or is complete. */
+const stageEntryFilled = (entry: any) =>
+  !!entry && (entry.status === "completed" || !!entry.completedAt || Object.keys(entry.documents || {}).length > 0)
+
+/**
+ * Appends to efns_filing_events — the audit trail of every link (auto vs staff, new / replace / add)
+ * and every skip. Never fails the filing (e.g. before migration 20261018000000 is applied).
+ */
+async function logEfnsFilingEvent(sb: SupabaseClientLike, event: Record<string, unknown>) {
+  await sb
+    .from("efns_filing_events")
+    .insert(event)
+    .then(
+      () => {},
+      () => {},
+    )
 }
 
 /**
@@ -549,6 +606,33 @@ export async function fileEfnsItem(input: FileEfnsItemInput): Promise<FileEfnsIt
 
     baseFiling = { ...baseFiling, stage_name: stageName, kyc_document_id: kycId, individual_id: individualId }
 
+    // A stage that already has a document (or is complete) is only changed by a staff member's
+    // explicit choice; auto-filing leaves it for review.
+    const linkedBy: EfnsLinkedBy = input.matchedBy === "manual" ? "staff" : "auto"
+    const existingEntry = task.stages?.[input.stageId] || null
+    const stageFilled = stageEntryFilled(existingEntry)
+    if (stageFilled && linkedBy === "auto") {
+      await logEfnsFilingEvent(sb, {
+        item_kind: input.kind,
+        item_id: input.id,
+        task_id: task.id,
+        stage_id: input.stageId,
+        stage_name: stageName,
+        kyc_document_id: kycId,
+        action: "skipped_already_filled",
+        linked_by: linkedBy,
+        actor_id: input.byId ?? null,
+        matched_by: input.matchedBy,
+      })
+      return {
+        success: false,
+        alreadyFilled: true,
+        filing: { ...baseFiling, linked_by: linkedBy },
+        error: `"${stageName}" already has a document on task #${task.id} — link it by hand to replace it or add it alongside`,
+      }
+    }
+    const mode: EfnsLinkMode = stageFilled ? input.mode ?? "replace" : "new"
+
     // Download the source PDF.
     const pdfName = input.kind === "notification" ? itemRow.pdf_file_name : itemRow.payment_instructions_file_name
     const pdfPath = immigrationPdfPath(input.kind, pdfName)
@@ -581,6 +665,16 @@ export async function fileEfnsItem(input: FileEfnsItemInput): Promise<FileEfnsIt
       itemRow,
     )
 
+    // Cache the PDF's labels on the item (the page previews fields from them without re-reading PDFs).
+    await sb
+      .from(table)
+      .update({ pdf_labels: fill.pdfLabels })
+      .eq("id", input.id)
+      .then(
+        () => {},
+        () => {},
+      )
+
     // Insert the document row.
     const { data: docRow, error: insErr } = await sb
       .from("acc_portal_directors_documents")
@@ -599,6 +693,9 @@ export async function fileEfnsItem(input: FileEfnsItemInput): Promise<FileEfnsIt
           efns_id: input.id,
           file_number: itemRow.file_number ?? null,
           matched_by: input.matchedBy,
+          linked_by: linkedBy,
+          linked_by_id: input.byId ?? null,
+          link_mode: mode,
           fields: { sources: fill.sources, missing: fill.missing, pdf_labels: fill.pdfLabels },
         },
         created_at: now,
@@ -610,9 +707,17 @@ export async function fileEfnsItem(input: FileEfnsItemInput): Promise<FileEfnsIt
     if (insErr || !docRow) return recordError(baseFiling, `Failed to create document row: ${insErr?.message ?? "unknown error"}`)
 
     // Link onto the task (mirrors buildStageLinkUpdate in tasks/utils/taskManagerData.ts).
+    // "replace" takes this type's existing documents off the stage (their rows stay in the
+    // individual's documents); "add" keeps them. stages.documents and source_document_id stay in step.
     const docDisplayName = await fetchKycDisplayName(sb, kycId)
-    const existingStageDocs = { ...(task.stages?.[input.stageId]?.documents || {}) }
-    existingStageDocs[String(docRow.id)] = {
+    const existingDocEntries = Object.entries(existingEntry?.documents || {}) as Array<[string, any]>
+    const replacedEntries =
+      mode === "replace" ? existingDocEntries.filter(([, d]) => String(d?.document_id) === String(kycId)) : []
+    const replacedIds = replacedEntries.map(([, d]) => d?.linked_document_id ?? d?.id).filter((v) => v != null)
+    const stageDocs: Record<string, any> = Object.fromEntries(
+      existingDocEntries.filter(([key]) => !replacedEntries.some(([rk]) => rk === key)),
+    )
+    stageDocs[String(docRow.id)] = {
       id: docRow.id,
       document_id: kycId,
       name: docDisplayName,
@@ -620,23 +725,47 @@ export async function fileEfnsItem(input: FileEfnsItemInput): Promise<FileEfnsIt
       status: "linked",
       linked_document_id: docRow.id,
       uploaded_by_id: input.byId ?? null,
+      // Audit: who linked it and from where.
+      source: "efns",
+      efns_kind: input.kind,
+      efns_id: input.id,
+      linked_by: linkedBy,
+      linked_by_id: input.byId ?? null,
+      link_mode: mode,
     }
+    // A stage that was already complete keeps its completion date and who completed it.
+    const wasCompleted = !!(existingEntry?.status === "completed" || existingEntry?.completedAt)
     const updatedStageEntry = {
-      ...task.stages?.[input.stageId],
+      ...existingEntry,
       status: "completed",
-      date: now.split("T")[0],
-      completedAt: now,
-      documentsUploaded: Object.keys(existingStageDocs).length,
+      documentsUploaded: Object.keys(stageDocs).length,
       lastUpdated: now,
-      uploaded_by_id: input.byId ?? null,
-      documents: existingStageDocs,
+      documents: stageDocs,
+      last_linked_by: linkedBy,
+      last_linked_by_id: input.byId ?? null,
+      ...(wasCompleted
+        ? {}
+        : {
+            date: now.split("T")[0],
+            completedAt: now,
+            uploaded_by_id: input.byId ?? null,
+            completed_by_id: input.byId ?? null,
+            completed_by: linkedBy === "auto" ? "efns_auto" : "staff",
+          }),
     }
     const existingSourceDocs: any[] = Array.isArray(task.source_document_id?.[input.stageId])
       ? task.source_document_id[input.stageId]
       : []
+    const replacedSet = new Set(replacedIds.map(String))
     const sourceDocsForStage = [
-      ...existingSourceDocs.filter((d: any) => String(d.document_id) !== String(kycId)),
-      { id: docRow.id, document_id: kycId, linked_at: now, status: "linked", linked_document_id: docRow.id },
+      ...(mode === "add"
+        ? existingSourceDocs
+        : mode === "replace"
+          ? existingSourceDocs.filter(
+              (d: any) => String(d.document_id) !== String(kycId) && !replacedSet.has(String(d.linked_document_id ?? d.id)),
+            )
+          : existingSourceDocs.filter((d: any) => String(d.document_id) !== String(kycId))),
+      { id: docRow.id, document_id: kycId, linked_at: now, status: "linked", linked_document_id: docRow.id, linked_by: linkedBy },
     ]
     const taskUpdate: Record<string, any> = {
       stages: { ...task.stages, [input.stageId]: updatedStageEntry },
@@ -649,7 +778,8 @@ export async function fileEfnsItem(input: FileEfnsItemInput): Promise<FileEfnsIt
     if (!String(task.r_number ?? "").trim() && String(itemRow.file_number ?? "").trim()) {
       taskUpdate.r_number = String(itemRow.file_number).trim()
     }
-    const advancedStatus = computeAdvancedTaskStatus(task.status, input.stageId)
+    // Only a stage completed by this link moves the task on.
+    const advancedStatus = wasCompleted ? null : computeAdvancedTaskStatus(task.status, input.stageId)
     if (advancedStatus) taskUpdate.status = advancedStatus
 
     const { error: taskUpdErr } = await sb.from("tm_tasks").update(taskUpdate).eq("id", task.id)
@@ -680,7 +810,25 @@ export async function fileEfnsItem(input: FileEfnsItemInput): Promise<FileEfnsIt
       job_level: task.job_level ?? null,
       matched_by: input.matchedBy,
       by_id: input.byId || null,
+      linked_by: linkedBy,
+      mode,
+      ...(replacedIds.length ? { replaced_document_ids: replacedIds } : {}),
     }
+    await logEfnsFilingEvent(sb, {
+      item_kind: input.kind,
+      item_id: input.id,
+      task_id: task.id,
+      stage_id: input.stageId,
+      stage_name: stageName,
+      kyc_document_id: kycId,
+      document_id: String(docRow.id),
+      action: mode === "replace" ? "replaced" : mode === "add" ? "added_alongside" : "filed",
+      linked_by: linkedBy,
+      actor_id: input.byId ?? null,
+      matched_by: input.matchedBy,
+      replaced_document_ids: replacedIds.map(String),
+      stage_was_completed: wasCompleted,
+    })
     const { error: filingErr } = await sb
       .from(table)
       .update({ filing_status: "filed", filing, filed_at: now })
@@ -906,11 +1054,49 @@ export async function runEfnsFilingJob(options: EfnsJobOptions = {}): Promise<Ef
     results.push(await processEfnsItem(sb, kind, row, options.byId ?? null))
   }
 
+  if (!options.ids?.length) await cacheMissingPdfLabels(sb, 60)
+
   return {
     success: true,
     processed: results.length,
     filed: results.filter((r) => r.status === "filed").length,
     results,
+  }
+}
+
+/**
+ * Reads and caches pdf_labels for items that don't have them yet (newest first), a batch per run, so
+ * the Immigration Notifications page can preview every record's document-type fields on load.
+ * Quietly does nothing before migration 20261018000000 adds the column.
+ */
+async function cacheMissingPdfLabels(sb: SupabaseClientLike, batch: number) {
+  for (const kind of ["notification", "payment"] as ItemKind[]) {
+    const table = kind === "notification" ? "immigration_notifications" : "immigration_payments"
+    const pdfColumn = kind === "notification" ? "pdf_file_name" : "payment_instructions_file_name"
+    const { data, error } = await sb
+      .from(table)
+      .select(`id, ${pdfColumn}`)
+      .is("pdf_labels", null)
+      .not(pdfColumn, "is", null)
+      .order("created_at", { ascending: false })
+      .limit(batch)
+    if (error || !data) continue
+    for (const row of data as any[]) {
+      const path = immigrationPdfPath(kind, row[pdfColumn])
+      let labels: Record<string, string> = {}
+      if (path) {
+        const { data: blob } = await sb.storage.from(IMMIGRATION_BUCKET).download(path)
+        if (blob) {
+          try {
+            labels = await readPdfLabels(new Uint8Array(await blob.arrayBuffer()))
+          } catch {
+            labels = {}
+          }
+        }
+      }
+      // {} marks "looked at" (no PDF / unreadable) so it isn't retried every run.
+      await sb.from(table).update({ pdf_labels: labels }).eq("id", row.id)
+    }
   }
 }
 
@@ -1005,6 +1191,13 @@ const processEfnsItem = async (
       matchedBy,
       byId,
     })
+    if (filed.alreadyFilled) {
+      return writeOutcome(
+        "already_filled",
+        { ...filed.filing, task_id: task.id, stage_id: match.stageId, stage_name: match.stageName, matched_by: matchedBy, error: filed.error },
+        { taskId: task.id, stageName: match.stageName, error: filed.error },
+      )
+    }
     return {
       kind,
       id,
@@ -1110,4 +1303,134 @@ export async function previewEfnsDocumentFields(kind: ItemKind, id: number): Pro
   const pdf = download?.data ? new Uint8Array(await download.data.arrayBuffer()) : null
   const fill = await fillEfnsDocumentFields(info.fields, pdf, kind, itemRow)
   return { ...base, source: "preview", values: fill.values, note: null }
+}
+
+export interface EfnsFieldPreviewMap {
+  /** Document types referenced, with their fields — shared by the items below. */
+  types: Record<string, { name: string | null; fields: any[] }>
+  /** Per item ("n-<id>" / "p-<id>", the page's item keys). */
+  items: Record<string, Omit<EfnsFieldPreview, "fields" | "docTypeName">>
+}
+
+/**
+ * Every item's document-type fields at once, for the Immigration Notifications page to load with
+ * its list: filed items get their filed document's saved values; unfiled ones the type their rule
+ * picks, filled from the cached pdf_labels (plus the row) — no PDFs are read here. Same rules as
+ * previewEfnsDocumentFields.
+ */
+export async function previewAllEfnsDocumentFields(): Promise<EfnsFieldPreviewMap> {
+  const sb = createServerSupabaseClient()
+  const fetchAll = async (table: string) => {
+    const out: any[] = []
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await sb.from(table).select("*").order("id", { ascending: true }).range(from, from + 999)
+      if (error || !data) break
+      out.push(...data)
+      if (data.length < 1000) break
+    }
+    return out
+  }
+  const [notifications, payments, department] = await Promise.all([
+    fetchAll("immigration_notifications"),
+    fetchAll("immigration_payments"),
+    fetchDepartment(sb, IMMIGRATION_DEPARTMENT_ID),
+  ])
+  const { stages, departments } = department
+
+  // Rule pick per (status, fee type, job levels) — the same few combinations repeat across items.
+  const pickCache = new Map<string, { kycId: string; stageName: string; orderNum: number } | null>()
+  const pickFor = (kind: ItemKind, row: any) => {
+    const { permitGroup, status, category, feeType } = itemPermitGroupAndStatus(kind, row)
+    const levels = itemJobLevels(permitGroup, category) || []
+    const key = JSON.stringify([status, feeType, levels])
+    if (pickCache.has(key)) return pickCache.get(key)!
+    const pseudoTasks = levels.map((l) => ({
+      job_level: { department_id: IMMIGRATION_DEPARTMENT_ID, subdepartment_id: l.subdepartmentId, class_id: l.classId ?? null, subclass_id: null },
+    }))
+    const appliesToLevels = (fn: (task: any) => boolean) => (pseudoTasks.length ? pseudoTasks.some(fn) : true)
+    let pick: { kycId: string; stageName: string; orderNum: number } | null = null
+    for (const stage of stages) {
+      if (!appliesToLevels((t) => isStageApplicableToTask(stage, t, departments))) continue
+      for (const doc of stage.documents || []) {
+        if (
+          doc?.kycId &&
+          isEfnsTriggerSet(doc.efnsTrigger) &&
+          efnsTriggerMatches(doc.efnsTrigger, status, feeType) &&
+          appliesToLevels((t) => documentAppliesToTask(doc, t)) &&
+          (!pick || (stage.order_num || 0) < pick.orderNum)
+        ) {
+          pick = { kycId: doc.kycId, stageName: stage.name || "", orderNum: stage.order_num || 0 }
+        }
+      }
+    }
+    pickCache.set(key, pick)
+    return pick
+  }
+
+  const rows = [
+    ...notifications.map((row) => ({ kind: "notification" as ItemKind, row })),
+    ...payments.map((row) => ({ kind: "payment" as ItemKind, row })),
+  ]
+
+  // Filed documents' saved values.
+  const filedIds = [...new Set(rows.map(({ row }) => (row.filing_status === "filed" ? row.filing?.document_id : null)).filter(Boolean).map(String))]
+  const filedDocs = new Map<string, any>()
+  for (let i = 0; i < filedIds.length; i += 200) {
+    const { data } = await sb
+      .from("acc_portal_directors_documents")
+      .select("id, document_id, extracted_details")
+      .in("id", filedIds.slice(i, i + 200))
+    for (const d of data || []) filedDocs.set(String(d.id), d)
+  }
+
+  // Each item's doc type, then the types' fields in one query.
+  const plan = rows.map(({ kind, row }) => {
+    const filedDoc = row.filing_status === "filed" && row.filing?.document_id ? filedDocs.get(String(row.filing.document_id)) : null
+    if (filedDoc || (row.filing_status === "filed" && row.filing?.kyc_document_id)) {
+      return { kind, row, filed: true, kycId: (filedDoc?.document_id || row.filing.kyc_document_id) as string, stageName: row.filing?.stage_name || null, filedDoc }
+    }
+    const pick = pickFor(kind, row)
+    return { kind, row, filed: false, kycId: pick?.kycId ?? null, stageName: pick?.stageName ?? null, filedDoc: null }
+  })
+  const kycIds = [...new Set(plan.map((p) => p.kycId).filter(Boolean) as string[])]
+  const types: EfnsFieldPreviewMap["types"] = {}
+  if (kycIds.length) {
+    const { data } = await sb.from("acc_portal_kyc").select("id, name, display_name, fields").in("id", kycIds)
+    for (const k of data || []) {
+      types[k.id] = { name: k.display_name || k.name || null, fields: Array.isArray(k.fields) ? k.fields : [] }
+    }
+  }
+
+  const items: EfnsFieldPreviewMap["items"] = {}
+  for (const p of plan) {
+    const key = `${p.kind === "notification" ? "n" : "p"}-${p.row.id}`
+    if (!p.kycId) {
+      items[key] = { source: "none", kycId: null, stageName: null, taskId: null, values: {}, note: "no_rule" }
+      continue
+    }
+    const type = types[p.kycId] || { name: null, fields: [] }
+    const note = type.fields.length ? null : "no_fields"
+    if (p.filed) {
+      const saved = p.filedDoc?.extracted_details
+      items[key] = {
+        source: "filed",
+        kycId: p.kycId,
+        stageName: p.stageName,
+        taskId: p.row.filing?.task_id ?? null,
+        values: saved && typeof saved === "object" ? saved : {},
+        note,
+      }
+    } else {
+      const labels = p.row.pdf_labels && typeof p.row.pdf_labels === "object" ? p.row.pdf_labels : {}
+      items[key] = {
+        source: "preview",
+        kycId: p.kycId,
+        stageName: p.stageName,
+        taskId: null,
+        values: type.fields.length ? fillFromLabels(type.fields, labels, p.kind, p.row).values : {},
+        note,
+      }
+    }
+  }
+  return { types, items }
 }

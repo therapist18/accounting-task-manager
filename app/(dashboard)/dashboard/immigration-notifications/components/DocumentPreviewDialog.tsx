@@ -1,7 +1,6 @@
 "use client"
 
-import { useEffect, useState, type ComponentType } from "react"
-import { Loader2 } from "lucide-react"
+import type { ComponentType } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import type { ImmigrationItem } from "@/lib/immigrationNotifications"
@@ -10,9 +9,10 @@ import { fmtDateTime } from "../../emails/components/shared"
 // Read-only document viewer for a notification/payment PDF, reusing the KYC module's
 // ExtractionPreview so the preview (the zoom/rotate document panel plus a details panel) behaves
 // exactly like the document viewer in Tasks. The right-hand panel shows the record's document type's
-// fields (/api/immigration-notifications/fields): the filed document's saved values, or — not filed
-// yet — the type its status's "Filled from EFNS" rule picks, with what filing would read off the PDF.
-// Without a rule (or with no fields on the type) it falls back to the row's own columns.
+// fields — loaded with the page's list (/api/immigration-notifications/fields) and passed in as
+// `preview`: the filed document's saved values, or — not filed yet — the type its status's "Filled
+// from EFNS" rule picks, with what filing would fill. Without a rule (or with no fields on the type)
+// it falls back to the row's own columns.
 //
 // ExtractionPreview is authored as a loosely-typed (@ts-nocheck) component whose `onDataChange`
 // prop is declared required even though it is optional at runtime. Omitting it is precisely what
@@ -58,7 +58,8 @@ function previewData(item: ImmigrationItem): Record<string, unknown> {
   }
 }
 
-interface FieldPreview {
+/** One item's document-type fields, as the page loads them for every item. */
+export interface FieldPreview {
   source: "filed" | "preview" | "none"
   docTypeName: string | null
   stageName: string | null
@@ -70,28 +71,13 @@ interface FieldPreview {
 
 export function DocumentPreviewDialog({
   item,
+  preview,
   onOpenChange,
 }: {
   item: ImmigrationItem | null
+  preview: FieldPreview | null
   onOpenChange: (open: boolean) => void
 }) {
-  const [preview, setPreview] = useState<FieldPreview | null>(null)
-  const [loadingFields, setLoadingFields] = useState(false)
-
-  useEffect(() => {
-    setPreview(null)
-    if (!item?.id) return
-    let cancelled = false
-    setLoadingFields(true)
-    fetch(`/api/immigration-notifications/fields?kind=${item.kind}&id=${item.id}`)
-      .then((r) => r.json())
-      .then((json) => !cancelled && json.success && setPreview(json))
-      .catch(() => {})
-      .finally(() => !cancelled && setLoadingFields(false))
-    return () => {
-      cancelled = true
-    }
-  }, [item?.kind, item?.id])
 
   // The doc type's fields when there are any; the row's columns otherwise.
   const typeFields = (preview?.fields || []).filter((f) => f?.name && f.type !== "array")
@@ -122,15 +108,7 @@ export function DocumentPreviewDialog({
             <span className="truncate">{item?.name || "Document"}</span>
             {item?.status && <span className="text-sm font-normal text-muted-foreground">({item.status})</span>}
           </DialogTitle>
-          <p className="text-xs text-slate-500 flex items-center gap-1.5 min-h-4">
-            {loadingFields ? (
-              <>
-                <Loader2 className="h-3 w-3 animate-spin" /> Loading document fields…
-              </>
-            ) : (
-              caption || fallbackNote
-            )}
-          </p>
+          {(caption || fallbackNote) && <p className="text-xs text-slate-500">{caption || fallbackNote}</p>}
         </DialogHeader>
 
         <div className="flex-1 min-h-0 overflow-hidden flex items-stretch justify-center">

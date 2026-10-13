@@ -191,8 +191,8 @@ export default function EmailCenterPage() {
       accounts: AccountRow[]; companies: CompanyOption[] | null; categories: CategoryOption[]
       staff: StaffOption[] | null
     }>(`/api/email-center${light ? "?light=1" : ""}`)
-    setAccounts(res.accounts)
-    setCategories(res.categories)
+    setAccounts(res.accounts ?? [])
+    setCategories(res.categories ?? [])
     if (res.companies) setCompanies(res.companies)
     if (res.staff) setStaff(res.staff)
     hasFullOverview.current = true
@@ -637,16 +637,16 @@ export default function EmailCenterPage() {
   )
   const updateCount = useMemo(() => baseUpdateEmails.length, [baseUpdateEmails])
   const ignoreCount = useMemo(() => baseIgnoredEmails.length, [baseIgnoredEmails])
-  const unassignedMailboxes = useMemo(() => accounts.filter((a) => !a.company_id).length, [accounts])
+  const unassignedMailboxes = useMemo(() => (accounts ?? []).filter((a) => !a.company_id).length, [accounts])
   // Mailboxes Google no longer accepts (token revoked/expired) - nothing syncs from them until they are
   // connected again, so they get their own indicator in the toolbar.
-  const failedMailboxes = useMemo(() => accounts.filter(needsReconnect).length, [accounts])
+  const failedMailboxes = useMemo(() => (accounts ?? []).filter(needsReconnect).length, [accounts])
   const openFailedMailboxes = useCallback(() => {
     setMailboxView("failed")
     setMailboxFocusNonce((n) => n + 1)
     setTab("mailboxes")
   }, [])
-  const pushHealthy = accounts.some((a) => a.watch_expiry && new Date(a.watch_expiry).getTime() > Date.now())
+  const pushHealthy = (accounts ?? []).some((a) => a.watch_expiry && new Date(a.watch_expiry).getTime() > Date.now())
 
   const isCaseTab = tab === "inprogress" || tab === "completed"
   const isListTab = tab !== "mailboxes" && tab !== "rules"
