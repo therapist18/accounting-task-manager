@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase/client"
+import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { useCurrentUser } from "@/lib/hooks/use-current-user"
 import { UploadModal } from "@/app/generic-components/UploadModal"
 import TemplateGenerationComponent from "../../../tasks-requirements/TemplateGenerationDialog"
@@ -70,6 +71,7 @@ export function GuidedApplication({ data, automationId, automationJobs, onAutoma
 
   // ---- dialogs: upload, letter generation, view ----
   const [uploadItem, setUploadItem] = useState<DocReadinessItem | null>(null)
+  const [previewDocument, setPreviewDocument] = useState<any>(null)
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [generation, setGeneration] = useState<{ item: DocReadinessItem; info: any } | null>(null)
 
@@ -79,7 +81,29 @@ export function GuidedApplication({ data, automationId, automationJobs, onAutoma
     try {
       const { data: signed, error } = await supabase.storage.from("kyc-documents").createSignedUrl(item.doc.file_path, 3600)
       if (error || !signed?.signedUrl) throw error || new Error("No URL")
-      window.open(signed.signedUrl, "_blank", "noopener,noreferrer")
+      const fields = (item.docMeta?.fields || []).map((field: any) => ({
+        id: field.id || field.fieldName || field.name,
+        name: field.fieldName || field.name,
+        displayName: field.displayName || field.display_name,
+        type: field.fieldType || field.type || "text",
+        isUnique: field.isUnique,
+        options: field.options,
+        section: field.section,
+        arrayConfig: field.arrayConfig,
+      }))
+      setPreviewDocument({
+        key: item.key,
+        id: item.doc.id,
+        table: item.col.type === "company" ? "acc_portal_kyc_uploads" : "acc_portal_directors_documents",
+        documentName: item.label,
+        fileUrl: signed.signedUrl,
+        fileName: item.doc.file_name || item.doc.file_path.split("/").pop() || item.label,
+        fields,
+        extractedData: item.doc.extracted_details || {},
+        uploadedAt: item.doc.created_at || item.doc.uploaded_at,
+        updatedAt: item.doc.updated_at,
+        type: item.docMeta?.documentType || "document",
+      })
     } catch {
       toast.error("Couldn't open the file.")
     } finally {
@@ -264,9 +288,46 @@ export function GuidedApplication({ data, automationId, automationJobs, onAutoma
             idFieldName={isCompany ? "company_id" : "director_id"}
             documentIdFieldName="document_id"
             isCompanyUpload={isCompany}
+            renderAsDialog={true}
           />
         )
       })()}
+
+      <Dialog open={!!previewDocument} onOpenChange={open => !open && setPreviewDocument(null)}>
+        <DialogContent className="max-w-[98vw] w-[98vw] h-[95vh] max-h-[95vh] p-0 overflow-hidden flex flex-col bg-gray-50">
+          <DialogHeader className="sr-only">
+            <DialogTitle>{previewDocument?.documentName || "Document preview"}</DialogTitle>
+          </DialogHeader>
+          {previewDocument && <div className="flex-1 min-h-0 overflow-hidden">
+            <ExtractionPreview
+              documentName={previewDocument.documentName}
+              extractedData={previewDocument.extractedData || {}}
+              fields={previewDocument.fields || []}
+              fileUrl={previewDocument.fileUrl}
+              fileName={previewDocument.fileName}
+              expanded
+              documentId={previewDocument.id}
+              type={previewDocument.type}
+              uploadedAt={previewDocument.uploadedAt}
+              updatedAt={previewDocument.updatedAt}
+              onDataChange={(field, value) => setPreviewDocument((prev: any) => prev ? {
+                ...prev,
+                extractedData: { ...(prev.extractedData || {}), [field]: value },
+              } : null)}
+              onSave={async data => {
+                if (!previewDocument.id) throw new Error("Document record is missing its ID")
+                const { error } = await supabase.from(previewDocument.table)
+                  .update({ extracted_details: data, updated_at: new Date().toISOString() })
+                  .eq("id", previewDocument.id)
+                if (error) throw error
+                setPreviewDocument((prev: any) => prev ? { ...prev, extractedData: data } : null)
+                onRefresh?.()
+              }}
+              supabase={supabase}
+            />
+          </div>}
+        </DialogContent>
+      </Dialog>
 
       {generation && (
         <Dialog open onOpenChange={open => { if (!open) { setGeneration(null); onRefresh?.() } }}>

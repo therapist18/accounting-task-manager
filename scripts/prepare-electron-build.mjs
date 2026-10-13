@@ -5,29 +5,30 @@
 // deployment usually serves those from a CDN. For a desktop app there is no CDN,
 // so both have to be copied in by hand or the window loads unstyled HTML.
 import { existsSync, cpSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const standalone = path.join(root, ".next", "standalone");
+const distDir = path.join(root, ".next-desktop");
+const standalone = path.join(distDir, "standalone");
 
 function fail(message) {
   console.error(`\n[prepare] ERROR: ${message}\n`);
   process.exit(1);
 }
 
-if (!existsSync(standalone)) {
+if (!existsSync(path.join(standalone, "server.js"))) {
   fail(
-    ".next/standalone is missing. Build with `npm run build:desktop` - a plain `next build` does not emit standalone output."
+    ".next-desktop/standalone/server.js is missing. Build with `npm run build:desktop` - a plain `next build` does not emit standalone output."
   );
 }
 
 // Fail loudly here rather than shipping a window with no stylesheet.
 for (const [from, to] of [
-  [path.join(root, ".next", "static"), path.join(standalone, ".next", "static")],
+  [path.join(distDir, "static"), path.join(standalone, ".next-desktop", "static")],
   [path.join(root, "public"), path.join(standalone, "public")],
 ]) {
   if (!existsSync(from)) {
@@ -49,7 +50,8 @@ if (!existsSync(automationDir)) {
 }
 if (!existsSync(path.join(automationDir, "node_modules", "express"))) {
   console.log("[prepare] installing automation-server dependencies");
-  execFileSync("npm", ["install", "--omit=dev", "--no-audit", "--no-fund"], {
+  // Through the shell: on Windows npm is npm.cmd, which Node will not spawn by bare name.
+  execSync("npm install --omit=dev --no-audit --no-fund", {
     cwd: automationDir,
     stdio: "inherit",
   });

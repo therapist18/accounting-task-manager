@@ -948,7 +948,7 @@ export const ExtractionPreview = ({
   return (
     <>
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="max-w-[98vw] sm:max-w-[98vw] max-h-[98vh] sm:h-[95vh] p-0 overflow-hidden flex flex-col bg-gray-50">
+      <DialogContent className="max-w-[98vw] w-[98vw] max-h-[95vh] h-[95vh] p-0 overflow-hidden flex flex-col bg-gray-50">
           <DialogHeader className="p-4 border-b bg-white shrink-0">
             <DialogTitle>Document Details Extraction: {documentName}</DialogTitle>
           </DialogHeader>

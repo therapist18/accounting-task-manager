@@ -5,6 +5,7 @@ import Link from "next/link"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import { NotificationCenter } from "@/components/notification-center"
+import { DownloadDesktopAppButton } from "@/components/download-desktop-app-button"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -64,6 +65,7 @@ export function Navbar() {
       </div>
 
       <div className="flex items-center gap-2">
+        <DownloadDesktopAppButton />
         <NotificationCenter />
 
         {/* User Profile Dropdown */}

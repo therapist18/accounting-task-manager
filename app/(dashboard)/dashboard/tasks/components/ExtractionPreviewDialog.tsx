@@ -95,7 +95,7 @@ export function ExtractionPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-none w-full h-full p-0 m-0">
+      <DialogContent className="max-w-[98vw] w-[98vw] h-[95vh] max-h-[95vh] p-0 overflow-hidden flex flex-col bg-gray-50">
         <DialogHeader className="sr-only">
           <DialogTitle>Document Preview</DialogTitle>
           <DialogDescription>Preview of the extracted document data</DialogDescription>

@@ -47,14 +47,14 @@
     ],
     "extraResources": [
       {
-        "from": ".next/standalone",
+        "from": ".next-desktop/standalone",
         "to": "next-server",
         "filter": [
           "**/*"
         ]
       },
       {
-        "from": ".next/standalone/node_modules",
+        "from": ".next-desktop/standalone/node_modules",
         "to": "next-server/node_modules",
         "filter": [
           "**/*"

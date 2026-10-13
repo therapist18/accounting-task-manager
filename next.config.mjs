@@ -7,8 +7,14 @@
 // `npm run build` is used by the normal web deployment, where the .next/server
 // output is what gets served and the extra standalone tree is just dead weight.
 // `npm run build:desktop` sets the flag.
+//
+// The desktop build also writes to its own .next-desktop folder: a `next dev`
+// running alongside it rewrites .next and would delete .next/standalone midway
+// through packaging, leaving the installer without its server.
+const desktopBuild = process.env.NEXT_OUTPUT_STANDALONE === "1"
 const nextConfig = {
-  output: process.env.NEXT_OUTPUT_STANDALONE === "1" ? "standalone" : undefined,
+  output: desktopBuild ? "standalone" : undefined,
+  distDir: desktopBuild ? ".next-desktop" : ".next",
   eslint: {
     ignoreDuringBuilds: true,
   },

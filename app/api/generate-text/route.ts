@@ -15,9 +15,9 @@ export async function POST(request: Request) {
 
     console.log('🔥 [API] Model type:', modelType);
     console.log('🔥 [API] Gemini API Key available:', !!API_KEYS);
-    console.log('🔥 [API] Using API key:', API_KEYS[1]?.substring(0, 20) + '...');
 
-    const genAI = new GoogleGenerativeAI(API_KEYS[1] || '');
+    const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || API_KEYS[1] || API_KEYS[0];
+    const genAI = new GoogleGenerativeAI(apiKey);
 
     console.log('🔥 [API] Calling Gemini model...');
 

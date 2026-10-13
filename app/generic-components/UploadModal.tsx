@@ -1340,7 +1340,7 @@ export function UploadModal({
         </div>
 
         {uploadedDocs.length > 0 && (
-          <div className="flex flex-col max-h-[60vh] mt-4 overflow-hidden">
+          <div className="flex flex-col max-h-[76vh] mt-4 overflow-hidden">
             <div className="flex-1 min-h-0 overflow-y-auto space-y-6 pb-2">
               {uploadedDocs.map((doc) => {
                 const docTypeForPreview = allowMultipleTypes && doc.selectedDocTypeId
@@ -1468,7 +1468,7 @@ export function UploadModal({
                     )}
 
                     <div className="space-y-4">
-                      <div className="h-[70vh] min-h-0 overflow-hidden rounded border border-gray-200">
+                      <div className="h-[65vh] min-h-[420px] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
                         <ExtractionPreview
                           extractedData={{
                             ...(doc.extractedData || {}),
@@ -1539,7 +1539,7 @@ export function UploadModal({
     return (
       <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
         <DialogContent
-          className="max-w-[85vw] sm:max-w-[85vw] w-full max-h-[92vh] overflow-hidden flex flex-col p-6"
+          className="max-w-[96vw] sm:max-w-[96vw] w-full h-[92vh] max-h-[92vh] overflow-hidden flex flex-col p-5 sm:p-6"
           onInteractOutside={(e) => {
             e.preventDefault();
             onClose();
@@ -1550,7 +1550,7 @@ export function UploadModal({
               Upload <span className="uppercase text-primary">{currentDocumentName}</span> for {individualName}
             </DialogTitle>
           </DialogHeader>
-          <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1">
             {renderContent()}
           </div>
         </DialogContent>

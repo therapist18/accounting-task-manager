@@ -12,6 +12,8 @@ const PUBLIC_PATHS = [
   "/cv-generator",
   "/dashboard/cv-generator",
   "/api/cv/extract",
+  // Lets browser-side extraction code read the shared Gemini model setting; exposes no PII.
+  "/api/gemini-model",
   // Called by the BCL Meetings mobile app, which has no web session cookie for this
   // domain — it authenticates via a shared-secret header instead (checked in the route
   // itself, see TASKS_REPORT_API_KEY), not the cookie-based session this middleware

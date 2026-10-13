@@ -272,7 +272,7 @@ function waitForServer(url, timeoutMs = 60000) {
 }
 
 function getStandaloneServerPath() {
-  if (isDev) return path.join(app.getAppPath(), ".next", "standalone", "server.js");
+  if (isDev) return path.join(app.getAppPath(), ".next-desktop", "standalone", "server.js");
   return path.join(process.resourcesPath, "next-server", "server.js");
 }
 
@@ -311,7 +311,7 @@ function spawnNextServer(port, automationPort) {
 
   if (!fs.existsSync(serverPath)) {
     throw new Error(
-      `Next standalone server not found at ${serverPath}. Run "npm run build" then "npm run desktop:prepare".`
+      `Next standalone server not found at ${serverPath}. Run "npm run build:desktop" then "npm run desktop:prepare".`
     );
   }
 

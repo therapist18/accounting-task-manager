@@ -4,6 +4,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import dayjs from 'dayjs'; // Import dayjs library
 import { supabase } from "@/utils/supabase/client";
 import { toast } from "@/lib/hooks/use-toast"
+import { getGeminiModelsToTry } from "@/lib/gemini";
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
 
@@ -20,8 +21,10 @@ const generationConfig = {
   maxOutputTokens: 8192,
 };
 
-// Models to try in order; on failure the retry loop below falls through to the next one
-const modelsToTry = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+// Models to try in order; on failure the retry loop below falls through to the next one.
+// The primary model is the shared setting the scanner app uses (sys_config:gemini_model),
+// resolved at runtime by getGeminiModelsToTry(); this list is the fallback if it can't be read.
+let modelsToTry = ['gemini-3.1-flash-lite', 'gemini-2.5-flash'];
 
 const getModel = (modelName: string) => genAI.getGenerativeModel({
   model: modelName,
@@ -383,6 +386,8 @@ export const performExtraction = async (
       failedFields: fields
     };
   }
+
+  modelsToTry = await getGeminiModelsToTry();
 
   let attempts = 0;
   const MAX_ATTEMPTS = modelsToTry.length;

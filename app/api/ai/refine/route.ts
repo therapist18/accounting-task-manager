@@ -34,7 +34,7 @@ async function handleSingleRefine(prompt: string, fieldName: string) {
         return Response.json({ error: 'Prompt is required' }, { status: 400 });
     }
 
-    const genAI = new GoogleGenerativeAI(API_KEYS[2] || '');
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || API_KEYS[2] || API_KEYS[0] || '');
 
     console.log('🔥 [API] Calling Gemini model...');
 
@@ -84,7 +84,7 @@ async function handleBatchRefine(fields: Array<{ fieldName: string; prompt: stri
         );
     }
 
-    const genAI = new GoogleGenerativeAI(API_KEYS[2] || '');
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || API_KEYS[2] || API_KEYS[0] || '');
 
     // Process all fields in parallel
     const results = await Promise.all(
