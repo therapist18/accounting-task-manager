@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
-import { CheckCircle2, Download, Loader2, Play, RefreshCcw, RotateCcw, Search, XCircle } from "lucide-react"
+import { CheckCircle2, Download, Loader2, Play, RefreshCcw, RotateCcw, Search, X, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -57,6 +57,8 @@ export default function ImmigrationNotificationsPage() {
   const [exportRows, setExportRows] = useState<ImmigrationItem[]>([])
   const [exporting, setExporting] = useState(false)
   const [running, setRunning] = useState(false)
+  // The item keys ticked in the table for a targeted "Run filing" (empty = file everything pending).
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [linkItem, setLinkItem] = useState<ImmigrationItem | null>(null)
   const [deleteItem, setDeleteItem] = useState<ImmigrationItem | null>(null)
   // Every row's document-type fields, loaded with the list so the preview opens with them.
@@ -182,21 +184,32 @@ export default function ImmigrationNotificationsPage() {
   const scopeLabel = `${tabLabel}${statusFilter === ALL ? "" : ` · ${statusFilter}`}`
 
   const handleRunFiling = async () => {
+    // With rows ticked in the table, file exactly those (passing their ids makes the job re-run
+    // just those records instead of taking the newest not-yet-processed ones); with nothing ticked
+    // it files everything pending, as before.
+    const picked = selected.size > 0 ? items.filter((i) => selected.has(i.key) && i.id != null) : []
     setRunning(true)
     try {
       const res = await fetch("/api/immigration-notifications/file-job", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(
+          picked.length > 0
+            ? { ids: picked.map((i) => ({ kind: i.kind, id: i.id })), limit: picked.length }
+            : {},
+        ),
       })
       const json = await res.json()
       if (!res.ok || json.success === false) throw new Error(json.error || "Auto-filing run failed")
       const { processed, filed } = json
       toast.success(
         processed === 0
-          ? "Nothing to file — every item has already been looked at"
+          ? picked.length > 0
+            ? "Nothing to file — the selected records are all already filed"
+            : "Nothing to file — every item has already been looked at"
           : `Filed ${filed} of ${processed} item${processed === 1 ? "" : "s"}`,
       )
+      if (picked.length > 0) setSelected(new Set())
       await load()
     } catch (e: any) {
       toast.error(e?.message || "Auto-filing run failed")
@@ -278,16 +291,37 @@ export default function ImmigrationNotificationsPage() {
             {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <RotateCcw className="h-5 w-5" />}
             Refresh
           </Button>
+          {selected.size > 0 && (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 h-9 text-sm font-medium text-blue-700"
+              title="These rows will be filed when you press Run filing. Tick the header box to select every row on this page."
+            >
+              {selected.size} selected
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                aria-label="Clear the selected records"
+                className="rounded-full p-0.5 hover:bg-blue-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </span>
+          )}
           <Button
             variant="outline"
             size="sm"
             onClick={handleRunFiling}
             disabled={running || loading}
             className={PILL_BUTTON_CLASS}
-            title="Match each not-yet-filed item to its task and file the PDF onto the matching stage document"
+            title={
+              selected.size > 0
+                ? `File only the ${selected.size} selected record${selected.size === 1 ? "" : "s"}`
+                : "Match each not-yet-filed item to its task and file the PDF onto the matching stage document. Tick rows first to file only those."
+            }
           >
             {running ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
             Run filing
+            {selected.size > 0 && <span className="ml-1 font-semibold">({selected.size})</span>}
           </Button>
         </div>
       </div>
@@ -348,6 +382,8 @@ export default function ImmigrationNotificationsPage() {
           onLink={setLinkItem}
           onDelete={setDeleteItem}
           fieldPreviews={fieldPreviews}
+          selected={selected}
+          onSelectedChange={setSelected}
           resetKey={`${permit}|${statusFilter}|${q}`}
         />
       </div>
