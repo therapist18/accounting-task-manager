@@ -6,6 +6,7 @@
 import "server-only"
 import { createServerSupabaseClient } from "@/lib/supabase"
 import { IMMIGRATION_BUCKET, immigrationPdfPath, type ItemKind } from "@/lib/immigrationNotifications"
+import { appendStageLinkHistory } from "@/lib/efnsFiling.server"
 
 type Sb = ReturnType<typeof createServerSupabaseClient>
 
@@ -40,7 +41,7 @@ function syncTarget(kind: ItemKind, row: any) {
  * from the stage (and source_document_id). A stage left with no documents is no longer complete.
  * The task's overall status isn't rolled back.
  */
-async function unfileDocument(sb: Sb, filing: any): Promise<string | null> {
+async function unfileDocument(sb: Sb, filing: any, item: { kind: ItemKind; id: number; byId?: string | null }): Promise<string | null> {
   const documentId = filing?.document_id
   if (!documentId) return null
   const { data: doc } = await sb.from("acc_portal_directors_documents").select("id, file_path").eq("id", documentId).maybeSingle()
@@ -59,7 +60,22 @@ async function unfileDocument(sb: Sb, filing: any): Promise<string | null> {
         const documents = { ...(entry.documents || {}) }
         delete documents[String(documentId)]
         const remaining = Object.keys(documents).length
-        const next: any = { ...entry, documents, documentsUploaded: remaining, lastUpdated: new Date().toISOString() }
+        const next: any = {
+          ...entry,
+          documents,
+          documentsUploaded: remaining,
+          lastUpdated: new Date().toISOString(),
+          // Audit: a staff member took the filed document back off the stage.
+          link_history: appendStageLinkHistory(entry, {
+            action: "unfiled",
+            linked_by: "staff",
+            linked_by_id: item.byId ?? null,
+            document_id: String(documentId),
+            kyc_document_id: filing.kyc_document_id ?? null,
+            efns_kind: item.kind,
+            efns_id: item.id,
+          }),
+        }
         if (remaining === 0) {
           delete next.status
           delete next.completedAt
@@ -95,29 +111,10 @@ export async function deleteEfnsItem(input: {
   const { data: row, error } = await sb.from(table).select("*").eq("id", input.id).maybeSingle()
   if (error || !row) return { success: false, error: error?.message || "Record not found" }
 
-  const warning = input.unfile && row.filing_status === "filed" ? await unfileDocument(sb, row.filing) : null
-  if (input.unfile && row.filing_status === "filed" && row.filing?.document_id) {
-    // Audit: a staff member took the filed document back off the task.
-    await sb
-      .from("efns_filing_events")
-      .insert({
-        item_kind: input.kind,
-        item_id: input.id,
-        task_id: row.filing.task_id ?? null,
-        stage_id: row.filing.stage_id ?? null,
-        stage_name: row.filing.stage_name ?? null,
-        kyc_document_id: row.filing.kyc_document_id ?? null,
-        document_id: String(row.filing.document_id),
-        action: "unfiled",
-        linked_by: "staff",
-        actor_id: input.byId ?? null,
-        matched_by: row.filing.matched_by ?? null,
-      })
-      .then(
-        () => {},
-        () => {},
-      )
-  }
+  const warning =
+    input.unfile && row.filing_status === "filed"
+      ? await unfileDocument(sb, row.filing, { kind: input.kind, id: input.id, byId: input.byId })
+      : null
 
   // The record's PDF (a re-capture renders and uploads it again).
   const pdfPath = immigrationPdfPath(input.kind, input.kind === "notification" ? row.pdf_file_name : row.payment_instructions_file_name)

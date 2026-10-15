@@ -98,7 +98,8 @@ export function NotificationsTable({
   onDelete?: (item: ImmigrationItem) => void
   // Each row's document-type fields (loaded with the list), keyed by item key.
   fieldPreviews?: Record<string, FieldPreview>
-  // The keys of the rows ticked for "Run filing" (lifted to the page, which owns the button).
+  // The keys of the ticked rows (lifted to the page, which owns the header buttons — Run filing and
+  // Delete).
   selected?: Set<string>
   // Replaces the whole selection (toggle one row / tick or untick the page).
   onSelectedChange?: (next: Set<string>) => void
@@ -120,10 +121,11 @@ export function NotificationsTable({
   const start = safePage * itemsPerPage
   const pageRows = useMemo(() => sorted.slice(start, start + itemsPerPage), [sorted, start, itemsPerPage])
 
-  // Selection for "Run filing": the page owns the set (the button lives in its header); the table
-  // only ticks rows and offers select-all for the page. Already-filed rows aren't tickable — the
-  // filing pass would just mark them "stage already filled" and lose where they were filed.
-  const selectableKeys = useMemo(() => pageRows.filter((i) => i.id != null && i.filingStatus !== "filed").map((i) => i.key), [pageRows])
+  // Selection for "Run filing" and bulk delete: the page owns the set (the buttons live in its
+  // header); the table only ticks rows and offers select-all for the page. Any row with a database
+  // id is tickable — already-filed ones too, since they can be deleted (the filing button just
+  // skips them, they're only filed again by the re-capture).
+  const selectableKeys = useMemo(() => pageRows.filter((i) => i.id != null).map((i) => i.key), [pageRows])
   const allPageSelected = selectableKeys.length > 0 && selectableKeys.every((k) => selected?.has(k))
   const somePageSelected = selectableKeys.some((k) => selected?.has(k))
 
@@ -302,8 +304,8 @@ export function NotificationsTable({
                     checked={allPageSelected ? true : somePageSelected ? "indeterminate" : false}
                     onCheckedChange={(v) => togglePage(v === true)}
                     disabled={selectableKeys.length === 0}
-                    aria-label="Select every row on this page for filing"
-                    title="Select every row on this page for filing"
+                    aria-label="Select every row on this page"
+                    title="Select every row on this page (for filing or deleting)"
                     className="mx-auto border-white/50 data-[state=checked]:border-white data-[state=indeterminate]:border-white data-[state=indeterminate]:bg-white/20"
                   />
                 )}
@@ -346,13 +348,15 @@ export function NotificationsTable({
                   {onSelectedChange && (
                     <Checkbox
                       checked={selected?.has(i.key) ?? false}
-                      disabled={i.id == null || i.filingStatus === "filed"}
+                      disabled={i.id == null}
                       onCheckedChange={(v) => toggleRow(i.key, v === true)}
-                      aria-label={`Select ${i.applicant} for filing`}
+                      aria-label={`Select ${i.applicant}`}
                       title={
-                        i.filingStatus === "filed"
-                          ? "Already filed — use Re-link to file it elsewhere"
-                          : "Tick to run filing for just this record"
+                        i.id == null
+                          ? "Not in the database — nothing to file or delete"
+                          : i.filingStatus === "filed"
+                            ? "Tick to delete this record (its filed document can come off the task too)"
+                            : "Tick to run filing for, or delete, just this record"
                       }
                       className="mx-auto"
                     />

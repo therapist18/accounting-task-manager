@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
-import { CheckCircle2, Download, Loader2, Play, RefreshCcw, RotateCcw, Search, X, XCircle } from "lucide-react"
+import { CheckCircle2, Download, Loader2, Play, RefreshCcw, RotateCcw, Search, Trash2, X, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -60,7 +60,8 @@ export default function ImmigrationNotificationsPage() {
   // The item keys ticked in the table for a targeted "Run filing" (empty = file everything pending).
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [linkItem, setLinkItem] = useState<ImmigrationItem | null>(null)
-  const [deleteItem, setDeleteItem] = useState<ImmigrationItem | null>(null)
+  // The record(s) queued for the delete dialog: one row's trash button, or the whole selection.
+  const [deleteItems, setDeleteItems] = useState<ImmigrationItem[]>([])
   // Every row's document-type fields, loaded with the list so the preview opens with them.
   const [fieldPreviews, setFieldPreviews] = useState<Record<string, FieldPreview>>({})
   // The latest requested sync (re-capture of deleted records by the EFNS automation).
@@ -183,11 +184,24 @@ export default function ImmigrationNotificationsPage() {
   const tabLabel = permit === ALL ? "All permit types" : permit
   const scopeLabel = `${tabLabel}${statusFilter === ALL ? "" : ` · ${statusFilter}`}`
 
+  // Everything ticked in the table that has a database id — what Delete removes.
+  const selectedItems = useMemo(() => items.filter((i) => selected.has(i.key) && i.id != null), [items, selected])
+  // Of the ticked rows, the ones filing can still do something with (already-filed records are only
+  // deletable — re-running them would just mark "stage already filled" and lose where they were filed).
+  const filingItems = useMemo(
+    () => selectedItems.filter((i) => i.filingStatus !== "filed"),
+    [selectedItems],
+  )
+
   const handleRunFiling = async () => {
     // With rows ticked in the table, file exactly those (passing their ids makes the job re-run
     // just those records instead of taking the newest not-yet-processed ones); with nothing ticked
     // it files everything pending, as before.
-    const picked = selected.size > 0 ? items.filter((i) => selected.has(i.key) && i.id != null) : []
+    const picked = selected.size > 0 ? filingItems : []
+    if (selected.size > 0 && picked.length === 0) {
+      toast.info("The selected records are all already filed — nothing to file")
+      return
+    }
     setRunning(true)
     try {
       const res = await fetch("/api/immigration-notifications/file-job", {
@@ -209,7 +223,15 @@ export default function ImmigrationNotificationsPage() {
             : "Nothing to file — every item has already been looked at"
           : `Filed ${filed} of ${processed} item${processed === 1 ? "" : "s"}`,
       )
-      if (picked.length > 0) setSelected(new Set())
+      // Drop just the rows that were filed (they're done); anything ticked only for deleting —
+      // already-filed records — stays ticked.
+      if (picked.length > 0) {
+        const done = new Set(picked.map((i) => i.key))
+        setSelected((prev) => {
+          const next = new Set([...prev].filter((k) => !done.has(k)))
+          return next
+        })
+      }
       await load()
     } catch (e: any) {
       toast.error(e?.message || "Auto-filing run failed")
@@ -294,7 +316,7 @@ export default function ImmigrationNotificationsPage() {
           {selected.size > 0 && (
             <span
               className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 h-9 text-sm font-medium text-blue-700"
-              title="These rows will be filed when you press Run filing. Tick the header box to select every row on this page."
+              title="Tick the header box to select every row on this page. The selection runs filing for, or deletes, exactly these records."
             >
               {selected.size} selected
               <button
@@ -307,6 +329,20 @@ export default function ImmigrationNotificationsPage() {
               </button>
             </span>
           )}
+          {selectedItems.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDeleteItems(selectedItems)}
+              disabled={loading}
+              className={cn(PILL_BUTTON_CLASS, "border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700")}
+              title={`Delete the ${selectedItems.length} selected record${selectedItems.length === 1 ? "" : "s"} (optionally re-capture them from EFNS)`}
+            >
+              <Trash2 className="h-5 w-5" />
+              Delete
+              <span className="ml-1 font-semibold">({selectedItems.length})</span>
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -315,13 +351,15 @@ export default function ImmigrationNotificationsPage() {
             className={PILL_BUTTON_CLASS}
             title={
               selected.size > 0
-                ? `File only the ${selected.size} selected record${selected.size === 1 ? "" : "s"}`
+                ? filingItems.length > 0
+                  ? `File only the ${filingItems.length} selected record${filingItems.length === 1 ? "" : "s"}${filingItems.length < selected.size ? " (the already-filed ones are skipped)" : ""}`
+                  : "The selected records are all already filed — nothing to file"
                 : "Match each not-yet-filed item to its task and file the PDF onto the matching stage document. Tick rows first to file only those."
             }
           >
             {running ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
             Run filing
-            {selected.size > 0 && <span className="ml-1 font-semibold">({selected.size})</span>}
+            {filingItems.length > 0 && <span className="ml-1 font-semibold">({filingItems.length})</span>}
           </Button>
         </div>
       </div>
@@ -380,7 +418,7 @@ export default function ImmigrationNotificationsPage() {
           isVisible={columns.isVisible}
           onFilteredChange={setExportRows}
           onLink={setLinkItem}
-          onDelete={setDeleteItem}
+          onDelete={(i) => setDeleteItems([i])}
           fieldPreviews={fieldPreviews}
           selected={selected}
           onSelectedChange={setSelected}
@@ -395,9 +433,12 @@ export default function ImmigrationNotificationsPage() {
       />
 
       <DeleteEfnsItemDialog
-        item={deleteItem}
-        onOpenChange={(open) => !open && setDeleteItem(null)}
+        items={deleteItems}
+        onOpenChange={(open) => !open && setDeleteItems([])}
         onDeleted={async (queued) => {
+          // Untick what just went, so the count in the header can't outlive the rows.
+          const gone = new Set(deleteItems.map((i) => i.key))
+          setSelected((prev) => new Set([...prev].filter((k) => !gone.has(k))))
           await load()
           if (queued) setSyncRequest(await loadSyncRequest())
         }}

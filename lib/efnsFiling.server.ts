@@ -529,18 +529,12 @@ const stageEntryFilled = (entry: any) =>
   !!entry && (entry.status === "completed" || !!entry.completedAt || Object.keys(entry.documents || {}).length > 0)
 
 /**
- * Appends to efns_filing_events — the audit trail of every link (auto vs staff, new / replace / add)
- * and every skip. Never fails the filing (e.g. before migration 20261018000000 is applied).
+ * The stage's link history (tm_tasks.stages[stageId].link_history): one entry per EFNS link or
+ * un-link, so what a replace / un-file took off the stage is still traceable after its document
+ * leaves stages.documents. Capped to the latest 20.
  */
-async function logEfnsFilingEvent(sb: SupabaseClientLike, event: Record<string, unknown>) {
-  await sb
-    .from("efns_filing_events")
-    .insert(event)
-    .then(
-      () => {},
-      () => {},
-    )
-}
+export const appendStageLinkHistory = (entry: any, event: Record<string, unknown>) =>
+  [...(Array.isArray(entry?.link_history) ? entry.link_history : []), { at: new Date().toISOString(), ...event }].slice(-20)
 
 /**
  * Files one EFNS item as the given task's stage document, against the task's individual, and
@@ -612,18 +606,7 @@ export async function fileEfnsItem(input: FileEfnsItemInput): Promise<FileEfnsIt
     const existingEntry = task.stages?.[input.stageId] || null
     const stageFilled = stageEntryFilled(existingEntry)
     if (stageFilled && linkedBy === "auto") {
-      await logEfnsFilingEvent(sb, {
-        item_kind: input.kind,
-        item_id: input.id,
-        task_id: task.id,
-        stage_id: input.stageId,
-        stage_name: stageName,
-        kyc_document_id: kycId,
-        action: "skipped_already_filled",
-        linked_by: linkedBy,
-        actor_id: input.byId ?? null,
-        matched_by: input.matchedBy,
-      })
+      // Recorded on the item (filing_status "already_filled"); the stage itself is left untouched.
       return {
         success: false,
         alreadyFilled: true,
@@ -743,6 +726,17 @@ export async function fileEfnsItem(input: FileEfnsItemInput): Promise<FileEfnsIt
       documents: stageDocs,
       last_linked_by: linkedBy,
       last_linked_by_id: input.byId ?? null,
+      link_history: appendStageLinkHistory(existingEntry, {
+        action: mode === "replace" ? "replaced" : mode === "add" ? "added_alongside" : "filed",
+        linked_by: linkedBy,
+        linked_by_id: input.byId ?? null,
+        document_id: String(docRow.id),
+        kyc_document_id: kycId,
+        efns_kind: input.kind,
+        efns_id: input.id,
+        matched_by: input.matchedBy,
+        ...(replacedIds.length ? { replaced_document_ids: replacedIds.map(String) } : {}),
+      }),
       ...(wasCompleted
         ? {}
         : {
@@ -814,21 +808,6 @@ export async function fileEfnsItem(input: FileEfnsItemInput): Promise<FileEfnsIt
       mode,
       ...(replacedIds.length ? { replaced_document_ids: replacedIds } : {}),
     }
-    await logEfnsFilingEvent(sb, {
-      item_kind: input.kind,
-      item_id: input.id,
-      task_id: task.id,
-      stage_id: input.stageId,
-      stage_name: stageName,
-      kyc_document_id: kycId,
-      document_id: String(docRow.id),
-      action: mode === "replace" ? "replaced" : mode === "add" ? "added_alongside" : "filed",
-      linked_by: linkedBy,
-      actor_id: input.byId ?? null,
-      matched_by: input.matchedBy,
-      replaced_document_ids: replacedIds.map(String),
-      stage_was_completed: wasCompleted,
-    })
     const { error: filingErr } = await sb
       .from(table)
       .update({ filing_status: "filed", filing, filed_at: now })
