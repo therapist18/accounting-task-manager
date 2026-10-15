@@ -74,6 +74,38 @@ const summarize = (items: { satisfied: boolean; optional: boolean }[]): StepSumm
   optionalMissing: items.filter(i => !i.satisfied && i.optional).length,
 })
 
+/**
+ * Returns true if the job question with the given ID is currently visible
+ * (i.e. its dependency condition is met, or it has no dependency).
+ * Mirrors the checkVisibility logic used by EnquiryDialog / NewCompanyInquiryDialog.
+ */
+function checkJobQuestionVisible(
+  questionId: string,
+  questionsById: Record<string, any>,
+  answers: Record<string, any>,
+): boolean {
+  const question = questionsById[questionId]
+  if (!question) return true // unknown question → don't suppress
+  const dep = question.depends_on
+  if (!dep || !dep.id) return true
+  const parentVal = answers[dep.id]
+  const targetVal = dep.value
+  switch (dep.operator) {
+    case "equals":
+      return String(parentVal) === String(targetVal)
+    case "not_equals":
+      return String(parentVal) !== String(targetVal)
+    case "is_not_empty":
+      if (Array.isArray(parentVal)) return parentVal.length > 0
+      return parentVal !== undefined && parentVal !== null && parentVal !== ""
+    case "is_empty":
+      if (Array.isArray(parentVal)) return parentVal.length === 0
+      return parentVal === undefined || parentVal === null || parentVal === ""
+    default:
+      return true
+  }
+}
+
 async function loadSnapshot(automation: any, task: any, relationshipData: any[]): Promise<Snapshot> {
   const fields = automation.webdata || []
   const computedConfigs = fields.filter((f: any) => f.fieldType === "computed")
@@ -210,6 +242,27 @@ export function useAutomationReadiness(data: JobWorkspaceData, automation: any |
       })
     }
 
+    // Build a flat map of all job questions so we can evaluate dependency
+    // visibility without traversing the question hierarchy.
+    const questionsById: Record<string, any> = {}
+    ;(task?.job_specific_questions || []).forEach((q: any) => {
+      questionsById[String(q.id)] = q
+    })
+
+    // Current answers saved by the user in the job-specific questions form.
+    const taskRecord = snapshot.sourceData["tm_tasks"]?.[String(task?.id)]
+    const jobAnswers: Record<string, any> = taskRecord?.job_specific_answers || {}
+
+    /**
+     * Returns true when the sub-field (or plain field) should be counted as required.
+     * A field whose linked job question IDs are ALL hidden by dependency rules is
+     * treated as NOT required — the path wasn't taken, so no data is expected.
+     */
+    const isLinkedQuestionsVisible = (qIds: string[]): boolean => {
+      if (qIds.length === 0) return true // no linked questions → always required
+      return qIds.some(qId => checkJobQuestionVisible(qId, questionsById, jobAnswers))
+    }
+
     ;(automation.webdata || []).forEach((field: any) => {
       const fieldKey = getFieldKey(field)
       const fieldOptional = field.isOptional === true
@@ -236,9 +289,14 @@ export function useAutomationReadiness(data: JobWorkspaceData, automation: any |
             const entityCategory = (it.entityTypes || field.entityTypes || []).includes("company") ? "company" : "individual"
             const masterFieldId = mIds[0] ?? null
             const questionId = masterFieldId == null ? (qIds[0] ?? null) : null
+            // If this sub-field is linked only to job questions AND all those questions
+            // are hidden by dependency rules, the field is not applicable for this path.
+            const linkedQVisible = mIds.length > 0 || isLinkedQuestionsVisible(qIds)
+            const satisfied = isValidValue(value) || !linkedQVisible
             fields.push({
               kind: "field", key: overrideKey, label: getFieldLabel(it), groupLabel: getFieldLabel(field), col, value,
-              satisfied: isValidValue(value), optional: fieldOptional || it.isOptional === true,
+              satisfied,
+              optional: fieldOptional || it.isOptional === true || !linkedQVisible,
               fieldType: it.type || "text", options: optionsOf(snapshot.jobFields[String(masterFieldId)]),
               persistable: !!getPersistenceSource(snapshot.jobFields, masterFieldId, questionId, entityCategory),
               masterFieldId, questionId, entityId: String(row.entityId), entityCategory, overrideKey,
@@ -268,9 +326,14 @@ export function useAutomationReadiness(data: JobWorkspaceData, automation: any |
         seen.add(overrideKey)
         const owner = columns.find(c => String(c.id) === String(targetId)) || col
         const value = overrides[overrideKey] ?? (targetId != null ? resolveVariableValueImpl(field, String(targetId), ctx) : null)
+        // If this field is linked only to job questions AND all those questions are
+        // hidden by dependency rules, treat it as not applicable for this path.
+        const plainLinkedQVisible = mIds.length > 0 || !!field.customFieldSource || isLinkedQuestionsVisible(qIds)
+        const satisfied = isValidValue(value) || !plainLinkedQVisible
         fields.push({
           kind: "field", key: overrideKey, label: getFieldLabel(field), col: owner, value,
-          satisfied: isValidValue(value), optional: fieldOptional,
+          satisfied,
+          optional: fieldOptional || !plainLinkedQVisible,
           fieldType: field.fieldType || "text", options: optionsOf(snapshot.jobFields[String(masterFieldId)]),
           persistable: targetId != null && !!getPersistenceSource(snapshot.jobFields, masterFieldId, questionId, entityCategory),
           masterFieldId, questionId, entityId: targetId != null ? String(targetId) : null, entityCategory, overrideKey,

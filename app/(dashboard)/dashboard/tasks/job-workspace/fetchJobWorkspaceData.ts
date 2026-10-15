@@ -186,8 +186,15 @@ export const fetchJobWorkspaceData = async (taskId: string): Promise<JobWorkspac
     })
 
     const allReqs: any[] = []
+    const allJobQuestions: any[] = []
+    const seenQIds = new Set<string>()
     matchingRequirements?.forEach((req: any) => {
       if (req.requirements) allReqs.push(...req.requirements)
+      // Collect job-specific questions (for dependency-visibility in the Guided Application)
+      ;(req.job_specific_questions || []).forEach((q: any) => {
+        const id = String(q.id)
+        if (!seenQIds.has(id)) { seenQIds.add(id); allJobQuestions.push(q) }
+      })
     })
 
     // 11. Fetch automations referenced by matching requirements (requirement-level linkage)
@@ -268,6 +275,7 @@ export const fetchJobWorkspaceData = async (taskId: string): Promise<JobWorkspac
       officer: officer ? { id: officer.id, name: officer.name, email: officer.email || '', phone: officer.phone || '' } : undefined,
       task_manager: taskManager ? { id: taskManager.id, name: taskManager.name, email: taskManager.email || '', phone: taskManager.phone || '' } : undefined,
       requirements: allReqs || [],
+      job_specific_questions: allJobQuestions,
       report_doc_defaults: [],
       referenceDocuments: {},
     }

@@ -290,6 +290,14 @@ export async function fetchSourceDataImpl(params: FetchSourceDataParams): Promis
     if (questionIds.length > 0) { if (taskId) addToQueue('tm_tasks', 'id', String(taskId)); return; }
     const isArray = field.fieldType === 'array';
     const cols = isArray ? (field.arrayItems || []) : [{ linkedMasterFieldId: field.linkedMasterFields?.[0] || field.masterFieldIds?.[0] }];
+
+    // If this is an array and any sub-items are linked to job questions, we need tm_tasks
+    // in sourceData so that job_specific_answers is available for dependency evaluation.
+    if (isArray && taskId) {
+      const hasArrayItemQuestions = (field.arrayItems || []).some((it: any) => (it.linkedJobQuestionIds || []).length > 0);
+      if (hasArrayItemQuestions) addToQueue('tm_tasks', 'id', String(taskId));
+    }
+
     let entityIds: string[] = [];
     if (isArray) {
       entityIds = resolveEntityIdsForArrayImpl(field, relationshipData, arrayCtx);

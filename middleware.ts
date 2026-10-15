@@ -25,6 +25,11 @@ const PUBLIC_PATHS = [
   // Called by the EFNS automation after each run (no session cookie). The route authenticates with
   // the x-efns-secret header (EFNS_FILING_SECRET) and rejects every request while that is unset.
   "/api/immigration-notifications/file-job/efns",
+  // Called by the local automation server when a run finishes (no session cookie - the user may
+  // have closed the window). Both routes authenticate with the per-run completion_secret minted
+  // in /api/automations/run, checked against the run row itself.
+  "/api/automations/complete",
+  "/api/automations/settled",
 ];
 
 function isPublicPath(pathname: string): boolean {

@@ -16,6 +16,38 @@ const __dirname = path.dirname(__filename);
 // clobbered them with values from a .env file sitting next to the installer.
 // Env loading is the server's job (automation-server/lib/config.mjs).
 
+// Portal selectors drift without warning. When a step times out, keep a
+// screenshot plus the form controls actually on the page so the broken selector
+// can be fixed from evidence instead of guesswork. Best-effort: never masks the
+// original error.
+async function saveFailureSnapshot(page, jobId) {
+    if (!page || page.isClosed()) return;
+    try {
+        const dir = process.env.AUTOMATION_LOG_DIR
+            ? path.join(process.env.AUTOMATION_LOG_DIR, 'failures')
+            : path.join(__dirname, '..', 'logs', 'failures');
+        fs.mkdirSync(dir, { recursive: true });
+        const base = path.join(dir, String(jobId || Date.now()));
+
+        await page.screenshot({ path: `${base}.png`, fullPage: true });
+        const controls = await page.evaluate(() =>
+            Array.from(document.querySelectorAll('input, select, textarea, button, [role="combobox"]')).map((el) => ({
+                tag: el.tagName.toLowerCase(),
+                id: el.id || null,
+                name: el.getAttribute('name'),
+                type: el.getAttribute('type'),
+                role: el.getAttribute('role'),
+                label: el.labels?.[0]?.innerText?.trim() || el.getAttribute('aria-label') || el.getAttribute('placeholder'),
+                text: el.tagName === 'BUTTON' ? el.innerText.trim().slice(0, 60) : undefined,
+            }))
+        );
+        fs.writeFileSync(`${base}.json`, JSON.stringify({ url: page.url(), controls }, null, 2));
+        console.log(`   🧾 Failure snapshot saved: ${base}.png / .json`);
+    } catch (snapshotError) {
+        console.log(`   ⚠️ Could not save failure snapshot: ${snapshotError.message}`);
+    }
+}
+
 // STATE MANAGEMENT: Job map for progress tracking
 const activeJobs = new Map();
 let latestJobId = null;
@@ -226,6 +258,7 @@ export async function runEtaKenyaAutomation(requestData, jobId = null, hooks = {
     updateJobProgress(currentJobId, 'browser_init', 'Launching browser...');
 
     let browser = null;
+    let page = null;
 
     try {
         // Headful by default: this is a user-visible desktop app and the eTA
@@ -264,7 +297,7 @@ export async function runEtaKenyaAutomation(requestData, jobId = null, hooks = {
             acceptDownloads: true
         });
 
-        const page = await context.newPage();
+        page = await context.newPage();
 
         updateJobProgress(currentJobId, 'navigation', 'Navigating to eTA portal...');
 
@@ -1143,6 +1176,7 @@ export async function runEtaKenyaAutomation(requestData, jobId = null, hooks = {
 
     } catch (error) {
         console.error('❌ eTA Kenya failed:', error.message);
+        await saveFailureSnapshot(page, currentJobId);
         const cancelled = activeJobs.get(currentJobId)?.stopRequested === true;
         if (!cancelled) throw error;
         return { success: false, cancelled: true, error: 'Stopped by user' };
