@@ -27,6 +27,7 @@ import { toast } from '@/lib/hooks/use-toast'
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { useCurrentUser } from "@/lib/hooks/use-current-user"
 import { auditActor } from "../../utils/audit"
+import { automationFetch } from "@/lib/automations/client"
 
 interface AutomationTabProps {
   data: JobWorkspaceData
@@ -478,17 +479,17 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
     });
   }, [getPrimaryTargetEntityId, individualName, onRefresh, saveScreenshotToSupabase]);
 
-  // Polls the local automation server through /api/automations/progress.
+  // Polls the local automation server (see lib/automations/client).
   //
   // This used to read the `automation_jobs` table directly, which only worked
   // because a separate worker process was claiming and completing rows there.
   // Automations now run in a child process of the desktop app, so live state is
   // in that process's memory and the durable record is tm_automation_runs. The
-  // proxy route merges both and returns the same shape this handler always
+  // automationFetch merges both and returns the same shape this handler always
   // consumed, so nothing below had to change.
   const pollSupabaseJob = useCallback(async (jobId: string) => {
     try {
-      const response = await fetch(`/api/automations/progress?jobId=${encodeURIComponent(jobId)}`, {
+      const response = await automationFetch(`/api/automations/progress?jobId=${encodeURIComponent(jobId)}`, {
         cache: 'no-store',
       });
       const payload = await response.json().catch(() => null);
@@ -557,7 +558,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
     // queue to notice the row had changed - the run itself kept going in the
     // browser until it happened to fail on its own.
     try {
-      const response = await fetch('/api/automations/stop', {
+      const response = await automationFetch('/api/automations/stop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jobId: automationJobId }),
@@ -962,7 +963,7 @@ export function AutomationTab({ data, onRefresh, highlightAutomationId, onNaviga
       // built above - as plaintext in a database column. Nothing sensitive is
       // written now: the payload travels over loopback and only the outcome
       // screenshot comes back.
-      const response = await fetch('/api/automations/run', {
+      const response = await automationFetch('/api/automations/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

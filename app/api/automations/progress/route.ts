@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAppSessionFromRequest } from "@/lib/auth/session";
 import { createServerSupabaseClient } from "@/lib/supabase";
-import { forward } from "../_lib/proxy";
 
 export const dynamic = "force-dynamic";
 
@@ -9,15 +8,12 @@ const RUN_COLUMNS =
   "id, automation_type, automation_id, task_id, task_label, job_id, status, progress, current_step, error, outcome_proof, created_at, completed_at";
 
 /**
- * Progress for a live run.
+ * The persisted half of a run's progress.
  *
- * Live state lives in the automation server's memory; the durable record lives in
- * tm_automation_runs. This merges the two - the in-memory job supplies logs and
- * fine-grained progress, and once the run is terminal the persisted row is folded
- * in to supply the outcome proof screenshot and the task/automation ids.
- *
- * The database is only read on the terminal poll, so a running job costs one
- * loopback request per tick and nothing else.
+ * Live state (logs, fine-grained progress) lives in the automation service on the
+ * user's machine and is read there by lib/automations/client. That client only
+ * calls this once the job is terminal or the service no longer knows it, to fold
+ * in the durable record - the outcome proof screenshot and the task/automation ids.
  */
 export async function GET(request: NextRequest) {
   const session = await getAppSessionFromRequest(request);
@@ -31,45 +27,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, error: "jobId is required." }, { status: 400 });
   }
 
-  const supabase = createServerSupabaseClient();
-  const userId = String(session.user.id);
-  const response = await forward(`/api/automations/jobs/${encodeURIComponent(jobId)}`);
-  const payload = await response.json().catch(() => ({}));
-
-  if (response.status === 503) {
-    return NextResponse.json(
-      { success: false, error: payload?.error || "The automation service is not running." },
-      { status: 503 }
-    );
+  const run = await findRun(createServerSupabaseClient(), String(session.user.id), jobId);
+  if (!run) {
+    return NextResponse.json({ success: false, error: "Job not found." }, { status: 404 });
   }
-
-  const job = payload?.job as Record<string, any> | undefined;
-
-  if (!job) {
-    // The job is no longer in memory - the automation server restarted, or the
-    // process died. Fall back to the persisted row for *this* job so the UI
-    // settles on a terminal state instead of polling a 404 forever.
-    const run = await findRun(supabase, userId, jobId);
-    if (!run) {
-      return NextResponse.json(
-        { success: false, error: payload?.error || "Job not found." },
-        { status: 404 }
-      );
-    }
-    return NextResponse.json({ success: true, job: shapeJob(jobId, run), persisted: true });
-  }
-
-  if (job.isRunning) {
-    return NextResponse.json({ success: true, job });
-  }
-
-  // Terminal: attach the persisted fields, which carry the outcome proof.
-  const run = await findRun(supabase, userId, jobId);
-  const merged = run
-    ? { ...job, ...shapeJob(jobId, run), logs: job.logs ?? [] }
-    : job;
-
-  return NextResponse.json({ success: true, job: merged });
+  return NextResponse.json({ success: true, job: shapeJob(jobId, run), persisted: true });
 }
 
 /**

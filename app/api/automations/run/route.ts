@@ -4,7 +4,6 @@ import { ensurePermission } from "@/lib/auth/access-controls";
 import { toAuthErrorResponse } from "@/lib/auth/errors";
 import { getAppSessionFromRequest } from "@/lib/auth/session";
 import { createServerSupabaseClient } from "@/lib/supabase";
-import { forward } from "../_lib/proxy";
 
 export const dynamic = "force-dynamic";
 
@@ -19,14 +18,18 @@ function isMissingTable(message?: string) {
 }
 
 /**
- * Starts an automation run.
+ * Prepares an automation run.
  *
- * The browser work happens in the local automation server, but this route is
- * the only writer to tm_automation_runs and the only holder of the Supabase
- * service-role key. It mints a per-run capability token and hands it to the
- * automation server, which uses it to report the terminal result back via
- * /api/automations/complete. That is what lets a completion notification fire
- * after the user has closed the window.
+ * The browser work happens in the automation service on the user's own machine,
+ * which this route (on Vercel) cannot reach. So it only creates the run record
+ * and mints a per-run capability token; the page then hands both to the local
+ * service (lib/automations/client). The service uses the token to report the
+ * terminal result back via /api/automations/complete, which is what lets a
+ * completion land after the user has closed the window.
+ *
+ * Returning the token to the browser is fine: it belongs to the signed-in user's
+ * own run and can only ever finalise that one row. The service-role key never
+ * leaves this server.
  */
 export async function POST(request: NextRequest) {
   const session = await getAppSessionFromRequest(request);
@@ -59,20 +62,15 @@ export async function POST(request: NextRequest) {
     taskId = null,
     automationId = null,
     taskLabel = null,
-    formData,
   } = body as {
     type?: string;
     taskId?: string | number | null;
     automationId?: string | number | null;
     taskLabel?: string | null;
-    formData?: Record<string, unknown>;
   };
 
   if (!type) {
     return NextResponse.json({ success: false, error: "type is required." }, { status: 400 });
-  }
-  if (!formData || typeof formData !== "object") {
-    return NextResponse.json({ success: false, error: "formData is required." }, { status: 400 });
   }
 
   // A stale run means the previous app session died mid-flight. The desktop
@@ -152,59 +150,54 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // The automation server has to report the terminal result back to *this* Next
-  // server, since this is the process holding the service-role key. Pointing it
-  // at the automation server's own address (getAutomationsApi) would make it call
-  // /api/automations/complete on itself, where no such route exists.
-  //
-  // The Next origin is taken from the incoming request, which in the desktop app
-  // is the loopback address the shell started the server on.
-  const nextOrigin = new URL(request.url).origin;
-
-  const started = await forward("/api/automations/run", {
-    method: "POST",
-    body: JSON.stringify({
-      type,
-      runId: run.id,
-      userId,
-      formData,
-      persistUrl: nextOrigin,
-      persistSecret: secret,
-    }),
-  });
-
-  const result = await started.json().catch(() => ({}));
-
-  if (!started.ok || !result?.success) {
-    // The run never started, so roll the placeholder row back rather than
-    // leaving a permanently "running" record behind.
-    await supabase
-      .from("tm_automation_runs")
-      .update({
-        status: "failed",
-        error: result?.error || "The automation service rejected the run.",
-        completed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", run.id);
-
-    return NextResponse.json(
-      { success: false, error: result?.error || "Could not start the automation." },
-      { status: started.status }
-    );
-  }
-
-  // Record the automation server's job id so a page refresh mid-run can resume
-  // live progress polling. Without it a refresh looks like the run never started.
-  await supabase
-    .from("tm_automation_runs")
-    .update({ job_id: result.jobId, updated_at: new Date().toISOString() })
-    .eq("id", run.id);
-
+  // The automation service reports the terminal result back to *this* server,
+  // since this is the process holding the service-role key. The origin comes
+  // from the incoming request: the Vercel domain in production, localhost in dev.
   return NextResponse.json({
     success: true,
     runId: run.id,
-    jobId: result.jobId,
-    label: result.label,
+    userId,
+    completionSecret: secret,
+    persistUrl: new URL(request.url).origin,
   });
+}
+
+/**
+ * Second half of a start: records the local service's job id (so a page refresh
+ * mid-run can resume live progress polling), or - when the service refused the
+ * run - marks the placeholder row failed instead of leaving it "running" forever.
+ */
+export async function PATCH(request: NextRequest) {
+  const session = await getAppSessionFromRequest(request);
+  if (!session) {
+    return NextResponse.json({ success: false, error: "Not signed in." }, { status: 401 });
+  }
+
+  const body = await request.json().catch(() => null);
+  const { runId, jobId, error } = (body || {}) as { runId?: string; jobId?: string; error?: string };
+  if (!runId || (!jobId && !error)) {
+    return NextResponse.json(
+      { success: false, error: "runId and either jobId or error are required." },
+      { status: 400 }
+    );
+  }
+
+  const now = new Date().toISOString();
+  const update = jobId
+    ? { job_id: String(jobId), updated_at: now }
+    : { status: "failed", error: String(error), completed_at: now, updated_at: now, completion_secret: null };
+
+  // Scoped to the caller's own still-active run, so this can't touch anyone
+  // else's history or reopen a settled run.
+  const { error: updateError } = await createServerSupabaseClient()
+    .from("tm_automation_runs")
+    .update(update)
+    .eq("id", runId)
+    .eq("user_id", String(session.user.id))
+    .in("status", ["pending", "running"]);
+
+  if (updateError) {
+    return NextResponse.json({ success: false, error: updateError.message }, { status: 500 });
+  }
+  return NextResponse.json({ success: true });
 }

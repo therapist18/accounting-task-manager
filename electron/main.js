@@ -19,8 +19,18 @@ const path = require("node:path");
 const isDev = !app.isPackaged;
 const PRODUCT_NAME = "Task Manager";
 
-let nextProcess;
+// The desktop app is a shell around the hosted web app. It deliberately does not
+// run Next itself: a local Next server needs the server secrets (service-role
+// key, OAuth/Twilio/SMTP credentials...) on every user's PC, and anything inside
+// the installer is readable by whoever has it. What has to run locally - the
+// headed eTA browser - is the automation server, reached over IPC below.
+//
+// ELECTRON_START_URL points the shell at another deployment, e.g.
+// http://localhost:3001 to try desktop features against `npm run dev`.
+const APP_URL = process.env.ELECTRON_START_URL || "https://bcl-tasks.booksmartportals.com";
+
 let automationProcess;
+let automationPort = 0;
 let eventBridgeServer;
 let mainWindow;
 let tray;
@@ -94,26 +104,44 @@ function getLockFilePath() {
   return path.join(app.getPath("userData"), "server.lock.json");
 }
 
+// Runs this machine has started and not yet seen finish, keyed by runId. Each
+// carries the run's own completion token, which is what lets the next launch
+// close out a run a crash left behind - without the service-role key the shell
+// used to need for that.
+const pendingRuns = new Map();
+
+function writeLockFile() {
+  try {
+    fs.writeFileSync(
+      getLockFilePath(),
+      JSON.stringify({
+        automationPid: automationProcess?.pid || null,
+        pendingRuns: [...pendingRuns.values()],
+      }),
+      "utf8"
+    );
+  } catch (error) {
+    appendLog(`Failed to write server lock file: ${error.message}`);
+  }
+}
+
 // Safety net for a session that ended without a clean shutdown (crash,
 // force-close, power loss): an automation left mid-run still holds a headed
-// browser and a Supabase row stuck in 'running'. Reap the orphans and reset any
-// job this machine left behind so the UI doesn't show a permanently spinning run.
+// browser and a row stuck in 'running'. Reap the orphan process and mark the
+// runs it left behind as interrupted so the UI doesn't spin forever.
 function cleanupStaleProcesses() {
   const lockPath = getLockFilePath();
   if (!fs.existsSync(lockPath)) return;
 
   try {
-    const { nextPid, automationPid, userId } = JSON.parse(fs.readFileSync(lockPath, "utf8"));
-    for (const pid of [nextPid, automationPid]) {
-      if (pid) {
-        appendLog(`Cleaning up leftover process from a previous session: PID ${pid}`);
-        killProcessTree(pid);
-      }
+    const { automationPid, pendingRuns: leftover = [] } = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+    if (automationPid) {
+      appendLog(`Cleaning up leftover process from a previous session: PID ${automationPid}`);
+      killProcessTree(automationPid);
     }
-    if (userId) {
-      appendLog(`Resetting stale automation runs for user ${userId}`);
-      resetStaleRuns(userId).catch((error) =>
-        appendLog(`Failed to reset stale runs: ${error.message}`)
+    for (const run of leftover) {
+      settleInterruptedRun(run).catch((error) =>
+        appendLog(`Failed to release interrupted run ${run.runId}: ${error.message}`)
       );
     }
   } catch (error) {
@@ -123,103 +151,15 @@ function cleanupStaleProcesses() {
   fs.rmSync(lockPath, { force: true });
 }
 
-function writeLockFile(userId = null) {
-  try {
-    fs.writeFileSync(
-      getLockFilePath(),
-      JSON.stringify({
-        nextPid: nextProcess?.pid || null,
-        automationPid: automationProcess?.pid || null,
-        userId,
-      }),
-      "utf8"
-    );
-  } catch (error) {
-    appendLog(`Failed to write server lock file: ${error.message}`);
-  }
-}
-
-// Any run still marked pending/running belongs to a process that no longer
-// exists. Release it so the automations page shows it as interrupted rather
-// than spinning forever.
-async function resetStaleRuns(userId) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return;
-
-  const { createClient } = require("@supabase/supabase-js");
-  const supabase = createClient(url, key);
-  const { error } = await supabase
-    .from("tm_automation_runs")
-    .update({
-      status: "interrupted",
-      error: "Application closed before the automation finished.",
-      completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("user_id", userId)
-    .in("status", ["pending", "running"]);
-  if (error) throw new Error(error.message);
-}
-
-// -------------------------------------------------------------- env files
-
-function parseEnvFile(filePath) {
-  if (!fs.existsSync(filePath)) return;
-
-  const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
-  for (let i = 0; i < lines.length; i += 1) {
-    const trimmed = lines[i].trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-
-    const separatorIndex = trimmed.indexOf("=");
-    if (separatorIndex === -1) continue;
-
-    const key = trimmed.slice(0, separatorIndex).trim();
-    let value = trimmed.slice(separatorIndex + 1).trim();
-    if (!key) continue;
-
-    const quote = value[0];
-    if (quote === '"' || quote === "'") {
-      if (value.length > 1 && value.endsWith(quote)) {
-        value = value.slice(1, -1);
-      } else {
-        // A quoted value can span several physical lines, which is how a PEM
-        // private key is normally stored. Without consuming the continuation
-        // lines the value is truncated to its opening line and Firebase
-        // rejects the key with "Invalid PEM formatted message".
-        const parts = [value.slice(1)];
-        while (i + 1 < lines.length) {
-          i += 1;
-          const closingIndex = lines[i].indexOf(quote);
-          if (closingIndex !== -1) {
-            parts.push(lines[i].slice(0, closingIndex));
-            break;
-          }
-          parts.push(lines[i]);
-        }
-        value = parts.join("\n");
-      }
-    }
-
-    if (process.env[key] === undefined) {
-      process.env[key] = value.replace(/\\n/g, "\n");
-    }
-  }
-}
-
-function loadEnvironmentVariables() {
-  const rootDir = app.getAppPath();
-  for (const name of [".env", ".env.local", ".env.production.local"]) {
-    parseEnvFile(path.join(rootDir, name));
-  }
-
-  const serverDir = path.dirname(getStandaloneServerPath());
-  if (serverDir !== rootDir) {
-    for (const name of [".env", ".env.local", ".env.production.local"]) {
-      parseEnvFile(path.join(serverDir, name));
-    }
-  }
+async function settleInterruptedRun({ runId, secret, persistUrl }) {
+  if (!runId || !secret || !persistUrl) return;
+  appendLog(`Marking run ${runId} as interrupted`);
+  const response = await fetch(`${persistUrl}/api/automations/settled`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ runId, secret, interrupted: true }),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
 }
 
 // ------------------------------------------------------------- networking
@@ -271,11 +211,6 @@ function waitForServer(url, timeoutMs = 60000) {
   });
 }
 
-function getStandaloneServerPath() {
-  if (isDev) return path.join(app.getAppPath(), ".next-desktop", "standalone", "server.js");
-  return path.join(process.resourcesPath, "next-server", "server.js");
-}
-
 function getAutomationServerPath() {
   if (isDev) return path.join(app.getAppPath(), "automation-server", "server.mjs");
   return path.join(process.resourcesPath, "automation-server", "server.mjs");
@@ -303,48 +238,6 @@ function attachChildLogging(child, label) {
   if (isDev) return;
   child.stdout?.on("data", (chunk) => appendLog(`[${label} stdout] ${chunk.toString().trimEnd()}`));
   child.stderr?.on("data", (chunk) => appendLog(`[${label} stderr] ${chunk.toString().trimEnd()}`));
-}
-
-function spawnNextServer(port, automationPort) {
-  const serverPath = getStandaloneServerPath();
-  const serverDir = path.dirname(serverPath);
-
-  if (!fs.existsSync(serverPath)) {
-    throw new Error(
-      `Next standalone server not found at ${serverPath}. Run "npm run build:desktop" then "npm run desktop:prepare".`
-    );
-  }
-
-  // The Next process proxies /api/automations/* to the automation server, so it
-  // needs the resolved port. Passed via env rather than a new build-time public
-  // var because the port is only known at runtime.
-  const env = childEnvironment({
-    NODE_ENV: "production",
-    PORT: String(port),
-    HOSTNAME: "127.0.0.1",
-    AUTOMATIONS_API_URL: `http://127.0.0.1:${automationPort}`,
-  });
-
-  appendLog(`Starting Next server on port ${port} (automations on ${automationPort})`);
-
-  const child = fork(serverPath, [], {
-    env,
-    cwd: serverDir,
-    stdio: isDev ? "inherit" : ["ignore", "pipe", "pipe", "ipc"],
-  });
-  attachChildLogging(child, "next");
-
-  child.on("exit", (code) => {
-    appendLog(`Next server exited with code ${code}`);
-    if (code !== 0 && !isQuitting) {
-      dialog.showErrorBox(
-        `${PRODUCT_NAME} server stopped`,
-        `The local server exited unexpectedly (code ${code}).\n\nLog file:\n${logFilePath}`
-      );
-    }
-  });
-
-  return child;
 }
 
 function spawnAutomationServer(port) {
@@ -528,6 +421,8 @@ function handleAutomationEvent(event) {
     activeJobCount = Math.max(0, activeJobCount - 1);
     updateTrayBadge();
     if (activeJobCount === 0) releasePowerSaveBlocker();
+    // The automation server reports the outcome itself; nothing left to recover.
+    if (event.runId && pendingRuns.delete(String(event.runId))) writeLockFile();
   }
 
   // Forward to the renderer so an open page can live-update without polling.
@@ -683,6 +578,17 @@ function createWindow(startUrl) {
     return { action: "deny" };
   });
 
+  // The app now lives on the internet, so a dropped connection is an ordinary
+  // event rather than a crash. Show a retry page instead of Chromium's error page.
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    // -3 is ERR_ABORTED: a navigation superseded by another, not a failure.
+    if (!isMainFrame || errorCode === -3) return;
+    appendLog(`Failed to load ${validatedURL}: ${errorDescription} (${errorCode})`);
+    mainWindow.loadFile(path.join(__dirname, "offline.html"), {
+      query: { retry: validatedURL || startUrl, reason: errorDescription || "" },
+    });
+  });
+
   // Closing the window must not kill the app: automations run headed browsers
   // for minutes at a time, and the user needs to be able to switch away and
   // still get a completion notification. The tray keeps the app resident and
@@ -719,36 +625,149 @@ ipcMain.handle("app:notify", (_event, { title, body, navigateTo } = {}) => {
   return true;
 });
 
-// The renderer signs in against /api/auth/session (Firebase-backed). Once it
-// knows who is logged in it hands us the id so the stale-run sweep on next
-// launch is scoped to that user rather than the whole table.
-ipcMain.handle("app:set-user", (_event, userId) => {
-  writeLockFile(userId ? String(userId) : null);
-  return true;
-});
+// Kept for pages that still call it. Stale-run recovery no longer needs the
+// user: the shell tracks the exact runs it started (see pendingRuns).
+ipcMain.handle("app:set-user", () => true);
 
 ipcMain.handle("app:get-active-jobs", () => ({ activeJobCount }));
 
+// Only our own pages get the automation bridge. The preload runs on whatever the
+// window shows, so without this check any site the window navigated to could
+// drive the eTA browser.
+function isTrustedSender(event) {
+  try {
+    const origin = new URL(event.senderFrame?.url || "").origin;
+    if (origin === new URL(APP_URL).origin) return true;
+    return !app.isPackaged && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  } catch {
+    return false;
+  }
+}
+
+// Exactly the automation server endpoints the web app uses - not a general proxy.
+const AUTOMATION_ROUTES = [
+  ["GET", /^\/health$/],
+  ["POST", /^\/api\/automations\/run$/],
+  ["GET", /^\/api\/automations\/jobs\/[\w.-]+$/],
+  ["POST", /^\/api\/automations\/jobs\/[\w.-]+\/stop$/],
+];
+
+ipcMain.handle("automations:request", async (event, { method, path: requestPath, body } = {}) => {
+  if (!isTrustedSender(event)) {
+    return { status: 403, payload: { success: false, error: "Not allowed from this page." } };
+  }
+  if (!AUTOMATION_ROUTES.some(([m, pattern]) => m === method && pattern.test(String(requestPath)))) {
+    return { status: 404, payload: { success: false, error: "Unknown automation endpoint." } };
+  }
+  if (!automationPort) {
+    return {
+      status: 503,
+      payload: { success: false, error: "The automation service is not running. Restart the desktop app." },
+    };
+  }
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${automationPort}${requestPath}`, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => ({}));
+
+    if (method === "POST" && requestPath === "/api/automations/run" && response.ok && payload?.success) {
+      pendingRuns.set(String(body.runId), {
+        runId: String(body.runId),
+        secret: body.persistSecret,
+        persistUrl: body.persistUrl,
+      });
+      writeLockFile();
+    }
+
+    return { status: response.status, payload };
+  } catch {
+    return {
+      status: 503,
+      payload: { success: false, error: "The automation service is not running. Restart the desktop app." },
+    };
+  }
+});
+
 // ------------------------------------------------------------- lifecycle
 
-const shouldStartAutomationServer = app.isPackaged
-  ? process.env.ELECTRON_ENABLE_AUTOMATION_SERVER !== "false"
-  : process.env.ELECTRON_ENABLE_AUTOMATION_SERVER === "true";
+// ------------------------------------------------------------ auto-update
+
+// Checks the release feed configured under "publish" in package.json (baked into
+// the installer as app-update.yml). Downloads in the background and asks before
+// restarting; "Later" installs on the next quit. Every failure is logged and
+// swallowed - no network, or no release yet, must never stop the app opening.
+const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+
+function setupAutoUpdates() {
+  if (!app.isPackaged || process.env.ELECTRON_DISABLE_AUTO_UPDATE === "true") return;
+
+  let autoUpdater;
+  try {
+    ({ autoUpdater } = require("electron-updater"));
+  } catch (error) {
+    appendLog(`Auto-update unavailable: ${error.message}`);
+    return;
+  }
+
+  autoUpdater.logger = { info: appendLog, warn: appendLog, error: appendLog, debug: () => {} };
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  let prompted = false;
+  autoUpdater.on("error", (error) => appendLog(`Auto-update error: ${error?.message || error}`));
+  autoUpdater.on("update-downloaded", async ({ version }) => {
+    if (prompted) return;
+    prompted = true;
+
+    // Restarting mid-run would kill a headed browser halfway through a
+    // government form, so defer to the next quit instead of asking.
+    if (activeJobCount > 0) {
+      appendLog(`Update ${version} downloaded; will install on quit (automation running)`);
+      return;
+    }
+
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "Update ready",
+      message: `${PRODUCT_NAME} ${version} is ready to install.`,
+      detail: "Restart now to update, or it will install the next time you quit the app.",
+      buttons: ["Restart now", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) {
+      isQuitting = true;
+      autoUpdater.quitAndInstall();
+    }
+  });
+
+  const check = () =>
+    autoUpdater.checkForUpdates().catch((error) => appendLog(`Update check failed: ${error.message}`));
+  check();
+  setInterval(check, UPDATE_CHECK_INTERVAL_MS).unref?.();
+}
+
+// ------------------------------------------------------------- lifecycle
+
+const shouldStartAutomationServer = process.env.ELECTRON_ENABLE_AUTOMATION_SERVER !== "false";
 
 app.whenReady().then(async () => {
   // A second copy just hands over to the running one (see requestSingleInstanceLock above).
   if (!hasInstanceLock) return;
   app.setAppUserModelId("com.bcl.task-manager");
-  loadEnvironmentVariables();
 
   logFilePath = path.join(app.getPath("userData"), "logs", "desktop.log");
   configureLaunchAtLogin();
   iconPath = isDev
     ? path.join(app.getAppPath(), "public", "electron-icon.png")
-    : path.join(process.resourcesPath, "next-server", "public", "electron-icon.png");
+    : path.join(process.resourcesPath, "electron-icon.png");
   if (!fs.existsSync(iconPath)) iconPath = undefined;
 
-  appendLog(`${PRODUCT_NAME} desktop starting. Packaged=${app.isPackaged}`);
+  appendLog(`${PRODUCT_NAME} desktop ${app.getVersion()} starting. Packaged=${app.isPackaged} url=${APP_URL}`);
   appendLog(`Automation server enabled: ${shouldStartAutomationServer}`);
 
   cleanupStaleProcesses();
@@ -756,32 +775,29 @@ app.whenReady().then(async () => {
   // process.env, so it must be listening before the child is spawned.
   eventBridgeServer = await startAutomationEventBridge();
 
-  try {
-    const automationPort = shouldStartAutomationServer
-      ? await findAvailablePort(Number(process.env.AUTOMATION_PORT_START) || 4000)
-      : 0;
-
-    if (shouldStartAutomationServer) {
-      automationProcess = spawnAutomationServer(automationPort);
-      await waitForServer(`http://127.0.0.1:${automationPort}/health`, 20000);
-    } else {
-      appendLog("Automation server skipped. Set ELECTRON_ENABLE_AUTOMATION_SERVER=true to enable.");
+  // The window opens even if the automation server fails: the rest of the app
+  // still works, and the automations page reports the service as unavailable.
+  if (shouldStartAutomationServer) {
+    try {
+      const port = await findAvailablePort(Number(process.env.AUTOMATION_PORT_START) || 4000);
+      automationProcess = spawnAutomationServer(port);
+      await waitForServer(`http://127.0.0.1:${port}/health`, 20000);
+      automationPort = port;
+      writeLockFile();
+    } catch (error) {
+      appendLog(`Automation server failed to start: ${error.stack || error.message}`);
+      notify({
+        title: "Automations unavailable",
+        body: "The automation service could not start. Restart the app to try again.",
+      });
     }
-
-    const port = await findAvailablePort(Number(process.env.ELECTRON_PORT_START) || 3000);
-    const startUrl = process.env.ELECTRON_START_URL || `http://127.0.0.1:${port}`;
-
-    nextProcess = spawnNextServer(port, automationPort);
-    writeLockFile();
-    await waitForServer(startUrl);
-
-    createWindow(startUrl);
-    createTray();
-  } catch (error) {
-    appendLog(`Startup failed: ${error.stack || error.message}`);
-    dialog.showErrorBox(`${PRODUCT_NAME} failed to start`, `${error.message}\n\nLog file:\n${logFilePath}`);
-    app.quit();
+  } else {
+    appendLog("Automation server skipped (ELECTRON_ENABLE_AUTOMATION_SERVER=false).");
   }
+
+  createWindow(APP_URL);
+  createTray();
+  setupAutoUpdates();
 });
 
 app.on("activate", () => {
@@ -802,8 +818,14 @@ app.on("before-quit", () => {
   isQuitting = true;
   releasePowerSaveBlocker();
   if (eventBridgeServer) eventBridgeServer.close();
-  if (nextProcess && !nextProcess.killed) killProcessTree(nextProcess.pid);
   if (automationProcess && !automationProcess.killed) killProcessTree(automationProcess.pid);
-  // Clean shutdown - nothing for the next launch to clean up.
-  fs.rmSync(getLockFilePath(), { force: true });
+  // Quitting mid-run kills that run. Leave its token behind (but not the PID,
+  // which is already dead and could be reused) so the next launch marks it
+  // interrupted; otherwise nothing is left to clean up.
+  if (pendingRuns.size > 0) {
+    automationProcess = null;
+    writeLockFile();
+  } else {
+    fs.rmSync(getLockFilePath(), { force: true });
+  }
 });

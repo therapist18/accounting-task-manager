@@ -17,7 +17,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "Invalid request body." }, { status: 400 });
   }
 
-  const { runId, secret } = body as { runId?: string; secret?: string };
+  // `interrupted` is sent by the desktop shell on its next launch for runs a
+  // crashed or force-closed session left behind (it kept their tokens for that).
+  const { runId, secret, interrupted } = body as { runId?: string; secret?: string; interrupted?: boolean };
   if (!runId || !secret) {
     return NextResponse.json({ success: false, error: "runId and secret are required." }, { status: 400 });
   }
@@ -60,9 +62,17 @@ export async function POST(request: NextRequest) {
     const { error: updateError } = await supabase
       .from("tm_automation_runs")
       .update({
-        status: "cancelled",
-        current_step: "Stopped",
-        error: "Stopped before the automation reported a result.",
+        ...(interrupted
+          ? {
+              status: "interrupted",
+              current_step: "Interrupted",
+              error: "Application closed before the automation finished.",
+            }
+          : {
+              status: "cancelled",
+              current_step: "Stopped",
+              error: "Stopped before the automation reported a result.",
+            }),
         completed_at: now,
         updated_at: now,
         completion_secret: null,

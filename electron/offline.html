@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Task Manager</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background: #f8fafc;
+        color: #0f172a;
+      }
+      @media (prefers-color-scheme: dark) {
+        body { background: #0f172a; color: #e2e8f0; }
+        p { color: #94a3b8; }
+      }
+      main { max-width: 420px; padding: 24px; text-align: center; }
+      h1 { font-size: 20px; margin: 0 0 8px; }
+      p { margin: 0 0 20px; color: #475569; line-height: 1.5; }
+      button {
+        font: inherit;
+        padding: 8px 20px;
+        border: 0;
+        border-radius: 6px;
+        background: #2563eb;
+        color: #fff;
+        cursor: pointer;
+      }
+      small { display: block; margin-top: 16px; opacity: 0.6; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Can't reach Task Manager</h1>
+      <p>Check your internet connection, then try again. Automations already running on this computer keep going.</p>
+      <button id="retry" type="button">Try again</button>
+      <small id="reason"></small>
+    </main>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const target = params.get("retry");
+      document.getElementById("reason").textContent = params.get("reason") || "";
+      document.getElementById("retry").addEventListener("click", () => {
+        // Only ever back to a web address - never another local file.
+        if (target && /^https?:\/\//.test(target)) location.href = target;
+      });
+      // Come back on our own once the connection returns.
+      window.addEventListener("online", () => document.getElementById("retry").click());
+    </script>
+  </body>
+</html>

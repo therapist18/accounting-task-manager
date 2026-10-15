@@ -1,135 +1,85 @@
-// Generates the app/tray icon set.
+// Generates the desktop app/tray icon set from the web app's own logo.
 //
-// The desktop shell needs two files and neither existed:
-//   build/icon.ico         - Windows executable + installer icon (electron-builder)
+//   build/icon.ico           - Windows executable, installer and shortcut icon
 //   public/electron-icon.png - window + tray icon at runtime
 //
-// electron/main.js deliberately degrades gracefully without the PNG (no tray), so
-// a missing icon silently degrades the app rather than failing loudly. This
-// script writes a real placeholder so packaging and the tray both work, and is
-// safe to re-run - replace with a designed icon when branding lands.
-import { deflateSync } from "node:zlib";
+// Source is public/BCL logo.png - the same mark the sidebar shows, drawn the same
+// way: the teal "B" on a white rounded tile. Only the "B" is used; the BOOKSMART
+// wordmark beneath it is unreadable at taskbar and tray sizes.
 import { mkdirSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+const require = createRequire(import.meta.url);
+const sharp = require("sharp");
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const SOURCE = path.join(root, "public", "BCL logo.png");
 
-// ---- PNG encoding -----------------------------------------------------------
-
-function crc32(buf) {
-  let c;
-  const table = [];
-  for (let n = 0; n < 256; n += 1) {
-    c = n;
-    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    table[n] = c >>> 0;
-  }
-  let crc = 0xffffffff;
-  for (const byte of buf) crc = table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function chunk(type, data) {
-  const length = Buffer.alloc(4);
-  length.writeUInt32BE(data.length);
-  const typeAndData = Buffer.concat([Buffer.from(type, "ascii"), data]);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(typeAndData));
-  return Buffer.concat([length, typeAndData, crc]);
-}
-
-/** Encodes an RGBA pixel buffer (size*size*4) as a PNG. */
-function encodePng(size, rgba) {
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0);
-  ihdr.writeUInt32BE(size, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 6; // colour type: RGBA
-  // 10..12: deflate compression, adaptive filtering, no interlace - all zero.
-
-  // Each scanline is prefixed with a filter byte; 0 = None.
-  const raw = Buffer.alloc(size * (size * 4 + 1));
-  for (let y = 0; y < size; y += 1) {
-    const rowStart = y * (size * 4 + 1);
-    raw[rowStart] = 0;
-    rgba.copy(raw, rowStart + 1, y * size * 4, (y + 1) * size * 4);
-  }
-
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", ihdr),
-    chunk("IDAT", deflateSync(raw, { level: 9 })),
-    chunk("IEND", Buffer.alloc(0)),
-  ]);
-}
-
-// ---- the icon itself --------------------------------------------------------
-
-// Rounded square in the app's teal, with a lighter "check" stroke, drawn with
-// simple distance fields so it scales cleanly to every size in the .ico.
-const BG = [13, 148, 136]; // teal-600
-const FG = [240, 253, 250];
-
-function drawIcon(size) {
-  const rgba = Buffer.alloc(size * size * 4);
-  const r = size * 0.22; // corner radius
-  const inset = size * 0.06;
-
-  // Check-mark geometry. Defined in 0..1 icon space, then scaled to pixels -
-  // the distance test below runs against pixel coordinates.
-  const strokeW = size * 0.11;
-  const pts = [
-    { x: 0.28 * size, y: 0.52 * size },
-    { x: 0.44 * size, y: 0.68 * size },
-    { x: 0.73 * size, y: 0.35 * size },
-  ];
-
-  const distToSegment = (px, py, a, b) => {
-    const vx = b.x - a.x;
-    const vy = b.y - a.y;
-    const wx = px - a.x;
-    const wy = py - a.y;
-    const len2 = vx * vx + vy * vy;
-    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, (wx * vx + wy * vy) / len2));
-    const dx = px - (a.x + t * vx);
-    const dy = py - (a.y + t * vy);
-    return Math.hypot(dx, dy);
+// The logo is the mark on top and the wordmark below, separated by a band of
+// empty rows. Scanning for that gap (rather than hard-coding a crop) keeps this
+// working if the logo file is re-exported at another size.
+async function extractMark() {
+  const { data, info } = await sharp(SOURCE).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  // sharp's trim() keys off the corner colour and is thrown by the faint
+  // anti-aliasing haze around this logo, so the box is measured on alpha directly.
+  const inked = (x, y) => data[(y * info.width + x) * info.channels + 3] > 40;
+  const rowHasInk = (y) => {
+    for (let x = 0; x < info.width; x += 1) if (inked(x, y)) return true;
+    return false;
   };
 
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const px = x + 0.5;
-      const py = y + 0.5;
+  let top = 0;
+  while (top < info.height && !rowHasInk(top)) top += 1;
+  let bottom = top;
+  while (bottom < info.height && rowHasInk(bottom)) bottom += 1;
 
-      // Rounded-square signed distance.
-      const qx = Math.abs(px - size / 2) - (size / 2 - inset - r);
-      const qy = Math.abs(py - size / 2) - (size / 2 - inset - r);
-      const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0));
-      const inside = Math.min(Math.max(qx, qy), 0);
-      const d = outside + inside - r;
-
-      // Antialias across roughly one pixel.
-      const bgAlpha = Math.max(0, Math.min(1, 0.5 - d));
-
-      let dFg = Infinity;
-      for (let i = 0; i < pts.length - 1; i += 1) {
-        dFg = Math.min(dFg, distToSegment(px, py, pts[i], pts[i + 1]));
-      }
-      const fgAlpha = bgAlpha * Math.max(0, Math.min(1, strokeW / 2 - dFg + 0.5));
-
-      const i = (y * size + x) * 4;
-      for (let c = 0; c < 3; c += 1) {
-        rgba[i + c] = Math.round(BG[c] * (1 - fgAlpha) + FG[c] * fgAlpha);
-      }
-      rgba[i + 3] = Math.round(255 * bgAlpha);
+  let left = info.width;
+  let right = 0;
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = 0; x < info.width; x += 1) {
+      if (!inked(x, y)) continue;
+      left = Math.min(left, x);
+      right = Math.max(right, x + 1);
     }
   }
 
-  return rgba;
+  return sharp(SOURCE)
+    .extract({ left, top, width: right - left, height: bottom - top })
+    .png()
+    .toBuffer();
 }
 
-// ---- ICO container ----------------------------------------------------------
+function tileSvg(size) {
+  // Small sizes get a tighter corner and less padding so the mark stays legible.
+  const radius = Math.round(size * (size <= 32 ? 0.18 : 0.22));
+  return Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">` +
+      `<rect width="${size}" height="${size}" rx="${radius}" ry="${radius}" fill="#ffffff"/></svg>`
+  );
+}
+
+async function renderIcon(mark, size) {
+  const padding = Math.round(size * (size <= 32 ? 0.1 : 0.16));
+  const inner = size - padding * 2;
+  let scaled = await sharp(mark)
+    .resize(inner, inner, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .toBuffer();
+
+  // The logo's strokes are hairline; downscaled to tray size they average out to
+  // a pale smudge. Boost coverage at the smallest sizes so the B stays solid.
+  if (size <= 24) {
+    const { data, info } = await sharp(scaled).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    for (let i = 0; i < data.length; i += 4) data[i + 3] = Math.min(255, data[i + 3] * 2.4);
+    scaled = await sharp(data, { raw: info }).png().toBuffer();
+  }
+
+  return sharp(tileSvg(size))
+    .composite([{ input: scaled, left: padding, top: padding }])
+    .png()
+    .toBuffer();
+}
 
 /** Packs PNG images into a Vista-style .ico (PNG-compressed entries). */
 function buildIco(entries) {
@@ -162,8 +112,10 @@ function buildIco(entries) {
 
 mkdirSync(path.join(root, "build"), { recursive: true });
 
+const mark = await extractMark();
 const sizes = [16, 24, 32, 48, 64, 128, 256];
-const entries = sizes.map((size) => ({ size, data: encodePng(size, drawIcon(size)) }));
+const entries = [];
+for (const size of sizes) entries.push({ size, data: await renderIcon(mark, size) });
 
 writeFileSync(path.join(root, "build", "icon.ico"), buildIco(entries));
 console.log(`[icons] wrote build/icon.ico (${sizes.join(", ")} px)`);

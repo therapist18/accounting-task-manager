@@ -20,6 +20,7 @@ import { Progress } from "@/components/ui/progress"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useToast } from "@/lib/hooks/use-toast"
 import { useCurrentUser, hasPermission } from "@/lib/hooks/use-current-user"
+import { automationFetch } from "@/lib/automations/client"
 
 type JobStatus = "running" | "completed" | "failed" | "cancelled" | "interrupted"
 
@@ -121,7 +122,7 @@ export default function AutomationsPage() {
 
     const poll = async () => {
       try {
-        const response = await fetch(`/api/automations/progress?jobId=${encodeURIComponent(job.jobId)}`, {
+        const response = await automationFetch(`/api/automations/progress?jobId=${encodeURIComponent(job.jobId)}`, {
           cache: "no-store",
         })
         const payload = await response.json().catch(() => null)
@@ -213,7 +214,7 @@ export default function AutomationsPage() {
     if (!job?.jobId) return
     setStopping(true)
     try {
-      await fetch("/api/automations/stop", {
+      await automationFetch("/api/automations/stop", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: job.jobId }),

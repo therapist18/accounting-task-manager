@@ -20,9 +20,14 @@ contextBridge.exposeInMainWorld("desktop", {
   // A notification that carried `navigateTo` was clicked - go to that in-app path.
   onNavigate: (handler) => subscribe("app:navigate", handler),
 
-  // Tells main which user is signed in so a crashed session's in-flight runs
-  // can be reset on next launch instead of showing as permanently running.
+  // No-op kept for older pages; stale-run recovery no longer needs the user.
   setUser: (userId) => ipcRenderer.invoke("app:set-user", userId),
+
+  // Talks to the local automation server (see lib/automations/client). Main
+  // checks that the caller is our own page and that the endpoint is one of the
+  // few the web app uses. Resolves to { status, payload }.
+  automationRequest: ({ method, path, body }) =>
+    ipcRenderer.invoke("automations:request", { method, path, body }),
 
   getActiveJobs: () => ipcRenderer.invoke("app:get-active-jobs"),
 

@@ -37,8 +37,18 @@ export interface DesktopBridge {
   /** Raises a native OS notification. The DOM Notification API is not available here. */
   notify(input: { title: string; body?: string }): Promise<boolean>;
 
-  /** Identifies the signed-in user so stale runs can be swept after a crash. */
+  /** No-op kept for compatibility; stale-run recovery no longer needs the user. */
   setUser(userId: string | null): Promise<boolean>;
+
+  /**
+   * Calls the local automation server through the main process. Only our own
+   * pages and a fixed set of endpoints are allowed. Absent in older installs.
+   */
+  automationRequest?(request: {
+    method: "GET" | "POST";
+    path: string;
+    body?: unknown;
+  }): Promise<{ status: number; payload: any }>;
 
   getActiveJobs(): Promise<{ activeJobCount: number }>;
 
@@ -46,7 +56,7 @@ export interface DesktopBridge {
   onAutomationEvent(handler: (event: DesktopAutomationEvent) => void): () => void;
 
   /** A notification was clicked; focus the run it refers to. Returns an unsubscribe fn. */
-  onNavigateToAutomation(handler: (payload: DesktopAutomationClick) => void): () => void;
+  onNavigateToAutomation(handler: (payload: DesktopNotificationClick) => void): () => void;
 
   /** The automation service died. Returns an unsubscribe fn. */
   onAutomationServerExit(handler: (code: number) => void): () => void;

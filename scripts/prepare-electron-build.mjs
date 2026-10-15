@@ -1,9 +1,7 @@
-// Assembles the artefacts electron-builder needs, after `next build`.
+// Assembles the artefacts electron-builder needs.
 //
-// A Next standalone bundle is deliberately incomplete: it traces only the server
-// code it can statically see, and leaves out .next/static and public/ because a
-// deployment usually serves those from a CDN. For a desktop app there is no CDN,
-// so both have to be copied in by hand or the window loads unstyled HTML.
+// The desktop app loads the hosted web app, so there is no Next build to package
+// here - only the local automation server and the Chromium it drives.
 import { existsSync, cpSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { createRequire } from "node:module";
@@ -12,33 +10,10 @@ import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const distDir = path.join(root, ".next-desktop");
-const standalone = path.join(distDir, "standalone");
 
 function fail(message) {
   console.error(`\n[prepare] ERROR: ${message}\n`);
   process.exit(1);
-}
-
-if (!existsSync(path.join(standalone, "server.js"))) {
-  fail(
-    ".next-desktop/standalone/server.js is missing. Build with `npm run build:desktop` - a plain `next build` does not emit standalone output."
-  );
-}
-
-// Fail loudly here rather than shipping a window with no stylesheet.
-for (const [from, to] of [
-  [path.join(distDir, "static"), path.join(standalone, ".next-desktop", "static")],
-  [path.join(root, "public"), path.join(standalone, "public")],
-]) {
-  if (!existsSync(from)) {
-    console.warn(`[prepare] warning: ${path.relative(root, from)} does not exist, skipping`);
-    continue;
-  }
-  rmSync(to, { recursive: true, force: true });
-  mkdirSync(path.dirname(to), { recursive: true });
-  cpSync(from, to, { recursive: true });
-  console.log(`[prepare] copied ${path.relative(root, from)} -> ${path.relative(root, to)}`);
 }
 
 // The packaged automation server runs as a separate process from inside the

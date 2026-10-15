@@ -11,11 +11,11 @@
     "lint": "next lint",
     "automation:dev": "node automation-server/server.mjs",
     "icons": "node scripts/generate-icons.mjs",
-    "build:desktop": "node scripts/build-desktop.mjs",
     "desktop:prepare": "node scripts/prepare-electron-build.mjs",
-    "desktop:dev": "electron electron/main.js",
-    "desktop:build": "npm run icons && npm run build:desktop && npm run desktop:prepare && electron-builder",
-    "dist:win": "npm run icons && npm run build:desktop && npm run desktop:prepare && electron-builder --win nsis portable",
+    "desktop:dev": "electron .",
+    "desktop:build": "npm run icons && npm run desktop:prepare && electron-builder",
+    "dist:win": "npm run icons && npm run desktop:prepare && electron-builder --win nsis portable",
+    "release": "npm run icons && npm run desktop:prepare && electron-builder --win nsis --publish always",
     "postinstall": "echo 'Skipping Playwright install in CI/CD...'",
     "check:automation-schema": "node scripts/check-automation-schema.mjs",
     "setup-local": "npx playwright install chromium"
@@ -33,34 +33,24 @@
       "package.json",
       "electron/**/*",
       "!**/node_modules/**/*",
-      "node_modules/@supabase/**/*",
-      "node_modules/@types/**/*",
-      "node_modules/iceberg-js/**/*",
-      "node_modules/tr46/**/*",
-      "node_modules/tslib/**/*",
-      "node_modules/undici-types/**/*",
-      "node_modules/webidl-conversions/**/*",
-      "node_modules/whatwg-url/**/*",
-      "node_modules/ws/**/*",
+      "node_modules/electron-updater/**/*",
+      "node_modules/builder-util-runtime/**/*",
+      "node_modules/debug/**/*",
+      "node_modules/ms/**/*",
+      "node_modules/sax/**/*",
+      "node_modules/js-yaml/**/*",
+      "node_modules/argparse/**/*",
+      "node_modules/lazy-val/**/*",
+      "node_modules/lodash.escaperegexp/**/*",
+      "node_modules/lodash.isequal/**/*",
+      "node_modules/semver/**/*",
+      "node_modules/tiny-typed-emitter/**/*",
+      "node_modules/graceful-fs/**/*",
       "!**/*.d.ts",
       "!**/*.map",
       "!**/*.md"
     ],
     "extraResources": [
-      {
-        "from": ".next-desktop/standalone",
-        "to": "next-server",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": ".next-desktop/standalone/node_modules",
-        "to": "next-server/node_modules",
-        "filter": [
-          "**/*"
-        ]
-      },
       {
         "from": "automation-server",
         "to": "automation-server",
@@ -68,7 +58,8 @@
           "**/*",
           "!logs/**",
           "!downloads/**",
-          "!tmp/**"
+          "!tmp/**",
+          "!.env*"
         ]
       },
       {
@@ -84,6 +75,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "public/electron-icon.png",
+        "to": "electron-icon.png"
       }
     ],
     "win": {
@@ -106,7 +101,13 @@
       "artifactName": "TaskManager-Portable-${version}.${ext}"
     },
     "artifactName": "TaskManager-Setup-${version}.${ext}",
-    "publish": null
+    "publish": {
+      "provider": "github",
+      "owner": "therapist18",
+      "repo": "task-manager-releases",
+      "releaseType": "release"
+    },
+    "afterPack": "scripts/verify-desktop-bundle.cjs"
   },
   "dependencies": {
     "@ckeditor/ckeditor5-react": "^11.0.0",
@@ -177,6 +178,7 @@
     "docxtemplater": "^3.67.6",
     "docxtemplater-image-module-free": "^1.1.1",
     "dotenv": "^16.6.1",
+    "electron-updater": "^6.8.9",
     "embla-carousel-react": "8.5.1",
     "exceljs": "^4.4.0",
     "express": "^4.21.1",

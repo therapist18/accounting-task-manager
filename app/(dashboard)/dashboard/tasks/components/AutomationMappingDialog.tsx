@@ -25,6 +25,7 @@ import { resolveTargetEntityIdImpl, resolveVariableValueImpl, getFieldValueImpl,
 import { AutomationMappingDialogUI } from './AutomationMappingDialogUI';
 import { useCurrentUser } from "@/lib/hooks/use-current-user";
 import { auditActor } from "../utils/audit";
+import { automationFetch } from "@/lib/automations/client";
 
 interface AutomationMappingDialogProps {
   isOpen: boolean;
@@ -268,16 +269,16 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
     });
   }, []);
 
-  // Polls the local automation server through /api/automations/progress.
+  // Polls the local automation server (see lib/automations/client).
   //
   // Previously read the `automation_jobs` table directly, which only worked
   // because a separate worker claimed and completed rows there. Automations now
   // run in a child process of the desktop app, so live state is in that
-  // process's memory and history is tm_automation_runs. The proxy route merges
+  // process's memory and history is tm_automation_runs. automationFetch merges
   // both and returns the shape this handler already consumed.
   const pollSupabaseJob = useCallback(async (jobId: string) => {
     try {
-      const response = await fetch(`/api/automations/progress?jobId=${encodeURIComponent(jobId)}`, {
+      const response = await automationFetch(`/api/automations/progress?jobId=${encodeURIComponent(jobId)}`, {
         cache: 'no-store',
       });
       const payload = await response.json().catch(() => null);
@@ -337,7 +338,7 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
     // into automation_jobs used to leave the run itself going in the browser
     // until it failed on its own.
     try {
-      const response = await fetch('/api/automations/stop', {
+      const response = await automationFetch('/api/automations/stop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jobId: automationJobId }),
@@ -790,7 +791,7 @@ export const AutomationMappingDialog = ({ isOpen, onClose, classId, taskId, task
       // assembled just above - as plaintext in a database column. Nothing
       // sensitive is stored now; the payload travels over loopback and only the
       // outcome screenshot comes back.
-      const response = await fetch('/api/automations/run', {
+      const response = await automationFetch('/api/automations/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

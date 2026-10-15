@@ -6,6 +6,7 @@
 
 import supabase from "@/lib/supabase/client"
 import { updateJsonValue, ETA_SCREENSHOT_DOCUMENT_ID } from "../utils/AutomationMappingDialog"
+import { automationFetch } from "@/lib/automations/client"
 
 export interface ColDef {
   type: string
@@ -232,10 +233,10 @@ export async function persistFieldValue({ persistenceSource, entityId, value, ca
   return updatedRecord
 }
 
-// --- Automation server calls (all go through the Next API routes) ---
+// --- Automation server calls (local service + hosted run records, see lib/automations/client) ---
 
 export async function startAutomationRun(body: { type: string; taskId: any; automationId: any; taskLabel: string | null; formData: Record<string, any> }) {
-  const response = await fetch('/api/automations/run', {
+  const response = await automationFetch('/api/automations/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -247,13 +248,13 @@ export async function startAutomationRun(body: { type: string; taskId: any; auto
 
 /** Returns { status: http status, job, error } - a 503 means the service is gone, a 404 that the job is unknown. */
 export async function fetchAutomationProgress(jobId: string) {
-  const response = await fetch(`/api/automations/progress?jobId=${encodeURIComponent(jobId)}`, { cache: 'no-store' })
+  const response = await automationFetch(`/api/automations/progress?jobId=${encodeURIComponent(jobId)}`, { cache: 'no-store' })
   const payload = await response.json().catch(() => null)
   return { ok: response.ok, status: response.status, job: payload?.job || null, error: payload?.error || null }
 }
 
 export async function stopAutomationRun(jobId: string) {
-  const response = await fetch('/api/automations/stop', {
+  const response = await automationFetch('/api/automations/stop', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jobId }),
