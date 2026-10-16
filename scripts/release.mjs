@@ -32,19 +32,32 @@ if (!/^[\w-]{20,}$/.test(token)) {
   fail('GH_TOKEN is missing or malformed. Set it with:  $env:GH_TOKEN = (Read-Host "GitHub token").Trim()');
 }
 
+// Retries dropped connections (ECONNABORTED/ECONNRESET on a flaky link) rather
+// than dying with a raw stack trace halfway through a release.
 async function github(method, url, body) {
-  const response = await fetch(`https://api.github.com/repos/${owner}/${repo}${url}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      ...(body ? { "Content-Type": "application/json" } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const payload = await response.json().catch(() => ({}));
-  return { status: response.status, payload };
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const response = await fetch(`https://api.github.com/repos/${owner}/${repo}${url}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const payload = await response.json().catch(() => ({}));
+      return { status: response.status, payload };
+    } catch (error) {
+      const reason = error.cause?.code || error.message;
+      if (attempt >= 4) {
+        fail(`Network error talking to GitHub (${method} ${url}): ${reason}. Check your connection and re-run - an unfinished release stays a draft and is reused.`);
+      }
+      console.warn(`[release] ${method} ${url} failed (${reason}), retrying (${attempt}/3)...`);
+      await new Promise((resolve) => setTimeout(resolve, attempt * 3000));
+    }
+  }
 }
 
 // A published release for this version means the version wasn't bumped -
@@ -103,7 +116,18 @@ const run = (command) => {
 
 run("npm run icons");
 run("npm run desktop:prepare");
-run("npx electron-builder --win nsis --publish always");
+// The installer upload is ~200MB in one request, which a flaky connection can
+// drop. The draft is reused and assets are replaced, so retrying is safe.
+for (let attempt = 1; ; attempt += 1) {
+  const result = spawnSync("npx electron-builder --win nsis --publish always", {
+    cwd: root,
+    stdio: "inherit",
+    shell: true,
+  });
+  if (result.status === 0) break;
+  if (attempt >= 3) fail("electron-builder failed to build or upload (see above). The release is still a draft; re-run to retry.");
+  console.warn(`\n[release] build/upload failed, retrying (${attempt}/2)...\n`);
+}
 
 // Publish only once every file is attached, and only if latest.yml made it -
 // without it installed apps can't see this version at all.
