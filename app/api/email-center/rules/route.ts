@@ -7,6 +7,7 @@ import {
 } from "@/lib/email-center/rule-store"
 import { withSupabaseRetry } from "@/lib/supabaseRetry"
 import { parseRuleBody } from "@/lib/email-center/rule-validation"
+import { categoriesFor } from "@/lib/email-center/categories"
 
 // deleted_at arrived in the 20260929000000 migration; read without the filter if it isn't applied
 // yet, so a soft delete just isn't available rather than the whole tab failing to load.
@@ -73,7 +74,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const { sb, actor } = await authorize(request)
-    const parsed = parseRuleBody(await request.json(), false)
+    const categories = await categoriesFor(sb)
+    const parsed = parseRuleBody(await request.json(), false, new Set(categories.map((c) => c.key)))
     if (!parsed.ok) return NextResponse.json({ success: false, error: parsed.error }, { status: 400 })
 
     // New rules go last unless the caller says otherwise (first match wins, so last = least priority).

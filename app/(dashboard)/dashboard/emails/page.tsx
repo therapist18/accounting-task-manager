@@ -8,10 +8,7 @@ import { DateInput } from "@/components/ui/date-input"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
-  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import {  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { addDaysIso, dateFieldToIso, formatDateToDMY, todayIso } from "@/lib/dateUtils"
 import { cn } from "@/lib/utils"
 import { CaseDialog, NewCaseDialog } from "./components/CaseDialogs"
@@ -21,19 +18,21 @@ import { EmailDialog } from "./components/EmailDialog"
 import { MailboxesPanel, type MailboxView } from "./components/MailboxesPanel"
 import { IgnoredPanel } from "./components/IgnoredPanel"
 import { RuleMatchedEmailsPanel } from "./components/RuleMatchedEmailsPanel"
-import { RulesPanel } from "./components/RulesPanel"
+import { RulesPanel, type RuleChange } from "./components/RulesPanel"
 import { SyncDialog } from "./components/SyncDialog"
+import { emailCenterCache, type EmailCenterSnapshot } from "./emailCenterCache"
 import { CompanyPanels, matchesCompanySelection, UNASSIGNED } from "./components/CompanyPanels"
 import { CompanyMultiSelect } from "./components/CompanyMultiSelect"
 import { TOGGLEABLE_COLUMNS as EMAIL_COLUMNS } from "./components/NeedsReview"
 import { ReviewPanel } from "./components/ReviewPanel"
+import { ReviewActionDialog, type ReviewActionPlan, type ReviewActionRequest } from "./components/ReviewActionDialog"
 import { ColumnVisibilityButton, useColumnVisibility } from "./components/table"
 import { exportCasesToExcel } from "./components/exportCases"
 import { exportEmailsToExcel } from "./components/exportEmails"
 import { fetchCompanies, fetchKraEmailCredentials, saveKraEmailPassword, type Company, type KraEmailCredentials } from "../companies/database"
 import {
   COUNT_BADGE_CLASS, DISPOSITION_LABEL, PILL_BUTTON_ACTIVE_CLASS, PILL_BUTTON_CLASS, PRIMARY_PILL_BUTTON_CLASS, SearchSelect,
-  TAB_LIST_CLASS, TAB_TRIGGER_CLASS, URGENT_BADGE_CLASS, api, needsReconnect,
+  TAB_LIST_CLASS, TAB_TRIGGER_CLASS, URGENT_BADGE_CLASS, api, fmtDateTime, needsReconnect,
   type AccountRow, type CaseRow, type CategoryOption, type CompanyOption,
   type Disposition, type EmailRow, type RuleRow, type StaffOption,
 } from "./components/shared"
@@ -130,36 +129,48 @@ export default function EmailCenterPage() {
   const casesColumns = useColumnVisibility(CASES_COLUMNS)
   const emailColumns = useColumnVisibility(EMAIL_COLUMNS)
 
-  const [accounts, setAccounts] = useState<AccountRow[]>([])
-  const [companies, setCompanies] = useState<CompanyOption[]>([])
+  // What this page showed last time in this session (emailCenterCache). A return visit renders it at
+  // once and refreshes behind it, instead of refetching everything behind a full-page spinner.
+  const cached = useRef(emailCenterCache.getState().data).current
+
+  const [accounts, setAccounts] = useState<AccountRow[]>(() => cached?.accounts ?? [])
+  // When the newest stored email arrived (overview route) - shown in the toolbar status.
+  const [latestEmailAt, setLatestEmailAt] = useState<string | null>(() => cached?.latestEmailAt ?? null)
+  const [companies, setCompanies] = useState<CompanyOption[]>(() => cached?.companies ?? [])
   // Full company records (with ACC/IMM/Audit/Sheria effective dates + cease details) for the Needs
   // Review sidebar's Client Category Filter — the thin CompanyOption list above doesn't carry those
   // fields. Fetched the same way every other module's company sidebar does: directly from Supabase
   // client-side, not through /api/email-center. Loaded once; the category filter itself is a
   // client-side predicate, so no refetch is needed as filters change.
-  const [fullCompanies, setFullCompanies] = useState<Company[]>([])
+  const [fullCompanies, setFullCompanies] = useState<Company[]>(() => cached?.fullCompanies ?? [])
   // Each company's KRA portal mailbox login (kra_email_address / kra_email_password), shown on the
   // Mailboxes tab. Loaded separately so the password isn't part of the shared company records.
-  const [kraCredentials, setKraCredentials] = useState<Map<string, KraEmailCredentials>>(new Map())
-  const [categories, setCategories] = useState<CategoryOption[]>([])
-  const [staff, setStaff] = useState<StaffOption[]>([])
-  const [cases, setCases] = useState<CaseRow[]>([])
-  const [emails, setEmails] = useState<EmailRow[]>([])
-  const [rules, setRules] = useState<RuleRow[]>([])
-  const [rulesSource, setRulesSource] = useState<"database" | "builtin">("database")
+  const [kraCredentials, setKraCredentials] = useState<Map<string, KraEmailCredentials>>(() => cached?.kraCredentials ?? new Map())
+  const [categories, setCategories] = useState<CategoryOption[]>(() => cached?.categories ?? [])
+  const [staff, setStaff] = useState<StaffOption[]>(() => cached?.staff ?? [])
+  const [cases, setCases] = useState<CaseRow[]>(() => cached?.cases ?? [])
+  const [emails, setEmails] = useState<EmailRow[]>(() => cached?.emails ?? [])
+  const [rules, setRules] = useState<RuleRow[]>(() => cached?.rules ?? [])
+  const [rulesSource, setRulesSource] = useState<"database" | "builtin">(() => cached?.rulesSource ?? "database")
 
-  const [loading, setLoading] = useState(true)
+  // Full-page loading only when there's nothing to show yet; a return visit refreshes quietly instead
+  // (`revalidating` - a small "Updating…" in the toolbar).
+  const [loading, setLoading] = useState(!cached)
+  const [revalidating, setRevalidating] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [openCaseId, setOpenCaseId] = useState<string | null>(null)
   // The email behind the open dialog, captured as a row (from a table or a case thread) — the dialog
   // renders straight from it, so opening an email never waits on a request for its details.
   const [openEmailSeed, setOpenEmailSeed] = useState<EmailRow | null>(null)
   const [newCaseOpen, setNewCaseOpen] = useState(false)
+  // Needs Review's Create task / Mark as update / Ignore (one row or a selection) — see ReviewActionDialog.
+  const [reviewAction, setReviewAction] = useState<ReviewActionRequest | null>(null)
   // Shown the moment a rule is created: the rule changes what the mails already sitting in Needs
   // Review would be classified as, so offer to re-run them through it (or skip and leave them).
   // `pattern` is absent when the dialog was opened from the toolbar's "Reclassify" button, or from the
   // Update tab's own Reclassify button, instead. `scope` defaults to "needs_review" when absent.
-  const [reclassifyPrompt, setReclassifyPrompt] = useState<{ pattern?: string; is_ignore?: boolean; is_notify?: boolean } | null>(null)
+  // `change` is set when an existing rule was edited or turned on/off (not created) - see handleRuleEdited.
+  const [reclassifyPrompt, setReclassifyPrompt] = useState<{ pattern?: string; is_ignore?: boolean; is_notify?: boolean; change?: RuleChange } | null>(null)
   // Which sections the Reclassify dialog will re-run the rules over (set to a sensible default on open).
   const [reclassifyScopes, setReclassifyScopes] = useState<ReclassifyScope[]>(["needs_review"])
   const [reclassifying, setReclassifying] = useState(false)
@@ -179,19 +190,20 @@ export default function EmailCenterPage() {
   // every email's classification back to Needs Review, so the whole history can be reclassified fresh.
   const [resetPromptOpen, setResetPromptOpen] = useState(false)
   const [resetting, setResetting] = useState(false)
-  const [companiesLoading, setCompaniesLoading] = useState(true)
+  const [companiesLoading, setCompaniesLoading] = useState(!cached)
 
   // Companies and staff barely change within a session, unlike accounts, which "Refresh"/"Sync now"
   // want current. Only the very first overview call fetches them; every later one asks the server to
   // skip that query (?light=1) and this just keeps what it already has.
-  const hasFullOverview = useRef(false)
+  const hasFullOverview = useRef(Boolean(cached?.companies.length))
   const loadOverview = useCallback(async () => {
     const light = hasFullOverview.current
     const res = await api<{
       accounts: AccountRow[]; companies: CompanyOption[] | null; categories: CategoryOption[]
-      staff: StaffOption[] | null
+      staff: StaffOption[] | null; latestEmailAt?: string | null
     }>(`/api/email-center${light ? "?light=1" : ""}`)
     setAccounts(res.accounts ?? [])
+    if (res.latestEmailAt !== undefined) setLatestEmailAt(res.latestEmailAt ?? null)
     setCategories(res.categories ?? [])
     if (res.companies) setCompanies(res.companies)
     if (res.staff) setStaff(res.staff)
@@ -223,11 +235,25 @@ export default function EmailCenterPage() {
   }, [loadOverview])
 
   useEffect(() => {
-    setLoading(true)
+    if (cached) setRevalidating(true)
+    else setLoading(true)
     loadAll()
       .catch((e: any) => toast.error(e.message))
-      .finally(() => setLoading(false))
+      .finally(() => {
+        setLoading(false)
+        setRevalidating(false)
+      })
   }, [loadAll])
+
+  // Write-through: keep the session snapshot identical to what's on screen - including local edits
+  // (classify, move, delete) that don't refetch - so the next visit starts from the right state.
+  useEffect(() => {
+    if (loading) return
+    const snapshot: EmailCenterSnapshot = {
+      accounts, latestEmailAt, companies, staff, categories, cases, emails, rules, rulesSource, fullCompanies, kraCredentials,
+    }
+    emailCenterCache.mutate(() => snapshot)
+  }, [loading, accounts, latestEmailAt, companies, staff, categories, cases, emails, rules, rulesSource, fullCompanies, kraCredentials])
 
   // Loaded once, independent of Refresh/Sync now — the Needs Review sidebar's company list and
   // Client Category Filter don't need to be as fresh as accounts/cases/emails.
@@ -309,6 +335,14 @@ export default function EmailCenterPage() {
     setReclassifyPrompt({ pattern: rule.pattern, is_ignore: rule.is_ignore, is_notify: rule.is_notify })
   }, [])
 
+  // An existing rule was edited in the Rules tab, or turned on/off: that can change how mail that is
+  // already sorted should be classified - in both directions (newly matched, or no longer matched) - so
+  // offer the same re-run as for a new rule.
+  const handleRuleEdited = useCallback((rule: RuleRow, change: RuleChange) => {
+    setReclassifyDue(true)
+    setReclassifyPrompt({ pattern: rule.pattern || "(any subject)", is_ignore: rule.is_ignore, is_notify: rule.is_notify, change })
+  }, [])
+
   // A wording was added to an existing rule from the email dialog: same follow-up as a new rule — offer to
   // re-run Needs Review through it.
   const handleRuleUpdated = useCallback((rule: RuleRow, addedWording: string) => {
@@ -325,6 +359,14 @@ export default function EmailCenterPage() {
       setReclassifyUntil("")
       // A just-created rule offers to re-run Needs Review (its original purpose); opened from the
       // toolbar, start on the section the user is looking at.
+      // An edited rule can also release mail it used to catch, so include the section it sorts into.
+      if (reclassifyPrompt.change) {
+        setReclassifyScopes([
+          "needs_review",
+          reclassifyPrompt.is_ignore ? "ignore" : reclassifyPrompt.is_notify ? "notification" : "update_only",
+        ])
+        return
+      }
       setReclassifyScopes([
         reclassifyPrompt.pattern ? "needs_review"
           : tab === "update" ? "update_only"
@@ -495,32 +537,41 @@ export default function EmailCenterPage() {
     }
   }
 
-  // Moves emails to another tab from the Ignored panel (one from a row's dropdown, or a whole selection).
+  // Moves emails to another tab (the Ignored panel's dropdown/selection, Needs Review's action dialog).
   // Unlike quickClassify this never pops a case dialog open - with many emails that would be a wall of
-  // dialogs; action-required ones simply appear under In Progress.
-  const moveEmails = useCallback(async (targets: EmailRow[], disposition: Disposition) => {
+  // dialogs; action-required ones simply appear under In Progress. `categoryKey` also sets the category
+  // (for action-required: the kind of task opened). Resolves to the ids of the cases it opened.
+  const moveEmails = useCallback(async (targets: EmailRow[], disposition: Disposition, categoryKey?: string): Promise<string[]> => {
     let moved = 0
-    let opened = 0
+    const openedIds: string[] = []
     let firstError: string | null = null
-    for (const email of targets) {
-      try {
-        const res = await api<{ email_patch: Partial<EmailRow>; case: CaseRow | null }>(
-          `/api/email-center/emails/${email.id}`,
-          { method: "PATCH", body: JSON.stringify({ disposition }) }
-        )
-        mergeEmail(email.id, res.email_patch)
-        if (res.case) {
-          upsertCase(res.case)
-          opened++
+    // A few at a time: a bulk "Create tasks" one request after another took ages for a big selection.
+    let next = 0
+    const worker = async () => {
+      for (let i = next++; i < targets.length; i = next++) {
+        const email = targets[i]
+        try {
+          const res = await api<{ email_patch: Partial<EmailRow>; case: CaseRow | null }>(
+            `/api/email-center/emails/${email.id}`,
+            { method: "PATCH", body: JSON.stringify({ disposition, ...(categoryKey ? { category_key: categoryKey } : {}) }) }
+          )
+          mergeEmail(email.id, res.email_patch)
+          if (res.case) {
+            upsertCase(res.case)
+            openedIds.push(res.case.id)
+          }
+          moved++
+        } catch (e: any) {
+          firstError ??= e.message
         }
-        moved++
-      } catch (e: any) {
-        firstError ??= e.message
       }
     }
+    await Promise.all(Array.from({ length: Math.min(6, targets.length) }, worker))
+    const opened = openedIds.length
     const label = DISPOSITION_LABEL[disposition].toLowerCase()
-    if (moved) toast.success(`${moved} email${moved === 1 ? "" : "s"} marked ${label}${opened ? ` - ${opened} case${opened === 1 ? "" : "s"} opened` : ""}.`)
+    if (moved) toast.success(`${moved} email${moved === 1 ? "" : "s"} marked ${label}${opened ? ` - ${opened} task${opened === 1 ? "" : "s"} opened` : ""}.`)
     if (firstError) toast.error(moved ? `${targets.length - moved} could not be moved: ${firstError}` : firstError)
+    return openedIds
   }, [mergeEmail, upsertCase])
 
   const deleteEmails = useCallback(async (targets: EmailRow[]) => {
@@ -540,6 +591,86 @@ export default function EmailCenterPage() {
       if (gone.size) setEmails((prev) => prev.filter((e) => !gone.has(e.id)))
     }
   }, [])
+
+  // After a rule is saved from Needs Review: runs the rules over the other Needs Review emails it was
+  // previewed to catch, in the background — the person carries on while a toast counts it through. Each
+  // batch's results are merged straight into the local list (the server hands back what it wrote per
+  // email); only the case list is refetched, and only if a task was actually opened.
+  const applyRuleInBackground = useCallback(async (ids: string[]) => {
+    const total = ids.length
+    const s = total === 1 ? "" : "s"
+    const toastId = toast.loading(`Sorting ${total} similar email${s} with the new rule… 0 of ${total}`)
+    let done = 0
+    let changed = 0
+    let deleted = 0
+    let opened = 0
+    let failed = 0
+    try {
+      for (let i = 0; i < total; i += 100) {
+        const batch = ids.slice(i, i + 100)
+        const res = await api<{
+          changed: number; deleted: number; cases_opened: number; failed: number
+          moved: { id: string; disposition: string; patch?: Partial<EmailRow> }[]
+        }>("/api/email-center/reclassify", { method: "POST", body: JSON.stringify({ action: "run", scope: "needs_review", ids: batch }) })
+        const gone = new Set(res.moved.filter((m) => m.disposition === "deleted").map((m) => m.id))
+        const patches = new Map(res.moved.filter((m) => m.patch).map((m) => [m.id, m.patch!]))
+        if (gone.size || patches.size) {
+          setEmails((prev) => prev.filter((e) => !gone.has(e.id)).map((e) => (patches.has(e.id) ? { ...e, ...patches.get(e.id) } : e)))
+        }
+        done += batch.length
+        changed += res.changed
+        deleted += res.deleted
+        opened += res.cases_opened
+        failed += res.failed
+        toast.loading(`Sorting ${total} similar email${s} with the new rule… ${done} of ${total}`, { id: toastId })
+      }
+      if (opened) {
+        const res = await api<{ cases: CaseRow[] }>("/api/email-center/cases?status=all")
+        setCases(res.cases)
+      }
+      const notes = [opened ? `${opened} task${opened === 1 ? "" : "s"} opened` : "", deleted ? `${deleted} deleted` : ""].filter(Boolean).join(", ")
+      const message = `${changed + deleted} of ${total} similar email${s} sorted by the rule${notes ? ` (${notes})` : ""}.${failed ? ` ${failed} couldn't be done — try Reclassify later.` : ""}`
+      if (changed + deleted === 0) toast.info(`${message} Another rule may be catching them first — check with the Test button.`, { id: toastId })
+      else toast.success(message, { id: toastId })
+    } catch (e: any) {
+      toast.error(`Stopped sorting the similar emails after ${done} of ${total}: ${e.message}`, { id: toastId })
+    }
+  }, [])
+
+  // Needs Review's action dialog, confirmed: apply the action to the picked emails, save the rule (new or
+  // widened), close the dialog, then sort the other emails the rule catches in the background. A rule
+  // that fails to save never blocks the action itself — it's reported and nothing else is reclassified.
+  const confirmReviewAction = useCallback(async (plan: ReviewActionPlan) => {
+    const { emails: targets, action, keep, categoryKey } = plan
+    if (action !== "task" && !keep) {
+      await deleteEmails(targets)
+    } else {
+      const disposition: Disposition = action === "task" ? "action_required" : action === "update" ? "update_only" : "ignore"
+      const opened = await moveEmails(targets, disposition, categoryKey ?? undefined)
+      // One email made into a task: open it straight away, as the old one-click Action did.
+      if (action === "task" && targets.length === 1 && opened[0]) setOpenCaseId(opened[0])
+    }
+
+    let ruleSaved = !plan.rule
+    if (plan.rule) {
+      try {
+        if (plan.rule.mode === "create") {
+          const res = await api<{ rule: RuleRow }>("/api/email-center/rules", { method: "POST", body: JSON.stringify(plan.rule.body) })
+          setRules((prev) => [...prev, res.rule])
+          toast.success("Rule saved — mail like this is sorted automatically from now on.")
+        } else {
+          const res = await api<{ rule: RuleRow }>(`/api/email-center/rules/${plan.rule.rule.id}`, { method: "PATCH", body: JSON.stringify(plan.rule.changes) })
+          setRules((prev) => prev.map((r) => (r.id === res.rule.id ? res.rule : r)))
+          toast.success("Rule updated — it now covers mail like this too.")
+        }
+        ruleSaved = true
+      } catch (e: any) {
+        toast.warning(`The emails were sorted, but the rule wasn't saved: ${e.message}`)
+      }
+    }
+    setReviewAction(null)
+    if (ruleSaved && plan.similarIds.length) void applyRuleInBackground(plan.similarIds)
+  }, [deleteEmails, moveEmails, applyRuleInBackground])
 
   // Deletes cases (In Progress's rule sidebar) — their emails aren't deleted, they go back to Needs
   // Review (the server does the reset), so a full reload picks up both the removed cases and the
@@ -585,7 +716,9 @@ export default function EmailCenterPage() {
 
   const baseOpenCases = useMemo(() => cases.filter((c) => c.status === "open" && meetsCaseFilters(c, assignee, q)), [cases, assignee, q])
   const baseClosedCases = useMemo(() => cases.filter((c) => c.status === "closed" && meetsCaseFilters(c, assignee, q)), [cases, assignee, q])
-  const baseReviewEmails = useMemo(() => emails.filter((e) => e.disposition === "needs_review" && e.category_key !== "notification" && meetsEmailFilters(e, q)), [emails, q])
+  // Every Needs Review email, ignoring the search — what a rule saved from the action dialog applies to.
+  const allReviewEmails = useMemo(() => emails.filter((e) => e.disposition === "needs_review" && e.category_key !== "notification"), [emails])
+  const baseReviewEmails = useMemo(() => allReviewEmails.filter((e) => meetsEmailFilters(e, q)), [allReviewEmails, q])
   const baseNotificationEmails = useMemo(() => emails.filter((e) => e.category_key === "notification" && meetsEmailFilters(e, q)), [emails, q])
   const baseUpdateEmails = useMemo(() => emails.filter((e) => e.disposition === "update_only" && meetsEmailFilters(e, q)), [emails, q])
   const baseIgnoredEmails = useMemo(() => emails.filter((e) => e.disposition === "ignore" && meetsEmailFilters(e, q)), [emails, q])
@@ -647,6 +780,12 @@ export default function EmailCenterPage() {
     setTab("mailboxes")
   }, [])
   const pushHealthy = (accounts ?? []).some((a) => a.watch_expiry && new Date(a.watch_expiry).getTime() > Date.now())
+  // Most recent sync of any mailbox. With push off, mail only arrives when something syncs, so this
+  // (and the newest email's date) is what tells you whether the inbox is actually current.
+  const lastSyncAt = (accounts ?? []).reduce<string | null>(
+    (latest, a) => (a.last_synced_at && (!latest || a.last_synced_at > latest) ? a.last_synced_at : latest),
+    null
+  )
 
   const isCaseTab = tab === "inprogress" || tab === "completed"
   const isListTab = tab !== "mailboxes" && tab !== "rules"
@@ -743,7 +882,7 @@ export default function EmailCenterPage() {
           categories={categories}
           companyNames={companyNames}
           onOpen={(e) => setOpenEmailSeed(e)}
-          onMove={moveEmails}
+          onMove={async (targets, d) => { await moveEmails(targets, d) }}
           onDelete={deleteEmails}
           showTime={showTime}
           loading={loading}
@@ -778,8 +917,7 @@ export default function EmailCenterPage() {
         emails={reviewEmails}
         categories={categories}
         onOpen={(e) => setOpenEmailSeed(e)}
-        onQuickClassify={quickClassify}
-        onMove={moveEmails}
+        onAction={(targets, action) => setReviewAction({ emails: targets, action })}
         onDelete={deleteEmails}
         showTime={showTime}
         loading={loading}
@@ -803,10 +941,24 @@ export default function EmailCenterPage() {
         <div className="hidden md:flex items-center text-base text-slate-500 gap-1.5">
           <span>{openCasesCount} open case{openCasesCount === 1 ? "" : "s"}</span>
           <span className="text-slate-300">·</span>
-          <span className={cn("inline-flex items-center gap-1 font-medium", pushHealthy ? "text-emerald-600" : "text-slate-400")}>
+          {/* "Live" = Gmail pushes new mail as it arrives. Otherwise mail only comes in on a sync (Sync
+              button or the scheduled sync), so say that rather than implying something is polling. */}
+          <span
+            className={cn("inline-flex items-center gap-1 font-medium", pushHealthy ? "text-emerald-600" : "text-amber-600")}
+            title={pushHealthy ? "Gmail pushes new mail here as it arrives" : "Gmail push has lapsed - new mail arrives on each sync. Press Sync to catch up and re-enable push."}
+          >
             {pushHealthy ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
-            {pushHealthy ? "Live Push" : "Polling"}
+            {pushHealthy ? "Live" : "Push off"}
           </span>
+          <span className="text-slate-300">·</span>
+          <span title={lastSyncAt ? fmtDateTime(lastSyncAt) : undefined}>Last sync {lastSyncAt ? timeAgo(lastSyncAt) : "never"}</span>
+          <span className="text-slate-300">·</span>
+          <span title={latestEmailAt ? fmtDateTime(latestEmailAt) : undefined}>Latest email {latestEmailAt ? timeAgo(latestEmailAt) : "—"}</span>
+          {revalidating && (
+            <span className="inline-flex items-center gap-1 text-slate-400" title="Showing what was loaded earlier while the latest data comes in">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Updating…
+            </span>
+          )}
         </div>
 
         {failedMailboxes > 0 && (
@@ -1066,7 +1218,7 @@ export default function EmailCenterPage() {
       {/* Body — tables own their scrolling and fill whatever height is left */}
       <div className="px-3 py-3 flex-1 min-h-0 flex flex-col overflow-hidden">
         {tab === "rules" ? (
-          <RulesPanel rules={rules} source={rulesSource} categories={categories} companies={companies} loading={loading} search={search} onRulesChange={setRules} onRuleCreated={handleRuleCreated} />
+          <RulesPanel rules={rules} source={rulesSource} categories={categories} companies={companies} loading={loading} search={search} onRulesChange={setRules} onRuleCreated={handleRuleCreated} onRuleEdited={handleRuleEdited} />
         ) : tab === "mailboxes" ? (
           <MailboxesPanel
             accounts={accounts}
@@ -1114,6 +1266,15 @@ export default function EmailCenterPage() {
         rules={rules}
         onRuleUpdated={handleRuleUpdated}
       />
+      <ReviewActionDialog
+        request={reviewAction}
+        reviewEmails={allReviewEmails}
+        rules={rules}
+        categories={categories}
+        onClose={() => setReviewAction(null)}
+        onConfirm={confirmReviewAction}
+        onCategoryCreated={(category) => setCategories((current) => [...current, category])}
+      />
       <SyncDialog
         open={syncFromOpen}
         accounts={accounts}
@@ -1137,7 +1298,9 @@ export default function EmailCenterPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Reclassify mail</AlertDialogTitle>
             <AlertDialogDescription>
-              {reclassifyPrompt?.pattern
+              {reclassifyPrompt?.change
+                ? `You ${reclassifyPrompt.change === "edited" ? "changed" : reclassifyPrompt.change === "activated" ? "turned on" : "turned off"} the ${reclassifyPrompt.is_ignore ? "ignore " : reclassifyPrompt.is_notify ? "important-notification " : ""}rule for “${reclassifyPrompt.pattern}”. Mail it now matches - or no longer matches - is still sorted the old way. Re-run the current rules over the sections below to bring it in line.`
+                : reclassifyPrompt?.pattern
                 ? `The new ${reclassifyPrompt.is_ignore ? "ignore " : reclassifyPrompt.is_notify ? "important-notification " : ""}rule matches “${reclassifyPrompt.pattern}”. Run the current rules over the sections below so the mail it matches is ${reclassifyPrompt.is_ignore ? "ignored" : reclassifyPrompt.is_notify ? "flagged urgent" : "classified (and cases opened where needed)"} automatically.`
                 : "Run the current rules over the sections you tick. Mail a rule matches confidently is classified (and cases opened where needed), ignored, or flagged as an important notification; the rest stays where it is. Mail already attached to a case stays attached to it."}
             </AlertDialogDescription>
@@ -1266,4 +1429,15 @@ export default function EmailCenterPage() {
       </AlertDialog>
     </div>
   )
+}
+
+/** "just now", "12 min ago", "3 h ago", "6 days ago" - the exact time is in the tooltip. */
+function timeAgo(iso: string): string {
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60_000)
+  if (minutes < 1) return "just now"
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours} h ago`
+  const days = Math.round(hours / 24)
+  return `${days} day${days === 1 ? "" : "s"} ago`
 }

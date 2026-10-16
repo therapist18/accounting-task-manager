@@ -3,6 +3,7 @@ import type { ScannerUserRole } from "@/lib/auth/types";
 export type PermissionKey =
   | "dashboard.view"
   | "emails.view"
+  | "quotations.view"
   | "tasks_requirements.view"
   | "tasks.view"
   | "tasks.bypass_sequential_stages"
@@ -51,6 +52,7 @@ export interface PermissionDefinition {
 export const PERMISSIONS: PermissionDefinition[] = [
   { key: "dashboard.view", label: "Dashboard", group: "Workspace", description: "View the main dashboard.", paths: ["/dashboard"] },
   { key: "emails.view", label: "Email Inbox", group: "Workspace", description: "View connected email inboxes.", paths: ["/dashboard/emails"] },
+  { key: "quotations.view", label: "Quotations", group: "Workspace", description: "Raise and manage client quotations priced from the rate card.", paths: ["/dashboard/quotations"] },
   { key: "tasks_requirements.view", label: "Task Requirements", group: "Task Management", description: "View task requirement records.", paths: ["/dashboard/tasks-requirements"] },
   { key: "tasks.view", label: "Task Tracking", group: "Task Management", description: "View and work with tracked tasks.", paths: ["/dashboard/tasks"] },
   { key: "tasks.bypass_sequential_stages", label: "Bypass Stage Order", group: "Task Management", description: "Update any stage on a task at any time, regardless of order. Without this, stages must be completed or skipped in order before later ones become editable.", parentKey: "tasks.view" },

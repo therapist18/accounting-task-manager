@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { TableLoadingStateInline } from "@/components/table-loading-state"
 
 // Table building blocks shared by every table in the Email Center (cases, emails, rules), so they all
 // sort, filter, border and stripe the same way the Individual Document Manager's tables do:
@@ -250,11 +251,13 @@ export function useColumnFilters<T>(rows: T[], getValue: Record<string, (row: T)
 }
 
 export function SortTh({
-  id, children, className, levels, onSort, rowSpan, tone = "neutral", filter,
+  id, children, className, style, levels, onSort, rowSpan, tone = "neutral", filter,
 }: {
   id: string
   children: React.ReactNode
   className?: string
+  /** For sticky columns whose offset depends on which columns are visible. */
+  style?: React.CSSProperties
   levels: SortLevel[]
   onSort: (id: string, additive?: boolean) => void
   rowSpan?: number
@@ -268,6 +271,7 @@ export function SortTh({
   return (
     <th
       rowSpan={rowSpan}
+      style={style}
       onClick={(e) => onSort(id, e.shiftKey)}
       title="Click to sort. Shift-click to sort by more than one column."
       className={cn(TH_CLASS, tone === "blue" ? HEAD_BLUE : HEAD_NEUTRAL, className, "cursor-pointer select-none transition-colors group")}
@@ -415,12 +419,14 @@ export function StatsRows<T>({ rows, columns }: { rows: T[]; columns: StatsColum
 
 // Loading placeholder for the table body — the toolbar and headers stay put while data loads, so there
 // is no full-page spinner, just a centred spinner + label inside the table.
-export function TableLoading({ cols, label = "Loading…" }: { cols: number; label?: string }) {
+// The app-wide table loader (components/table-loading-state): these tables are far wider than the
+// screen, and a centred spinner sat off to the right where nobody could see it. This one stays centred
+// in whatever part of the table is visible. Pass `label` only to override the standard wording.
+export function TableLoading({ cols, label }: { cols: number; label?: string }) {
   return (
     <tr>
-      <td colSpan={cols} className="py-16 text-center">
-        <Loader2 className="h-8 w-8 animate-spin text-custom-blue mx-auto mb-3" />
-        <div className="text-base text-slate-400">{label}</div>
+      <td colSpan={cols} className="p-0">
+        <TableLoadingStateInline {...(label ? { message: label } : {})} />
       </td>
     </tr>
   )

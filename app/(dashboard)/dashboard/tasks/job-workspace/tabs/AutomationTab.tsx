@@ -33,6 +33,8 @@ interface AutomationTabProps {
   data: JobWorkspaceData
   onRefresh?: () => void
   highlightAutomationId?: string | number
+  /** Application guide: show only this automation (the one being applied for). */
+  focusAutomationId?: string | number | null
   onNavigateToRequirement?: (requirementId: string) => void
   onNavigateToTemplate?: (documentId: string) => void
   // Raw automation_jobs rows for this task, fetched once by the parent
@@ -132,8 +134,13 @@ function formatRelativeTime(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString()
 }
 
-export function AutomationTab({ data, onRefresh, highlightAutomationId, onNavigateToRequirement, onNavigateToTemplate, automationJobs }: AutomationTabProps) {
-  const { task, automations, automationLinkSources = {}, kycDocsMap } = data
+export function AutomationTab({ data, onRefresh, highlightAutomationId, focusAutomationId, onNavigateToRequirement, onNavigateToTemplate, automationJobs }: AutomationTabProps) {
+  const { task, automations: allAutomations, automationLinkSources = {}, kycDocsMap } = data
+  // In the application guide the matrix narrows to the application being worked on.
+  const automations = useMemo(
+    () => (focusAutomationId ? (allAutomations || []).filter((a: any) => String(a.id) === String(focusAutomationId)) : allAutomations),
+    [allAutomations, focusAutomationId]
+  )
   const { user: currentUser } = useCurrentUser();
   const actor = auditActor(currentUser);
   const [expandedAutomations, setExpandedAutomations] = useState<Set<number>>(new Set(automations?.map(a => a.id) || []))

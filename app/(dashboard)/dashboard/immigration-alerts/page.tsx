@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
-import { getImmigrationAlerts, type ImmigrationAlert } from "@/lib/immigrationAlerts"
+import { getImmigrationAlerts, immigrationAlertsResource, type ImmigrationAlert } from "@/lib/immigrationAlerts"
 import { fetchDepartments } from "../departments/departments/database"
 import {
   COUNT_BADGE_CLASS, PILL_BUTTON_CLASS, TAB_LIST_CLASS, TAB_TRIGGER_CLASS, URGENT_BADGE_CLASS, fmtDateTime,
@@ -34,9 +34,10 @@ const matchesSearch = (a: ImmigrationAlert, q: string) =>
   !q || ALERT_COLUMNS.some((c) => ALERT_VALUE[c.id](a).toLowerCase().includes(q))
 
 export default function ImmigrationAlertsPage() {
-  const [alerts, setAlerts] = useState<ImmigrationAlert[]>([])
-  const [generatedAt, setGeneratedAt] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  // Seeded from the shared copy (lib/immigrationAlerts) the notifier and dashboard card also use.
+  const [alerts, setAlerts] = useState<ImmigrationAlert[]>(() => immigrationAlertsResource.getState().data?.alerts ?? [])
+  const [generatedAt, setGeneratedAt] = useState<string | null>(() => immigrationAlertsResource.getState().data?.generatedAt ?? null)
+  const [loading, setLoading] = useState(() => !immigrationAlertsResource.getState().data)
   const [departments, setDepartments] = useState<any[]>([])
   const [jobLevel, setJobLevel] = useState<string>(ALL)
   const [status, setStatus] = useState<StatusTab>("all")
@@ -48,10 +49,12 @@ export default function ImmigrationAlertsPage() {
   const statsRows = useColumnVisibility(STATS_ROWS.map(({ key, label }) => ({ id: key, label })))
 
   // `fresh` (Refresh) asks bcl-registry to recalculate instead of using its cache.
+  // fresh = the Recalculate button: ask the registry to recompute, then share the result.
   const load = useCallback(async (fresh = false) => {
-    setLoading(true)
+    if (fresh || !immigrationAlertsResource.getState().data) setLoading(true)
     try {
-      const result = await getImmigrationAlerts({ fresh })
+      const result = fresh ? await getImmigrationAlerts({ fresh: true }) : await immigrationAlertsResource.load()
+      if (fresh) immigrationAlertsResource.mutate(() => result)
       setAlerts(result.alerts)
       setGeneratedAt(result.generatedAt)
     } catch (e: any) {

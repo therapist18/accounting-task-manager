@@ -1,25 +1,26 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Loader2, Trash2, X } from "lucide-react"
+import { Briefcase, EyeOff, Inbox, Loader2, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { EmailsTable } from "./NeedsReview"
-import type { CategoryOption, Disposition, EmailRow, RuleRow } from "./shared"
+import type { ReviewAction } from "./ruleSuggest"
+import type { CategoryOption, EmailRow, RuleRow } from "./shared"
 
-// Needs Review: the EmailsTable plus row checkboxes, a bulk-action bar (Action / Update / Ignore /
-// Delete) and a per-row delete. Mail that turns up here and simply isn't needed can be deleted outright
-// instead of being pushed through a classification first.
+// Needs Review: the EmailsTable plus row checkboxes, a bulk-action bar (Create tasks / Mark as update /
+// Ignore / Delete) and a per-row delete. Create task / update / ignore — for one row or a selection —
+// go through the page's ReviewActionDialog, which also offers a rule for mail like it. Mail that turns
+// up here and simply isn't needed can be deleted outright instead.
 export function ReviewPanel({
   emails,
   categories,
   rules,
   onOpen,
-  onQuickClassify,
-  onMove,
+  onAction,
   onDelete,
   showTime,
   loading,
@@ -32,9 +33,8 @@ export function ReviewPanel({
   categories: CategoryOption[]
   rules: RuleRow[]
   onOpen: (e: EmailRow) => void
-  onQuickClassify: (e: EmailRow, d: Disposition) => void
-  // Bulk-classify; resolves once done.
-  onMove: (emails: EmailRow[], disposition: Disposition) => Promise<void>
+  // Opens the action dialog for these emails (a row's button, or the selection).
+  onAction: (emails: EmailRow[], action: ReviewAction) => void
   // Deletes emails from the app; resolves once done.
   onDelete: (emails: EmailRow[]) => Promise<void>
   showTime: boolean
@@ -77,15 +77,10 @@ export function ReviewPanel({
       return next
     })
 
-  const moveSelected = async (d: Disposition) => {
-    if (!selectedEmails.length) return
-    setBusy(true)
-    try {
-      await onMove(selectedEmails, d)
-      setSelected(new Set())
-    } finally {
-      setBusy(false)
-    }
+  // The selection clears itself once the emails leave Needs Review (see the effect above), so a
+  // cancelled dialog keeps it.
+  const actOnSelected = (action: ReviewAction) => {
+    if (selectedEmails.length) onAction(selectedEmails, action)
   }
 
   const runDelete = async () => {
@@ -105,14 +100,14 @@ export function ReviewPanel({
       {selected.size > 0 && (
         <div className="shrink-0 flex items-center gap-2 flex-wrap rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5">
           <span className="text-base font-semibold text-blue-800">{selected.size} selected</span>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => moveSelected("action_required")} className="h-9 px-3 rounded-md border-slate-200 bg-white hover:bg-slate-100 text-base font-medium">
-            Action required
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => actOnSelected("task")} className="h-9 px-3 gap-1.5 rounded-md border-slate-200 bg-white hover:bg-slate-100 text-base font-medium" title="Open a task for each selected email">
+            <Briefcase className="w-4 h-4" /> Create tasks
           </Button>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => moveSelected("update_only")} className="h-9 px-3 rounded-md border-slate-200 bg-white hover:bg-slate-100 text-base font-medium">
-            Update only
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => actOnSelected("update")} className="h-9 px-3 gap-1.5 rounded-md border-slate-200 bg-white hover:bg-slate-100 text-base font-medium" title="Informational — keep in the Update tab, or delete">
+            <Inbox className="w-4 h-4" /> Mark as update
           </Button>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => moveSelected("ignore")} className="h-9 px-3 rounded-md border-slate-200 bg-white hover:bg-slate-100 text-base font-medium">
-            Ignore
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => actOnSelected("ignore")} className="h-9 px-3 gap-1.5 rounded-md border-slate-200 bg-white hover:bg-slate-100 text-base font-medium" title="Not needed — keep in the Ignored tab, or delete">
+            <EyeOff className="w-4 h-4" /> Ignore
           </Button>
           <Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirmDelete(selectedEmails)} className="h-9 px-3 gap-1.5 rounded-md border-red-200 text-red-700 hover:bg-red-50 text-base font-medium">
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />} Delete
@@ -127,7 +122,7 @@ export function ReviewPanel({
         emails={emails}
         categories={categories}
         onOpen={onOpen}
-        onQuickClassify={onQuickClassify}
+        onQuickClassify={(e, d) => onAction([e], d === "action_required" ? "task" : d === "update_only" ? "update" : "ignore")}
         showTime={showTime}
         loading={loading}
         emptyMessage={emptyMessage}

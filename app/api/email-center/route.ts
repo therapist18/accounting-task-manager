@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { authorize, companyNames, fail } from "@/lib/email-center/api"
-import { CATEGORIES } from "@/lib/email-center/categories"
+import { categoriesFor } from "@/lib/email-center/categories"
 import { withSupabaseRetry } from "@/lib/supabaseRetry"
 
 // GET /api/email-center?light=1 — mailboxes, companies, staff and categories: everything the page
@@ -39,6 +39,18 @@ export async function GET(request: NextRequest) {
         : withSupabaseRetry<any>(() => sb.from("scanner_users").select("id, first_name, last_name, username").neq("is_active", false)),
     ])
 
+    // When the newest stored email arrived - shown in the toolbar beside the sync status, so a stalled
+    // inbox is obvious at a glance. Uses emails_received_idx (20261016000000); capped at a few seconds so
+    // a slow database never holds up the page, it just leaves the date blank.
+    const latestEmailRes = await sb
+      .from("emails")
+      .select("received_at")
+      .order("received_at", { ascending: false })
+      .limit(1)
+      .abortSignal(AbortSignal.timeout(4000))
+      .then((res: { data: unknown }) => res, () => ({ data: null }))
+    const latestEmailAt: string | null = (latestEmailRes.data as any)?.[0]?.received_at ?? null
+
     const names = await companyNames(sb, (accountsRes.data ?? []).map((a: any) => a.company_id))
     const accounts = (accountsRes.data ?? []).map((a: any) => ({
       ...a,
@@ -62,7 +74,8 @@ export async function GET(request: NextRequest) {
       success: true,
       accounts,
       staff,
-      categories: CATEGORIES,
+      categories: (await categoriesFor(sb)).map((category) => ({ ...category, id: category.key })),
+      latestEmailAt,
       companies: light
         ? null
         : (companiesRes.data ?? []).map((c: any) => ({

@@ -48,6 +48,14 @@ export interface CompanyRowData {
   live: number
 }
 
+// Sticky columns for the wide mailbox table: # and Company stay pinned on the left and Actions on
+// the right while the mailbox detail columns scroll between them. Fixed widths keep the left offsets
+// exact; bg-inherit takes the row's (opaque) zebra colour so nothing shows through when scrolling.
+const STICKY_INDEX = "sticky left-0 w-16 min-w-16 max-w-16"
+const STICKY_COMPANY = "sticky left-16 min-w-[260px] w-[260px] max-w-[260px] shadow-[6px_0_8px_-6px_rgba(15,23,42,0.18)]"
+const STICKY_ACTIONS = "sticky right-0 min-w-[250px] shadow-[-6px_0_8px_-6px_rgba(15,23,42,0.18)]"
+const STICKY_BODY = "z-10 bg-inherit"
+
 const watchActive = (a: AccountRow) => (a.watch_expiry ? new Date(a.watch_expiry).getTime() > Date.now() : false)
 
 const STATE_RANK: Record<ConnState, number> = { connected: 0, reconnect: 1, not_connected: 2 }
@@ -558,8 +566,8 @@ export function MailboxesPanel({
             <table className="w-full min-w-[2300px] border-separate border-spacing-0 text-base">
               <thead className="sticky top-0 z-30 bg-white shadow-xs">
                 <tr>
-                  <SortTh tone="blue" id="#" levels={companySort.levels} onSort={companySort.toggle} className="w-16 text-center">#</SortTh>
-                  <SortTh tone="blue" id="company" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[260px]">Company</SortTh>
+                  <SortTh tone="blue" id="#" levels={companySort.levels} onSort={companySort.toggle} className={cn("text-center", STICKY_INDEX, "z-40")}>#</SortTh>
+                  <SortTh tone="blue" id="company" levels={companySort.levels} onSort={companySort.toggle} className={cn("text-left", STICKY_COMPANY, "z-40")}>Company</SortTh>
                   <SortTh tone="blue" id="kra_email" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[240px]">KRA email</SortTh>
                   <SortTh tone="blue" id="kra_password" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[200px]">KRA email password</SortTh>
                   <SortTh tone="blue" id="state" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[170px]">Status</SortTh>
@@ -572,7 +580,7 @@ export function MailboxesPanel({
                   <SortTh tone="blue" id="push" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[130px]">Push</SortTh>
                   <SortTh tone="blue" id="issues" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[180px]">Sync issue</SortTh>
                   <SortTh tone="blue" id="mailbox_actions" levels={companySort.levels} onSort={companySort.toggle} className="text-left min-w-[300px]">Move / unlink</SortTh>
-                  <SortTh tone="blue" id="actions" levels={companySort.levels} onSort={companySort.toggle} className="min-w-[250px] text-left border-r-0">Actions</SortTh>
+                  <SortTh tone="blue" id="actions" levels={companySort.levels} onSort={companySort.toggle} className={cn("text-left border-r-0", STICKY_ACTIONS, "z-40")}>Actions</SortTh>
                 </tr>
               </thead>
               <tbody>
@@ -588,8 +596,8 @@ export function MailboxesPanel({
                   // The cells that belong to the company, not to one mailbox — rendered once, spanning every sub-row.
                   const companyCells = (
                     <>
-                      <td rowSpan={span} className={cn(TD_CLASS, "text-center text-slate-400 tabular-nums font-medium")}>{start + index + 1}</td>
-                      <td rowSpan={span} className={TD_CLASS}>
+                      <td rowSpan={span} className={cn(TD_CLASS, "text-center text-slate-400 tabular-nums font-medium", STICKY_INDEX, STICKY_BODY)}>{start + index + 1}</td>
+                      <td rowSpan={span} className={cn(TD_CLASS, STICKY_COMPANY, STICKY_BODY)}>
                         <div className="font-semibold text-slate-900 leading-snug">{r.company.company_name}</div>
                         {r.company.kra_pin && <div className="text-sm text-slate-500 mt-0.5 font-mono">{r.company.kra_pin}</div>}
                       </td>
@@ -602,7 +610,7 @@ export function MailboxesPanel({
                   )
 
                   const actionsCell = (
-                    <td rowSpan={span} className={cn(TD_CLASS, "border-r-0")}>
+                    <td rowSpan={span} className={cn(TD_CLASS, "border-r-0", STICKY_ACTIONS, STICKY_BODY)}>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {connectedOnce ? (
                           <>

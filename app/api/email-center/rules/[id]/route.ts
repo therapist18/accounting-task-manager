@@ -5,6 +5,7 @@ import {
   invalidateRulesCache, normalizeRuleRow, ruleColumns, withOptionalColumnFallback, withoutDroppedColumns,
 } from "@/lib/email-center/rule-store"
 import { parseRuleBody } from "@/lib/email-center/rule-validation"
+import { categoriesFor } from "@/lib/email-center/categories"
 
 type Ctx = { params: Promise<{ id: string }> }
 
@@ -14,7 +15,9 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
   try {
     const { sb, actor } = await authorize(request)
     const { id } = await params
-    const parsed = parseRuleBody(await request.json(), true)
+    const categories = await categoriesFor(sb)
+    const categoryKeys = new Set(categories.map((c) => c.key))
+    const parsed = parseRuleBody(await request.json(), true, categoryKeys)
     if (!parsed.ok) return NextResponse.json({ success: false, error: parsed.error }, { status: 400 })
     if (!Object.keys(parsed.value).length) return NextResponse.json({ success: false, error: "Nothing to update." }, { status: 400 })
 
@@ -24,7 +27,8 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
       if (!current) return NextResponse.json({ success: false, error: "Rule not found." }, { status: 404 })
       const check = parseRuleBody(
         { pattern: current.pattern, match_type: current.match_type, category_key: "other_kra", ...parsed.value },
-        false
+        false,
+        categoryKeys
       )
       if (!check.ok) return NextResponse.json({ success: false, error: check.error }, { status: 400 })
     }

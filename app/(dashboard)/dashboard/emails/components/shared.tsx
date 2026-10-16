@@ -408,6 +408,7 @@ export function SearchSelect({
   disabled,
   error,
   variant = "default",
+  onCreateOption,
 }: {
   value: string
   onChange: (value: string) => void
@@ -417,12 +418,14 @@ export function SearchSelect({
   disabled?: boolean
   error?: boolean
   variant?: "pill" | "default"
+  onCreateOption?: (query: string) => void
 }) {
   return (
     <SearchableSelect
       value={value}
       onValueChange={onChange}
       options={options}
+      onCreateOption={onCreateOption}
       placeholder={placeholder}
       disabled={disabled}
       className={className}

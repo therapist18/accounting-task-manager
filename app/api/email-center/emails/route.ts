@@ -27,7 +27,9 @@ export async function GET(request: NextRequest) {
     const run = (select: string) => {
       let query = sb
         .from("emails")
-        .select(select, { count: "exact" })
+        // No count: the list isn't capped below the table size, so the rows returned ARE the total -
+        // an exact count only made Postgres scan the matching rows a second time.
+        .select(select)
         .not("disposition", "is", null)
         .order("received_at", { ascending: false })
         .range(offset, offset + limit - 1)
@@ -40,9 +42,9 @@ export async function GET(request: NextRequest) {
     // withSupabaseRetry absorbs a transient network blip before this is treated as a real error — the
     // three list/review/update/ignore tabs load concurrently on every page open, and this list has no
     // row cap (see comment above), so it's one of the larger single queries in the module.
-    type EmailsQueryResult = { data: any; count: number | null; error: any }
-    let { data, count, error } = await withSupabaseRetry<EmailsQueryResult>(() => run(`${columns}, matched_rule_id`))
-    if (error && /matched_rule_id/i.test(error.message)) ({ data, count, error } = await withSupabaseRetry<EmailsQueryResult>(() => run(columns)))
+    type EmailsQueryResult = { data: any; error: any }
+    let { data, error } = await withSupabaseRetry<EmailsQueryResult>(() => run(`${columns}, matched_rule_id`))
+    if (error && /matched_rule_id/i.test(error.message)) ({ data, error } = await withSupabaseRetry<EmailsQueryResult>(() => run(columns)))
     if (error) throw new Error(error.message)
 
     const names = await companyNames(sb, (data ?? []).map((e: any) => e.company_id))
@@ -56,15 +58,15 @@ export async function GET(request: NextRequest) {
       handled_by_name: e.handled_by_id ? people.get(String(e.handled_by_id)) ?? null : null,
       classified_by_name: e.classified_by_id ? people.get(String(e.classified_by_id)) ?? null : null,
     }))
-    return NextResponse.json({ success: true, emails, total: count ?? emails.length })
+    return NextResponse.json({ success: true, emails, total: emails.length })
   } catch (error) {
     return fail(error, "emails GET")
   }
 }
 
 // DELETE /api/email-center/emails — remove emails from the app (they stay in Gmail).
-// Body: { ids: string[] }. Only Ignored, Notifications (needs_review + category "notification") and
-// Update-only rows with no case attached are deleted — a stale selection can never remove something
+// Body: { ids: string[] }. Only Ignored, Needs Review (notifications included) and Update-only rows
+// with no case attached are deleted — a stale selection can never remove something
 // that has since been reclassified into a case, or mail that's actually attached to one (an
 // extension-of-time reply, an objection decision) even if its disposition happens to be update_only;
 // that kind of mail should only ever go away via deleting the case itself.
@@ -80,7 +82,7 @@ export async function DELETE(request: NextRequest) {
       .select("id, attachments")
       .in("id", list)
       .is("case_id", null)
-      .or("disposition.eq.ignore,disposition.eq.update_only,and(disposition.eq.needs_review,category_key.eq.notification)")
+      .in("disposition", ["ignore", "update_only", "needs_review"])
     if (readErr) throw new Error(readErr.message)
     const targets = rows ?? []
     if (!targets.length) return NextResponse.json({ success: true, deleted: 0, ids: [] })

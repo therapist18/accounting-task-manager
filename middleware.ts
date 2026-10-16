@@ -25,6 +25,8 @@ const PUBLIC_PATHS = [
   // Called by the EFNS automation after each run (no session cookie). The route authenticates with
   // the x-efns-secret header (EFNS_FILING_SECRET) and rejects every request while that is unset.
   "/api/immigration-notifications/file-job/efns",
+  // Vercel Cron (vercel.json) - no session cookie. The route checks Authorization: Bearer CRON_SECRET.
+  "/api/email-center/cron",
   // Called by the local automation server when a run finishes (no session cookie - the user may
   // have closed the window). Both routes authenticate with the per-run completion_secret minted
   // in /api/automations/run, checked against the run row itself.

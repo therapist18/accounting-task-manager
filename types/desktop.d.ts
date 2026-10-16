@@ -35,7 +35,14 @@ export interface DesktopBridge {
   }>;
 
   /** Raises a native OS notification. The DOM Notification API is not available here. */
-  notify(input: { title: string; body?: string }): Promise<boolean>;
+  notify(input: { title: string; body?: string; navigateTo?: string }): Promise<boolean>;
+
+  /**
+   * A notification raised with `navigateTo` was clicked. The main process only forwards in-app
+   * paths (it refuses anything not starting with a single slash), so the payload is a path such as
+   * `/dashboard/immigration-alerts`. Returns an unsubscribe fn.
+   */
+  onNavigate?(handler: (payload: { path?: string }) => void): () => void;
 
   /** No-op kept for compatibility; stale-run recovery no longer needs the user. */
   setUser(userId: string | null): Promise<boolean>;

@@ -4,18 +4,20 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { Loader2, ShieldAlert } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { getImmigrationAlerts, IMMIGRATION_ALERTS_PATH, type ImmigrationAlert } from "@/lib/immigrationAlerts"
+import { IMMIGRATION_ALERTS_PATH, immigrationAlertsResource, type ImmigrationAlert } from "@/lib/immigrationAlerts"
 
 // Dashboard card: how many people are Expired / in their grace period, plus the most urgent few.
 // Loads in the browser so the dashboard never waits on bcl-registry (an uncached calculation takes a
 // while); the list arrives already sorted most-urgent-first.
 export default function ImmigrationStatusCard() {
-  const [alerts, setAlerts] = useState<ImmigrationAlert[] | null>(null)
+  // Starts from the shared copy the notifier keeps, so the card usually renders without a request.
+  const [alerts, setAlerts] = useState<ImmigrationAlert[] | null>(() => immigrationAlertsResource.getState().data?.alerts ?? null)
   const [failed, setFailed] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    getImmigrationAlerts()
+    immigrationAlertsResource
+      .load()
       .then((r) => !cancelled && setAlerts(r.alerts))
       .catch((error) => {
         console.warn("[immigration-status-card]", error)

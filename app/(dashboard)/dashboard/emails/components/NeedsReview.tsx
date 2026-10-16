@@ -212,7 +212,7 @@ export function EmailsTable({
               {isVisible("category") && <SortTh tone="blue" id="category" levels={levels} onSort={toggle} filter={configFor("category")} className="min-w-[140px]">Category</SortTh>}
               {isVisible("status") && <SortTh tone="blue" id="status" levels={levels} onSort={toggle} filter={configFor("status")} className="min-w-[130px]">Status</SortTh>}
               {isVisible("case") && <SortTh tone="blue" id="case" levels={levels} onSort={toggle} className="min-w-[90px]">Case</SortTh>}
-              {showActions && <SortTh tone="blue" id="actions" levels={levels} onSort={toggle} className="min-w-[200px] text-left">Actions</SortTh>}
+              {showActions && <SortTh tone="blue" id="actions" levels={levels} onSort={toggle} className="min-w-[300px] text-left">Actions</SortTh>}
             </tr>
             {showStats && <StatsRows rows={filtered} columns={statsRowColumns} />}
           </thead>
@@ -376,9 +376,9 @@ export function EmailsTable({
                               Handled
                             </Button>
                           )}
-                          <Button size="sm" variant="outline" className="h-8 px-2.5 rounded-md text-base font-medium border-slate-200 bg-white hover:bg-slate-100" onClick={() => onQuickClassify(e, "action_required")}>Action</Button>
-                          <Button size="sm" variant="outline" className="h-8 px-2.5 rounded-md text-base font-medium border-slate-200 bg-white hover:bg-slate-100" onClick={() => onQuickClassify(e, "update_only")}>Update</Button>
-                          <Button size="sm" variant="ghost" className="h-8 px-2.5 rounded-md text-base font-medium text-slate-500 hover:text-slate-800" onClick={() => onQuickClassify(e, "ignore")}>Ignore</Button>
+                          <Button size="sm" variant="outline" className="h-8 px-2.5 rounded-md text-base font-medium border-slate-200 bg-white hover:bg-slate-100 whitespace-nowrap" onClick={() => onQuickClassify(e, "action_required")} title="Open a KRA task for this email">Create task</Button>
+                          <Button size="sm" variant="outline" className="h-8 px-2.5 rounded-md text-base font-medium border-slate-200 bg-white hover:bg-slate-100" onClick={() => onQuickClassify(e, "update_only")} title="Informational — no task needed">Update</Button>
+                          <Button size="sm" variant="ghost" className="h-8 px-2.5 rounded-md text-base font-medium text-slate-500 hover:text-slate-800" onClick={() => onQuickClassify(e, "ignore")} title="Not needed">Ignore</Button>
                           {rules && (
                             <Button
                               size="sm"

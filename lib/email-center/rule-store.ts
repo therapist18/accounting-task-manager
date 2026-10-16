@@ -1,4 +1,3 @@
-import { CATEGORY_BY_KEY } from "./categories"
 import { DEFAULT_SUBJECT_RULES, type RuleMatchType, type SubjectRule } from "./rules"
 import { withSupabaseRetry } from "./retry"
 import type { getServiceClient } from "./service"
@@ -133,7 +132,6 @@ export async function loadSubjectRules(sb: ReturnType<typeof getServiceClient>):
   }
 
   const rules: SubjectRule[] = (data ?? [])
-    .filter((r: any) => CATEGORY_BY_KEY.has(r.category_key))
     .map((r: any) => ({
       id: r.id,
       match_type: r.match_type as RuleMatchType,

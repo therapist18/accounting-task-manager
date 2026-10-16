@@ -11,7 +11,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { gmail_v1 } from "googleapis"
 import { getGmailClient, parseEmailHeaders } from "@/lib/gmail/client"
-import { CATEGORY_BY_KEY, KRA_JOB_LEVEL, type CategoryDef } from "./categories"
+import { CATEGORY_BY_KEY, categoryByKey, KRA_JOB_LEVEL, type CategoryDef } from "./categories"
 import { classifyByRules, detectApproval, extractPin, isAutomatedSender, isKraSender } from "./rules"
 import { loadSubjectRules } from "./rule-store"
 import { withRetry, withSupabaseRetry } from "./retry"
@@ -316,7 +316,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     }
     if (!kra && cheap?.categoryKey === "system_noise") return "skipped"
     if (kra && !threadCase && cheap && cheap.categoryKey) {
-      const cat = CATEGORY_BY_KEY.get(cheap.categoryKey)
+      const cat = await categoryByKey(sb, cheap.categoryKey)
       // Confidently an informational KRA email (acknowledgement, certificate, statement): nothing to track.
       if (cheap.confidence >= THRESHOLD && cat && cat.disposition === "update_only" && !cat.attaches_to_case) {
         return "skipped"
@@ -416,7 +416,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
     // "Ignore and delete" reached only via the full body/subject (the cheap, snippet-only pass above
     // missed it): drop it now, before going any further.
     if (rule?.action === "ignore" && rule.confidence >= THRESHOLD && rule.hardIgnore) return "skipped"
-    const ruleCat = rule && rule.categoryKey ? CATEGORY_BY_KEY.get(rule.categoryKey) : null
+    const ruleCat = rule && rule.categoryKey ? await categoryByKey(sb, rule.categoryKey) : null
     if (rule && rule.action === "ignore") {
       // An ignore rule matched. At/above the confidence threshold the mail is dropped (the cheap
       // path already handles fresh inbox mail); below it the subject goes to Needs Review instead.
@@ -439,7 +439,7 @@ export async function ingestMessage(ctx: Ctx, messageId: string): Promise<"inges
       confidence = Math.max(rule?.confidence ?? 0, 0.3)
     }
 
-    const category = CATEGORY_BY_KEY.get(categoryKey) ?? CATEGORY_BY_KEY.get("other_kra")!
+    const category = await categoryByKey(sb, categoryKey) ?? CATEGORY_BY_KEY.get("other_kra")!
     disposition = category.disposition
 
     // A notify match always lands in Needs Review flagged urgent — that IS its purpose. Don't let the

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { authorize, clientAttachments, companyNames, fail, userNames } from "@/lib/email-center/api"
-import { CATEGORY_BY_KEY } from "@/lib/email-center/categories"
+import { categoryByKey } from "@/lib/email-center/categories"
 import { RULE_COLUMNS_BASE, RULES_TABLE } from "@/lib/email-center/rule-store"
 import { APPROVAL_STATUSES } from "@/lib/email-center/types"
 
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest, { params }: Ctx) {
       if (rule) {
         createdByRule = {
           pattern: rule.pattern,
-          category_name: CATEGORY_BY_KEY.get(rule.category_key)?.name ?? rule.category_key,
+          category_name: (await categoryByKey(sb, rule.category_key))?.name ?? rule.category_key,
           is_active: !!rule.is_active,
         }
       }

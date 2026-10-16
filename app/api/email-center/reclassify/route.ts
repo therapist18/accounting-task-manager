@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import type { Actor } from "@/lib/email-center/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { authorize, fail } from "@/lib/email-center/api"
-import { CATEGORY_BY_KEY } from "@/lib/email-center/categories"
+import { categoryByKey } from "@/lib/email-center/categories"
 import { APPROVAL_DECISION_CATEGORIES, findCaseByThread, findOpenCaseByPin, openCaseFromEmail, toNairobiYmd } from "@/lib/email-center/ingest"
 import { classifyByRules, detectApproval, isAutomatedSender, isKraSender, type SubjectRule } from "@/lib/email-center/rules"
-import { loadSubjectRules } from "@/lib/email-center/rule-store"
+import { invalidateRulesCache, loadSubjectRules } from "@/lib/email-center/rule-store"
 import { AUTO_CONFIDENCE_THRESHOLD as THRESHOLD } from "@/lib/email-center/types"
 import { withSupabaseRetry } from "@/lib/supabaseRetry"
 
@@ -81,7 +81,9 @@ interface ReclassifyResult {
   deleted: number
   casesOpened: number
   failed: number
-  moved: Array<{ id: string; subject: string; category: string | null; disposition: string; case_opened: boolean }>
+  // `patch` is exactly what was written to the row (absent for a deleted one), so the client can merge
+  // it into its own copy instead of reloading every list to see what moved.
+  moved: Array<{ id: string; subject: string; category: string | null; disposition: string; case_opened: boolean; patch?: Record<string, unknown> }>
 }
 
 async function reclassifyEmails(
@@ -138,24 +140,20 @@ async function reclassifyEmails(
         // for "anything that isn't KRA", so this lives in code (mirrors the matching block in
         // ingest.ts). A reply that's genuinely part of an already-tracked case is left alone.
         if (!e.case_id && !isKraSender(e.sender_email) && !(await findCaseByThread(sb, e.gmail_thread_id))) {
-          const { error: upErr } = await withSupabaseRetry(() =>
-            sb
-              .from("emails")
-              .update({
-                category_key: "system_noise",
-                category_confidence: 0.5,
-                classification_source: "rule",
-                disposition: "ignore",
-                priority: "low",
-                review_reason: null,
-                classified_at: now,
-                updated_at: now,
-              })
-              .eq("id", e.id)
-          )
+          const patch = {
+            category_key: "system_noise",
+            category_confidence: 0.5,
+            classification_source: "rule",
+            disposition: "ignore",
+            priority: "low",
+            review_reason: null,
+            classified_at: now,
+            updated_at: now,
+          }
+          const { error: upErr } = await withSupabaseRetry(() => sb.from("emails").update(patch).eq("id", e.id))
           if (upErr) throw new Error(upErr.message)
           changed++
-          moved.push({ id: e.id, subject: e.subject, category: "system_noise", disposition: "ignore", case_opened: false })
+          moved.push({ id: e.id, subject: e.subject, category: "system_noise", disposition: "ignore", case_opened: false, patch })
         }
         return // otherwise stays in Needs Review
       }
@@ -182,25 +180,21 @@ async function reclassifyEmails(
           moved.push({ id: e.id, subject: e.subject, category: null, disposition: "deleted", case_opened: false })
           return
         }
-        const { error: upErr } = await withSupabaseRetry(() =>
-          sb
-            .from("emails")
-            .update({
-              category_key: "system_noise",
-              category_confidence: rule.confidence,
-              classification_source: "rule",
-              matched_rule_id: rule.ruleId ?? null,
-              disposition: "ignore",
-              priority: "low",
-              review_reason: null,
-              classified_at: now,
-              updated_at: now,
-            })
-            .eq("id", e.id)
-        )
+        const patch = {
+          category_key: "system_noise",
+          category_confidence: rule.confidence,
+          classification_source: "rule",
+          matched_rule_id: rule.ruleId ?? null,
+          disposition: "ignore",
+          priority: "low",
+          review_reason: null,
+          classified_at: now,
+          updated_at: now,
+        }
+        const { error: upErr } = await withSupabaseRetry(() => sb.from("emails").update(patch).eq("id", e.id))
         if (upErr) throw new Error(upErr.message)
         changed++
-        moved.push({ id: e.id, subject: e.subject, category: "system_noise", disposition: "ignore", case_opened: false })
+        moved.push({ id: e.id, subject: e.subject, category: "system_noise", disposition: "ignore", case_opened: false, patch })
         return
       }
 
@@ -208,29 +202,25 @@ async function reclassifyEmails(
       // notify_priority decides how loudly (urgent -> priority "urgent", informational/FYI -> "normal").
       if (rule.action === "notify") {
         const informational = rule.notifyPriority === "informational"
-        const { error: upErr } = await withSupabaseRetry(() =>
-          sb
-            .from("emails")
-            .update({
-              category_key: "notification",
-              category_confidence: rule.confidence,
-              classification_source: "rule",
-              matched_rule_id: rule.ruleId ?? null,
-              disposition: "needs_review",
-              priority: informational ? "normal" : "urgent",
-              review_reason: informational ? "Important notification (FYI) — no action needed." : "Important notification — requires attention.",
-              classified_at: now,
-              updated_at: now,
-            })
-            .eq("id", e.id)
-        )
+        const patch = {
+          category_key: "notification",
+          category_confidence: rule.confidence,
+          classification_source: "rule",
+          matched_rule_id: rule.ruleId ?? null,
+          disposition: "needs_review",
+          priority: informational ? "normal" : "urgent",
+          review_reason: informational ? "Important notification (FYI) — no action needed." : "Important notification — requires attention.",
+          classified_at: now,
+          updated_at: now,
+        }
+        const { error: upErr } = await withSupabaseRetry(() => sb.from("emails").update(patch).eq("id", e.id))
         if (upErr) throw new Error(upErr.message)
         changed++
-        moved.push({ id: e.id, subject: e.subject, category: "notification", disposition: "needs_review", case_opened: false })
+        moved.push({ id: e.id, subject: e.subject, category: "notification", disposition: "needs_review", case_opened: false, patch })
         return
       }
 
-      const cat = rule.categoryKey ? CATEGORY_BY_KEY.get(rule.categoryKey) : null
+      const cat = rule.categoryKey ? await categoryByKey(sb, rule.categoryKey) : null
       if (!cat || cat.disposition === "needs_review") return
 
       let disposition: string = cat.disposition
@@ -300,25 +290,21 @@ async function reclassifyEmails(
         }
       }
 
-      const { error: upErr } = await withSupabaseRetry(() =>
-        sb
-          .from("emails")
-          .update({
-            category_key: cat.key,
-            category_confidence: rule.confidence,
-            classification_source: "rule",
-            matched_rule_id: rule.ruleId ?? null,
-            disposition,
-            case_id: caseId,
-            review_reason: reviewReason,
-            classified_at: now,
-            updated_at: now,
-          })
-          .eq("id", e.id)
-      )
+      const patch = {
+        category_key: cat.key,
+        category_confidence: rule.confidence,
+        classification_source: "rule",
+        matched_rule_id: rule.ruleId ?? null,
+        disposition,
+        case_id: caseId,
+        review_reason: reviewReason,
+        classified_at: now,
+        updated_at: now,
+      }
+      const { error: upErr } = await withSupabaseRetry(() => sb.from("emails").update(patch).eq("id", e.id))
       if (upErr) throw new Error(upErr.message)
       changed++
-      moved.push({ id: e.id, subject: e.subject, category: cat.key, disposition, case_opened: caseOpened })
+      moved.push({ id: e.id, subject: e.subject, category: cat.key, disposition, case_opened: caseOpened, patch })
     } catch (err: any) {
       failed++
       console.error("[email-center] reclassify failed for", e.id, err)
@@ -351,6 +337,9 @@ export async function POST(request: NextRequest) {
       if (!ids.length || ids.length > RUN_MAX) {
         return NextResponse.json({ success: false, error: `Send between 1 and ${RUN_MAX} email ids.` }, { status: 400 })
       }
+      // Usually run straight after a rule was saved — possibly on another server instance, whose cached
+      // rules wouldn't have it yet. One extra query per batch is nothing next to the per-row writes.
+      invalidateRulesCache()
       const rules = await loadSubjectRules(sb)
       const { data: rows, error } = await withSupabaseRetry<any>(() =>
         applyScope(sb.from("emails").select("*").in("id", ids), scope)

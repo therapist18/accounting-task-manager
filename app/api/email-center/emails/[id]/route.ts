@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { authorize, clientAttachments, companyNames, fail, userNames } from "@/lib/email-center/api"
-import { CATEGORY_BY_KEY } from "@/lib/email-center/categories"
+import { CATEGORY_BY_KEY, categoryByKey } from "@/lib/email-center/categories"
 import { fetchMessageBody, openCaseFromEmail } from "@/lib/email-center/ingest"
 import { DISPOSITIONS, type Disposition } from "@/lib/email-center/types"
 
@@ -72,7 +72,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
 
     let category = null as ReturnType<typeof CATEGORY_BY_KEY.get> | null
     if (body.category_key) {
-      category = CATEGORY_BY_KEY.get(body.category_key) ?? null
+      category = await categoryByKey(sb, body.category_key) ?? null
       if (!category) return NextResponse.json({ success: false, error: "Unknown category." }, { status: 400 })
       patch.category_key = category.key
     }
@@ -97,7 +97,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     let caseId: string | null = email.case_id
     let newCase: Record<string, unknown> | null = null
     if (patch.disposition === "action_required" && !email.case_id) {
-      const current = CATEGORY_BY_KEY.get(email.category_key ?? "")
+      const current = email.category_key ? await categoryByKey(sb, email.category_key) : undefined
       const chosen = category ?? current
       const cat = chosen?.creates_case ? chosen : CATEGORY_BY_KEY.get("document_request")!
       const { caseRow } = await openCaseFromEmail(

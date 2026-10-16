@@ -9,37 +9,15 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { cn } from "@/lib/utils"
 import {
   appliesToCompany, classifyByRules, matchesSender, matchesSubject, stripReplyPrefix, subjectWordings,
-  type SubjectRule,
 } from "@/lib/email-center/rules"
 import { AUTO_CONFIDENCE_THRESHOLD } from "@/lib/email-center/types"
+import { toSubjectRule } from "./ruleSuggest"
 import { ruleOutcome, type CategoryOption, type RuleRow } from "./shared"
 
 // "Test a subject" — paste (or seed from a real email) a subject/sender and see which of the active
 // rules would catch it, run through the exact same engine (classifyByRules) ingestion and Reclassify
 // use, not a second hand-written approximation. Shared by the Rules tab's own toolbar button (a blank
 // test) and the Needs Review tab's per-row "Test" action (seeded from that email).
-
-// RuleRow (what the table edits) -> SubjectRule (what the real engine matches against) — just a field
-// reshape (null -> undefined for the two optional sender fields).
-function toSubjectRule(r: RuleRow): SubjectRule {
-  return {
-    id: r.id,
-    match_type: r.match_type,
-    pattern: r.pattern,
-    extra_patterns: r.extra_patterns,
-    category_key: r.category_key,
-    confidence: r.confidence,
-    is_ignore: r.is_ignore,
-    is_notify: r.is_notify,
-    hard_ignore: r.hard_ignore,
-    notify_priority: r.notify_priority,
-    sender_pattern: r.sender_pattern ?? undefined,
-    extra_sender_patterns: r.extra_sender_patterns,
-    sender_match_type: r.sender_match_type ?? undefined,
-    company_scope: r.company_scope,
-    company_ids: r.company_ids,
-  }
-}
 
 export function RuleTesterDialog({
   open,

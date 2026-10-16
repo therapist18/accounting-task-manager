@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronsUpDown, X } from "lucide-react";
+import { Check, ChevronsUpDown, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +37,7 @@ interface SearchableSelectProps {
   popoverClassName?: string;
   onOpenChange?: (open: boolean) => void;
   allowClear?: boolean;
+  onCreateOption?: (query: string) => void;
 }
 
 export function SearchableSelect({
@@ -52,6 +53,7 @@ export function SearchableSelect({
   popoverClassName,
   onOpenChange,
   allowClear = false,
+  onCreateOption,
 }: SearchableSelectProps) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
@@ -85,6 +87,9 @@ export function SearchableSelect({
   const selectedOption = React.useMemo(
     () => normalizedOptions.find((option) => option.value === value),
     [normalizedOptions, value]
+  );
+  const canCreate = !!onCreateOption && !!search.trim() && !normalizedOptions.some(
+    (option) => option.label.trim().toLowerCase() === search.trim().toLowerCase()
   );
 
   const handleOpenChange = (newOpen: boolean) => {
@@ -161,6 +166,21 @@ export function SearchableSelect({
                   </CommandItem>
                 ))}
               </CommandGroup>
+              {canCreate && (
+                <CommandGroup>
+                  <CommandItem
+                    value={`create:${search.trim()}`}
+                    onSelect={() => {
+                      onCreateOption?.(search.trim());
+                      setOpen(false);
+                    }}
+                    className="cursor-pointer border-t border-slate-100 font-medium text-custom-blue"
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Create “{search.trim()}”
+                  </CommandItem>
+                </CommandGroup>
+              )}
             </CommandList>
           </Command>
         </PopoverContent>

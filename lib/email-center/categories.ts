@@ -62,6 +62,24 @@ export const CATEGORIES: CategoryDef[] = [
 
 export const CATEGORY_BY_KEY = new Map(CATEGORIES.map((x) => [x.key, x]))
 
+// User-created notice types always behave like task-opening categories. The migration stores only
+// their key and label; this shared shape keeps the ingestion and reclassification paths consistent.
+export async function categoriesFor(sb: any): Promise<CategoryDef[]> {
+  const { data, error } = await sb.from("email_custom_task_types").select("key, name").order("name")
+  if (error) throw new Error(`Could not load custom task types: ${error.message}`)
+  return [...CATEGORIES, ...(data ?? []).map((row: { key: string; name: string }) =>
+    c(row.key, row.name, "#2563eb", "action_required", true, false)
+  )]
+}
+
+export async function categoryByKey(sb: any, key: string): Promise<CategoryDef | undefined> {
+  const builtin = CATEGORY_BY_KEY.get(key)
+  if (builtin) return builtin
+  const { data, error } = await sb.from("email_custom_task_types").select("key, name").eq("key", key).maybeSingle()
+  if (error) throw new Error(`Could not load task type: ${error.message}`)
+  return data ? c(data.key, data.name, "#2563eb", "action_required", true, false) : undefined
+}
+
 // Every email case belongs to this job level: department 2 (KRA), subdepartment 28 ("KRA ITAX EMAILS").
 // Stored on each email_case row so a case can later be promoted to a tm_tasks row without guessing.
 export const KRA_JOB_LEVEL = { level: 2, department_id: 2, subdepartment_id: 28 } as const

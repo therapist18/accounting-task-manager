@@ -16,7 +16,8 @@ import { TemplatesTab } from "./tabs/TemplatesTab"
 import { BillingTab } from "./tabs/BillingTab"
 import { HistoryTab } from "./tabs/HistoryTab"
 import { NotesTab } from "./tabs/NotesTab"
-import { GuidedApplication } from "./guided/GuidedApplication"
+import { OverviewTab } from "./tabs/OverviewTab"
+import { ApplicationGuideBar, type GuideStepId } from "./ApplicationGuideBar"
 
 interface JobWorkspaceProps {
   data: JobWorkspaceData
@@ -27,7 +28,7 @@ interface JobWorkspaceProps {
   initialRequirementId?: string
   initialOpenSendDialog?: boolean
   initialTemplateDocId?: string
-  /** "guided" opens the step-by-step application flow instead of the tabs */
+  /** "guided" shows the application guide bar (ApplicationGuideBar) over the tabs */
   initialMode?: string
 }
 
@@ -97,12 +98,21 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
   }
   const exitGuided = () => {
     setGuided(false)
+    setGuideStep(null)
     syncGuidedParams(false)
-    // Land on the automation matrix - the closest tab to where the user just was.
-    handleTabChange("automation")
   }
-  const [activeTab, setActiveTab] = useState(initialTab || "workflow")
-  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(new Set([initialTab || "workflow"]))
+  // Which guide step is open; each step is just one of the normal tabs (see ApplicationGuideBar).
+  const [guideStep, setGuideStep] = useState<GuideStepId | null>(null)
+  // The guide's Run step scrolls the Automation tab to this application's Run button.
+  const [automationHighlight, setAutomationHighlight] = useState<string | null>(null)
+  const handleGuideStep = (step: GuideStepId, tab: string) => {
+    setGuideStep(step)
+    handleTabChange(tab)
+    if (step === "run" && guidedAutomationId) setAutomationHighlight(guidedAutomationId)
+  }
+  // Overview is the job's home: what's left on it, and which tab each thing is done in.
+  const [activeTab, setActiveTab] = useState(initialTab || "overview")
+  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(new Set([initialTab || "overview"]))
   const [openReviewDraft, setOpenReviewDraft] = useState(false)
   const [openSendRequirements, setOpenSendRequirements] = useState(false)
   // Mutable versions of the URL-sourced deep-link targets, so a same-session jump
@@ -221,19 +231,6 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
   const statusLabel = task?.status?.replace("_", " ") || "Unknown"
   const clientDraft = task?.registry_metadata?.client_requirements_draft
 
-  if (guided) {
-    return (
-      <GuidedApplication
-        data={data}
-        automationId={guidedAutomationId}
-        automationJobs={automationJobs}
-        onAutomationChange={(id) => { setGuidedAutomationId(id || null); syncGuidedParams(true, id || null) }}
-        onExit={exitGuided}
-        onRefresh={onRefresh}
-      />
-    )
-  }
-
   return (
     <div className="h-screen flex flex-col bg-[#FAFAFC] overflow-hidden">
       <div className="h-1 bg-gradient-to-r from-custom-blue via-blue-400 to-blue-300" />
@@ -286,7 +283,7 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
                   {currentStage.name}
                 </Badge>
               )}
-              {data.automations?.length > 0 && (
+              {data.automations?.length > 0 && !guided && (
                 <Button
                   size="sm"
                   className="h-8 bg-custom-blue hover:bg-custom-blue/90 text-white"
@@ -300,6 +297,18 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
           </div>
         </div>
       </div>
+
+      {guided && (
+        <ApplicationGuideBar
+          data={data}
+          automationId={guidedAutomationId}
+          onAutomationChange={(id) => { setGuidedAutomationId(id || null); syncGuidedParams(true, id || null) }}
+          automationJobs={automationJobs}
+          step={guideStep}
+          onStepChange={handleGuideStep}
+          onExit={exitGuided}
+        />
+      )}
 
       {/* Tabs Row with actions aligned */}
       <div className="border-b border-slate-200 bg-white px-6 shrink-0 flex items-center justify-between z-10 shadow-sm">
@@ -378,7 +387,16 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
         {visitedTabs.has("overview") && (
           <div className={cn("h-full overflow-y-auto", activeTab !== "overview" && "hidden")}>
             <div className="p-6">
-              <OverviewTabContent data={data} />
+              <OverviewTab
+                data={data}
+                requirementsSummary={requirementsSummary}
+                templatesSummary={templatesSummary}
+                automationJobs={automationJobs}
+                stageProgress={stageProgress}
+                currentStage={currentStage}
+                onGoToTab={handleTabChange}
+                onStartApplication={(id) => enterGuided(id)}
+              />
             </div>
           </div>
         )}
@@ -418,7 +436,8 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
             <AutomationTab
               data={data}
               onRefresh={onRefresh}
-              highlightAutomationId={activeTab === "automation" ? initialAutomationId : undefined}
+              highlightAutomationId={activeTab === "automation" ? (automationHighlight ?? initialAutomationId) : undefined}
+              focusAutomationId={guided ? guidedAutomationId : undefined}
               onNavigateToRequirement={handleNavigateToRequirement}
               onNavigateToTemplate={handleNavigateToTemplate}
               automationJobs={automationJobs}
@@ -440,149 +459,6 @@ export function JobWorkspace({ data, onBack, onRefresh, initialTab, initialAutom
           </div>
         )}
       </div>
-    </div>
-  )
-}
-
-// --- Overview Tab ---
-function OverviewTabContent({ data }: { data: JobWorkspaceData }) {
-  const { task, stages, individual, department, subdepartment } = data
-  const currentStage = getCurrentStage(task, stages)
-  const progress = getStageProgress(task, stages)
-
-  const company = task?.participants_details?.find((p: any) => p.type === "company")
-  const sponsor = task?.participants_details?.find((p: any) =>
-    p.role?.includes("sponsor") || p.role?.includes("company")
-  )
-  const taskManager = task?.participants_details?.find((p: any) => p.role?.includes("task_manager"))
-
-  return (
-    <div className="max-w-4xl space-y-5 pb-8">
-      {/* Job Details Card */}
-      <Card className="border-slate-200 shadow-sm overflow-hidden">
-        <div className="h-0.5 bg-gradient-to-r from-custom-blue via-blue-400 to-blue-300" />
-        <CardHeader className="pb-2 px-5 pt-4">
-          <div className="flex items-center gap-2">
-            <Briefcase className="h-4 w-4 text-custom-blue" />
-            <CardTitle className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Job Details</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent className="px-5 pb-4">
-          <div className="grid grid-cols-2 gap-x-10 gap-y-3 text-base">
-            <div className="flex justify-between items-center py-1 border-b border-slate-50">
-              <span className="text-slate-500 flex items-center gap-1.5"><User className="h-3.5 w-3.5 text-slate-400" /> Applicant</span>
-              <span className="font-medium text-slate-800 text-right">{task?.applicant_name}</span>
-            </div>
-            <div className="flex justify-between items-center py-1 border-b border-slate-50">
-              <span className="text-slate-500 flex items-center gap-1.5"><Hash className="h-3.5 w-3.5 text-slate-400" /> R Number</span>
-              <span className="font-medium text-slate-800 text-right">{individual?.r_number || task?.r_number || "N/A"}</span>
-            </div>
-            <div className="flex justify-between items-center py-1 border-b border-slate-50">
-              <span className="text-slate-500 flex items-center gap-1.5"><Globe className="h-3.5 w-3.5 text-slate-400" /> Nationality</span>
-              <span className="font-medium text-slate-800 text-right">{individual?.nationality || task?.nationality || "N/A"}</span>
-            </div>
-            <div className="flex justify-between items-center py-1 border-b border-slate-50">
-              <span className="text-slate-500 flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5 text-slate-400" /> Date of Birth</span>
-              <span className="font-medium text-slate-800 text-right">{individual?.date_of_birth ? new Date(individual.date_of_birth).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "N/A"}</span>
-            </div>
-            <div className="flex justify-between items-center py-1 border-b border-slate-50">
-              <span className="text-slate-500 flex items-center gap-1.5"><FileText className="h-3.5 w-3.5 text-slate-400" /> Passport No.</span>
-              <span className="font-medium text-slate-800 text-right">{individual?.passport_number || "N/A"}</span>
-            </div>
-            <div className="flex justify-between items-center py-1 border-b border-slate-50">
-              <span className="text-slate-500 flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5 text-slate-400" /> Status</span>
-              <span className={cn("font-medium capitalize text-right", task?.status === "cancelled" ? "text-red-600" : task?.status === "completed" ? "text-green-600" : "text-slate-800")}>{task?.status?.replace("_", " ") || "N/A"}</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Assignment Card */}
-      <Card className="border-slate-200 shadow-sm overflow-hidden">
-        <div className="h-0.5 bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-200" />
-        <CardHeader className="pb-2 px-5 pt-4">
-          <div className="flex items-center gap-2">
-            <Building2 className="h-4 w-4 text-amber-600" />
-            <CardTitle className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Assignment &amp; Company</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent className="px-5 pb-4">
-          <div className="grid grid-cols-2 gap-x-10 gap-y-3 text-base">
-            <div className="flex justify-between items-center py-1 border-b border-slate-50">
-              <span className="text-slate-500">Department</span>
-              <span className="font-medium text-slate-800 text-right">{department?.name || "N/A"}</span>
-            </div>
-            <div className="flex justify-between items-center py-1 border-b border-slate-50">
-              <span className="text-slate-500">Subdepartment</span>
-              <span className="font-medium text-slate-800 text-right">{subdepartment?.name || "N/A"}</span>
-            </div>
-            <div className="flex justify-between items-center py-1 border-b border-slate-50">
-              <span className="text-slate-500">Officer</span>
-              <span className="font-medium text-slate-800 text-right">{task?.officer?.name || "Unassigned"}</span>
-            </div>
-            <div className="flex justify-between items-center py-1 border-b border-slate-50">
-              <span className="text-slate-500">Task Manager</span>
-              <span className="font-medium text-slate-800 text-right">{taskManager?.name || "N/A"}</span>
-            </div>
-            <div className="flex justify-between items-center py-1 border-b border-slate-50">
-              <span className="text-slate-500">Sponsor / Company</span>
-              <span className="font-medium text-slate-800 text-right">{sponsor?.name || company?.name || "N/A"}</span>
-            </div>
-            <div className="flex justify-between items-center py-1 border-b border-slate-50">
-              <span className="text-slate-500">Created</span>
-              <span className="font-medium text-slate-800 text-right">{task?.created_at ? new Date(task.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "N/A"}</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Progress Card */}
-      <Card className="border-slate-200 shadow-sm overflow-hidden">
-        <div className="h-0.5 bg-gradient-to-r from-green-400 via-green-300 to-emerald-200" />
-        <CardHeader className="pb-2 px-5 pt-4">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-green-600" />
-            <CardTitle className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Progress</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent className="px-5 pb-4">
-          <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden mb-2">
-            <div className="h-full bg-gradient-to-r from-green-400 to-emerald-500 rounded-full transition-all duration-700" style={{ width: `${progress.percentage}%` }} />
-          </div>
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-sm text-slate-500">{progress.completed}/{progress.total} stages completed</p>
-            <span className="text-sm font-bold text-slate-700">{progress.percentage}%</span>
-          </div>
-          {currentStage && (
-            <div className="p-3.5 bg-blue-50/80 rounded-lg border border-blue-100">
-              <div className="flex items-center gap-2 mb-1">
-                <Clock className="h-3.5 w-3.5 text-blue-600" />
-                <p className="text-sm font-semibold text-blue-700">Current Stage: {currentStage.name}</p>
-              </div>
-              {currentStage.description && <p className="text-sm text-blue-500 mt-1 ml-5 leading-relaxed">{currentStage.description}</p>}
-            </div>
-          )}
-          {stages.length > 0 && (
-            <div className="mt-3 space-y-1.5">
-              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Stage Overview</p>
-              <div className="flex flex-wrap gap-1.5">
-                {[...stages].sort((a, b) => (a.order_num ?? 0) - (b.order_num ?? 0)).map((s) => {
-                  const done = task?.stages?.[s.id]?.status === "completed"
-                  return (
-                    <Badge key={s.id} variant="outline" className={cn(
-                      "text-[9px] px-1.5 py-0 font-medium",
-                      done ? "bg-green-50 text-green-700 border-green-200" : "bg-slate-50 text-slate-500 border-slate-200"
-                    )}>
-                      {done ? <CheckCircle2 className="h-2.5 w-2.5 mr-1" /> : <Clock className="h-2.5 w-2.5 mr-1" />}
-                      {s.name}
-                    </Badge>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   )
 }

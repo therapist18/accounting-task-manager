@@ -181,6 +181,7 @@ export function RulesPanel({
   search,
   onRulesChange,
   onRuleCreated,
+  onRuleEdited,
 }: {
   rules: RuleRow[]
   source: "database" | "builtin"
@@ -191,6 +192,8 @@ export function RulesPanel({
   search: string
   onRulesChange: (update: (prev: RuleRow[]) => RuleRow[]) => void
   onRuleCreated?: (rule: RuleRow) => void
+  /** An existing rule changed in a way that affects classification (edited, or turned on/off). */
+  onRuleEdited?: (rule: RuleRow, change: RuleChange) => void
 }) {
   const readOnly = source === "builtin"
   const companyNames = useMemo(() => Object.fromEntries(companies.map((c) => [String(c.id), c.company_name])), [companies])
@@ -233,6 +236,20 @@ export function RulesPanel({
   const { visible: visibleCols, isVisible, toggle: toggleColumn, showAll } = useColumnVisibility(TOGGLEABLE_COLUMNS)
   const [showStats, setShowStats] = useState(false)
   const colCount = 2 + TOGGLEABLE_COLUMNS.filter((c) => isVisible(c.id)).length
+
+  // Sticky left block: #, Order, Match and Subject wordings stay put while the other columns scroll.
+  // Fixed widths make the offsets exact; Order/Match can be hidden, so each offset adds up only the
+  // pinned columns actually shown to its left.
+  const pinned = useMemo(() => {
+    const widths = { index: 64, order: 96, match: 128, pattern: 280 }
+    const box = (left: number, width: number): React.CSSProperties => ({ position: "sticky", left, width, minWidth: width, maxWidth: width })
+    let left = 0
+    const index = box(left, widths.index); left += widths.index
+    const order = box(left, widths.order); if (isVisible("order")) left += widths.order
+    const match = box(left, widths.match); if (isVisible("match")) left += widths.match
+    const pattern = box(left, widths.pattern)
+    return { index, order, match, pattern }
+  }, [isVisible])
 
   // "Test a subject" — same idea as the per-rule "Try it" box, but run against every active rule at
   // once via the real engine (classifyByRules), so the answer is exactly what ingestion/Reclassify
@@ -342,9 +359,12 @@ export function RulesPanel({
     setSaving(true)
     try {
       if (draft.id) {
+        const before = rules.find((r) => r.id === draft.id)
         const res = await api<{ rule: RuleRow }>(`/api/email-center/rules/${draft.id}`, { method: "PATCH", body: JSON.stringify(payload) })
         onRulesChange((prev) => prev.map((r) => (r.id === draft.id ? res.rule : r)))
         toast.success("Rule updated.")
+        // A notes-only edit changes nothing about what the rule matches; anything else can.
+        if (!before || affectsClassification(before, res.rule)) onRuleEdited?.(res.rule, "edited")
       } else {
         const res = await api<{ rule: RuleRow }>("/api/email-center/rules", { method: "POST", body: JSON.stringify(payload) })
         onRulesChange((prev) => [...prev, res.rule])
@@ -363,6 +383,7 @@ export function RulesPanel({
     onRulesChange((prev) => prev.map((x) => (x.id === r.id ? { ...x, is_active } : x)))
     try {
       await api(`/api/email-center/rules/${r.id}`, { method: "PATCH", body: JSON.stringify({ is_active }) })
+      onRuleEdited?.({ ...r, is_active }, is_active ? "activated" : "deactivated")
     } catch (e: any) {
       onRulesChange((prev) => prev.map((x) => (x.id === r.id ? { ...x, is_active: r.is_active } : x)))
       toast.error(e.message)
@@ -472,10 +493,10 @@ export function RulesPanel({
           <table className="w-full min-w-[1420px] border-separate border-spacing-0 text-base">
             <thead className="sticky top-0 z-30 bg-white shadow-xs">
               <tr>
-                <SortTh tone="blue" id="#" levels={levels} onSort={toggle} className="w-16 text-center">#</SortTh>
-                {isVisible("order") && <SortTh tone="blue" id="order" levels={levels} onSort={toggle} className="w-24 text-left">Order</SortTh>}
-                {isVisible("match") && <SortTh tone="blue" id="match" levels={levels} onSort={toggle} filter={configFor("match")} className="w-32 text-left">Match</SortTh>}
-                {isVisible("pattern") && <SortTh tone="blue" id="pattern" levels={levels} onSort={toggle} className="min-w-[260px] text-left">Subject wordings</SortTh>}
+                <SortTh tone="blue" id="#" levels={levels} onSort={toggle} className="text-center z-40" style={pinned.index}>#</SortTh>
+                {isVisible("order") && <SortTh tone="blue" id="order" levels={levels} onSort={toggle} className="text-left z-40" style={pinned.order}>Order</SortTh>}
+                {isVisible("match") && <SortTh tone="blue" id="match" levels={levels} onSort={toggle} filter={configFor("match")} className="text-left z-40" style={pinned.match}>Match</SortTh>}
+                {isVisible("pattern") && <SortTh tone="blue" id="pattern" levels={levels} onSort={toggle} className={cn("text-left z-40", PINNED_EDGE_LEFT)} style={pinned.pattern}>Subject wordings</SortTh>}
                 {isVisible("sender") && <SortTh tone="blue" id="sender" levels={levels} onSort={toggle} className="min-w-[200px] text-left">Sender</SortTh>}
                 {isVisible("sender_match") && <SortTh tone="blue" id="sender_match" levels={levels} onSort={toggle} filter={configFor("sender_match")} className="w-32 text-left">Sender match</SortTh>}
                 {isVisible("companies") && <SortTh tone="blue" id="companies" levels={levels} onSort={toggle} filter={configFor("companies")} className="min-w-[200px] text-left">Applies to</SortTh>}
@@ -486,7 +507,7 @@ export function RulesPanel({
                 {isVisible("notes") && <SortTh tone="blue" id="notes" levels={levels} onSort={toggle} className="min-w-[200px] text-left">Notes</SortTh>}
                 {isVisible("created") && <SortTh tone="blue" id="created" levels={levels} onSort={toggle} filter={configFor("created")} className="w-44 text-left">Created</SortTh>}
                 {isVisible("changed") && <SortTh tone="blue" id="changed" levels={levels} onSort={toggle} filter={configFor("changed")} className="w-44 text-left">Last changed</SortTh>}
-                <SortTh tone="blue" id="actions" levels={levels} onSort={toggle} className="w-32 border-r-0 text-left">Actions</SortTh>
+                <SortTh tone="blue" id="actions" levels={levels} onSort={toggle} className={cn("w-32 border-r-0 text-left z-40", PINNED_RIGHT)}>Actions</SortTh>
               </tr>
               {showStats && <StatsRows rows={filtered} columns={statsRowColumns} />}
             </thead>
@@ -497,17 +518,17 @@ export function RulesPanel({
                 const auto = r.confidence >= 0.8
                 return (
                   <tr key={r.id} className={cn("transition-colors", zebraRow(index), !r.is_active && "opacity-60")}>
-                    <td className={cn(TD_CLASS, "text-center text-slate-400 tabular-nums font-medium")}>{index + 1}</td>
-                    {isVisible("order") && <td className={cn(TD_CLASS, "tabular-nums font-medium")}>{r.sort_order}</td>}
+                    <td className={cn(TD_CLASS, "text-center text-slate-400 tabular-nums font-medium", PINNED_BODY)} style={pinned.index}>{index + 1}</td>
+                    {isVisible("order") && <td className={cn(TD_CLASS, "tabular-nums font-medium", PINNED_BODY)} style={pinned.order}>{r.sort_order}</td>}
                     {isVisible("match") && (
-                    <td className={TD_CLASS}>
+                    <td className={cn(TD_CLASS, PINNED_BODY)} style={pinned.match}>
                       <span className={cn("text-sm font-semibold px-2.5 py-0.5 rounded-full border", r.match_type === "regex" ? "bg-violet-50 text-violet-700 border-violet-200" : "bg-slate-100 text-slate-700 border-slate-200")}>
                         {r.match_type === "regex" ? "Regex" : "Contains"}
                       </span>
                     </td>
                     )}
                     {isVisible("pattern") && (
-                    <td className={cn(TD_CLASS, "text-sm text-slate-800 break-all")}>
+                    <td className={cn(TD_CLASS, "text-sm text-slate-800 break-all", PINNED_BODY, PINNED_EDGE_LEFT)} style={pinned.pattern}>
                       {(() => {
                         const wordings = [r.pattern, ...(r.extra_patterns ?? [])].filter(Boolean)
                         // Plain "contains" wordings read as ordinary sentences; only a genuine regex line
@@ -636,7 +657,7 @@ export function RulesPanel({
                       <div className="text-sm text-slate-400">{r.updated_at ? fmtDateTime(r.updated_at) : r.created_at ? fmtDateTime(r.created_at) : "—"}</div>
                     </td>
                     )}
-                    <td className={cn(TD_CLASS, "border-r-0")}>
+                    <td className={cn(TD_CLASS, "border-r-0", PINNED_RIGHT, PINNED_BODY)}>
                       <div className="flex items-center gap-1.5">
                         <Button variant="outline" size="sm" disabled={readOnly} onClick={() => openEdit(r)} className="h-9 w-9 p-0 rounded-md border-slate-200" title="Edit rule">
                           <Pencil className="w-4 h-4 text-slate-600" />
@@ -1065,3 +1086,22 @@ export function RulesPanel({
     </div>
   )
 }
+
+export type RuleChange = "edited" | "activated" | "deactivated"
+
+// Everything that decides which mail a rule matches and what it does with it - i.e. everything except
+// notes. Changing any of these can reclassify mail that's already sorted, so the page offers a re-run.
+const CLASSIFYING_FIELDS = [
+  "pattern", "extra_patterns", "match_type", "sender_pattern", "extra_sender_patterns", "sender_match_type",
+  "company_scope", "company_ids", "category_key", "confidence", "sort_order", "is_active",
+  "is_ignore", "hard_ignore", "is_notify", "notify_priority",
+] as const
+
+function affectsClassification(before: RuleRow, after: RuleRow): boolean {
+  return CLASSIFYING_FIELDS.some((field) => JSON.stringify((before as any)[field] ?? null) !== JSON.stringify((after as any)[field] ?? null))
+}
+
+// Pinned cells take their row's (opaque) zebra colour so scrolled content never shows through.
+const PINNED_BODY = "z-10 bg-inherit"
+const PINNED_EDGE_LEFT = "shadow-[6px_0_8px_-6px_rgba(15,23,42,0.18)]"
+const PINNED_RIGHT = "sticky right-0 shadow-[-6px_0_8px_-6px_rgba(15,23,42,0.18)]"

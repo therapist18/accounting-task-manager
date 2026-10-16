@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/lib/hooks/use-toast"
 import { ToastAction } from "@/components/ui/toast"
-import { getImmigrationAlerts, IMMIGRATION_ALERTS_PATH, type ImmigrationAlert } from "@/lib/immigrationAlerts"
+import { ALERTS_REFRESH_MS, IMMIGRATION_ALERTS_PATH, immigrationAlertsResource, type ImmigrationAlert } from "@/lib/immigrationAlerts"
 
 // Tells everyone when someone's Current Immigration Status enters its grace period or expires,
 // wherever they are in the app — same shape as TaskBasketNotifier.
@@ -16,7 +16,26 @@ import { getImmigrationAlerts, IMMIGRATION_ALERTS_PATH, type ImmigrationAlert } 
 // running with the window closed (tray) and the app starts with Windows, so alerts arrive without
 // anyone opening the window.
 
-const POLL_MS = 2 * 60 * 1000
+const POLL_MS = ALERTS_REFRESH_MS
+// Shared by every window/tab of the app (the desktop app opens extra windows): whichever checked most
+// recently records it here, and the others skip their turn instead of all asking at once.
+const LAST_CHECK_KEY = "tm.immigrationAlerts.lastCheck"
+
+function checkedRecentlyElsewhere(): boolean {
+  try {
+    return Date.now() - Number(window.localStorage.getItem(LAST_CHECK_KEY) || 0) < POLL_MS
+  } catch {
+    return false
+  }
+}
+
+function markChecked() {
+  try {
+    window.localStorage.setItem(LAST_CHECK_KEY, String(Date.now()))
+  } catch {
+    // Storage unavailable: this window just checks on its own schedule.
+  }
+}
 const SEEN_KEY = "immigrationAlerts.notifiedKeys.v2"
 const ASKED_PERMISSION_KEY = "taskBasket.askedNotificationPermission.v1" // shared: one prompt for both notifiers
 
@@ -95,9 +114,15 @@ export default function ImmigrationAlertsNotifier({ userId }: { userId: string }
 
     const check = async () => {
       if (busyRef.current || cancelled) return
+      // Another window (or this one, on a quick refocus) checked within the interval - its result
+      // already reached the shared "seen" list, so there's nothing new to announce yet.
+      if (!immigrationAlertsResource.isFresh() && checkedRecentlyElsewhere()) return
       busyRef.current = true
       try {
-        const { alerts } = await getImmigrationAlerts()
+        // Fresh within the interval → served from the shared copy, no request.
+        const alreadyFresh = immigrationAlertsResource.isFresh()
+        const { alerts } = await immigrationAlertsResource.load()
+        if (!alreadyFresh) markChecked()
         if (cancelled) return
         const seen = readSeen(userId)
         // The first run on an install only records what's already open: announcing every person

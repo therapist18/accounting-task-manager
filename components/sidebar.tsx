@@ -6,7 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { AppWindow, BarChart3, BookOpen, Calendar, CheckSquare, ChevronDown, ChevronRight, Database, FileText, LayoutDashboard, LogOut, Mail, Moon, PanelLeftClose, PanelLeftOpen, PlusCircle, Search, Settings, Settings2, ShieldAlert, Sun, Users, X } from "lucide-react";
+import { AppWindow, BarChart3, BookOpen, Calendar, CheckSquare, ChevronDown, ChevronRight, Database, FileText, LayoutDashboard, LogOut, Mail, Moon, PanelLeftClose, PanelLeftOpen, PlusCircle, Receipt, Search, Settings, Settings2, ShieldAlert, Sun, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,7 @@ import { clearSessionCache } from "@/lib/sessionCache";
 const navItems = [
     { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard, permission: "dashboard.view" },
     { title: "KRA Email Center", href: "/dashboard/emails", icon: Mail, permission: "emails.view" },
+    { title: "Quotations", href: "/dashboard/quotations", icon: Receipt, permission: "quotations.view" },
     // No permission: immigration alerts are for everyone signed in.
     { title: "Immigration Alerts", href: "/dashboard/immigration-alerts", icon: ShieldAlert },
     {

@@ -14,6 +14,8 @@ export const IMMIGRATION_BUCKET = "immigration"
 export const NOTIFICATION_PDF_PREFIX = "daily-extractions/notification_pdfs"
 export const PAYMENT_PDF_PREFIX = "daily-extractions/payment_instructions"
 
+export const IMMIGRATION_NOTIFICATIONS_PATH = "/dashboard/immigration-notifications"
+
 // The storage path of an item's source PDF inside the immigration bucket, or null when the row
 // carries no file name. Kept here (not in the mapper) so the filing job can download the exact
 // same object the page links to, without re-deriving the prefix.
@@ -370,6 +372,25 @@ async function fetchAll(supabase: SupabaseClientLike, table: string): Promise<Re
   return rows
 }
 
+// The rows one table gained after `sinceIso`, newest first. Newest-first matters when the limit
+// bites: it then drops the oldest of a burst, and the next poll's window still covers them, so a
+// big run is announced a poll late rather than never.
+async function fetchRowsSince(
+  supabase: SupabaseClientLike,
+  table: string,
+  sinceIso: string,
+  limit: number,
+): Promise<Record<string, any>[]> {
+  const { data, error } = await supabase
+    .from(table)
+    .select("*")
+    .gt("created_at", sinceIso)
+    .order("created_at", { ascending: false })
+    .limit(limit)
+  if (error) throw new Error(`${table}: ${error.message}`)
+  return (data ?? []) as Record<string, any>[]
+}
+
 // Everything, newest record first. The two tables together are only a few thousand rows, so like
 // Immigration Alerts this fetches once and lets the tabs/search/column filters re-slice in memory.
 export async function fetchImmigrationItems(): Promise<ImmigrationItem[]> {
@@ -387,5 +408,29 @@ export async function fetchImmigrationItems(): Promise<ImmigrationItem[]> {
     const bk = b.iso || b.dateIso
     return bk.localeCompare(ak)
   })
+  return items
+}
+
+/**
+ * Only what arrived after `sinceIso` — the background notifier's poll.
+ *
+ * Same mapper, same newest-first order, but bounded by the window instead of by the tables: after
+ * the first couple of minutes that is a handful of rows, so it can ask every couple of minutes
+ * without pulling the whole pair of tables the way the page does.
+ */
+export async function fetchImmigrationItemsSince(
+  sinceIso: string,
+  { limit = 200 }: { limit?: number } = {},
+): Promise<ImmigrationItem[]> {
+  const supabase = getClientSupabaseInstance()
+  const [notifications, payments] = await Promise.all([
+    fetchRowsSince(supabase, "immigration_notifications", sinceIso, limit),
+    fetchRowsSince(supabase, "immigration_payments", sinceIso, limit),
+  ])
+  const items = [
+    ...notifications.map((r) => mapNotification(asRecord(r))),
+    ...payments.map((r) => mapPayment(asRecord(r))),
+  ]
+  items.sort((a, b) => (b.iso || b.dateIso).localeCompare(a.iso || a.dateIso))
   return items
 }

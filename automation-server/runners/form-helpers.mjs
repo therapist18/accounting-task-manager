@@ -251,7 +251,9 @@ async function handleDropdown(element, value, fieldName) {
     async function downloadFile(url, outputPath) {
         if (!url) throw new Error('URL is required');
         url = url.replace(/\s+/g, '').replace(/%20\//g, '/').replace(/\/%20/g, '/');
-        const tempPath = outputPath || path.join(__dirname, `temp_${Date.now()}_${path.basename(url).split('?')[0]}`);
+        // Random part: documents are downloaded in parallel, and two of them can share a file name
+        // (e.g. the same sponsor letter as invitation and host ID) within the same millisecond.
+        const tempPath = outputPath || path.join(__dirname, `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${path.basename(url).split('?')[0]}`);
         return new Promise((resolve, reject) => {
             const protocol = url.startsWith('https') ? https : http;
             const file = fs.createWriteStream(tempPath);

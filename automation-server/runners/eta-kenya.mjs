@@ -276,13 +276,13 @@ export async function runEtaKenyaAutomation(requestData, jobId = null, hooks = {
                 '--disable-dev-shm-usage',
                 '--no-first-run',
                 '--no-default-browser-check',
-                // Park the window just off-screen rather than hidden or
-                // minimised. Off-screen keeps it genuinely headful - the portal's
-                // canvas/date widgets and upload steps behave differently when
-                // the page believes it is not visible - without a headed window
-                // stealing focus from the app window the user is typing in.
-                '--window-position=-32000,-32000',
-                '--window-size=1920,1080'
+                // A normal, visible, maximized window. It used to be parked
+                // off-screen (-32000,-32000) to avoid stealing focus, but then
+                // staff saw it in the taskbar and could neither bring it up nor
+                // maximize it - and a run you can't watch looks like it never
+                // started. Visible also keeps the portal's widgets happy (they
+                // behave differently when the page believes it is hidden).
+                '--start-maximized'
             ]
         });
         // Store browser reference on job so stopJob() can close it
@@ -291,7 +291,9 @@ export async function runEtaKenyaAutomation(requestData, jobId = null, hooks = {
 
         const context = await browser.newContext({
             userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-            viewport: { width: 1920, height: 1080 },
+            // Follow the real window size, so maximizing/resizing actually resizes the page
+            // instead of leaving a fixed 1920x1080 page inside it.
+            viewport: null,
             locale: 'en-US',
             timezoneId: 'Africa/Nairobi',
             acceptDownloads: true
@@ -340,15 +342,18 @@ export async function runEtaKenyaAutomation(requestData, jobId = null, hooks = {
             }
             return rawPath;
         };
-        const uploads = {
-            passport: await prepareFile(data.passportBiodataPath, 'Passport'),
-            selfie: await prepareFile(data.photoPath || data.selfiePath, 'Selfie'),
-            airline: await prepareFile(data.airlineBookingPath, 'Airline'),
-            hotel: await prepareFile(data.accommodationBookingPath, 'Hotel'),
-            employer: await prepareFile(data.employerLetterPath, 'Employer Letter'),
-            invitation: await prepareFile(data.invitationLetterPath, 'Invitation'),
-            hostId: await prepareFile(data.hostIdPath, 'Host ID')
-        };
+        // All at once rather than one after another - they're independent, and in sequence the
+        // six or seven downloads added ~10-15s before the portal steps could start.
+        const [passport, selfie, airline, hotel, employer, invitation, hostId] = await Promise.all([
+            prepareFile(data.passportBiodataPath, 'Passport'),
+            prepareFile(data.photoPath || data.selfiePath, 'Selfie'),
+            prepareFile(data.airlineBookingPath, 'Airline'),
+            prepareFile(data.accommodationBookingPath, 'Hotel'),
+            prepareFile(data.employerLetterPath, 'Employer Letter'),
+            prepareFile(data.invitationLetterPath, 'Invitation'),
+            prepareFile(data.hostIdPath, 'Host ID'),
+        ]);
+        const uploads = { passport, selfie, airline, hotel, employer, invitation, hostId };
 
         if (!uploads.passport) {
             throw new Error('Missing required document: passportBiodataPath (job cannot proceed past the passport upload page without it)');

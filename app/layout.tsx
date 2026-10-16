@@ -23,7 +23,7 @@ export default function RootLayout({
       <head>
         <meta name="referrer" content="no-referrer" />
       </head>
-      <body className={inter.className}>
+      <body className={`${inter.className} antialiased`}>
         {/* Desktop app only: lets the frameless window be dragged on pages with no header (login). */}
         <div data-desktop-drag-strip aria-hidden="true" />
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>

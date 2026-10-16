@@ -29,7 +29,8 @@ export interface RuleInput {
 // category for classify rules, are required); a partial edit only validates the fields that were sent.
 export function parseRuleBody(
   raw: unknown,
-  partial: boolean
+  partial: boolean,
+  allowedCategoryKeys: ReadonlySet<string> = new Set(CATEGORY_BY_KEY.keys())
 ): { ok: true; value: RuleInput } | { ok: false; error: string } {
   const body = (raw ?? {}) as Record<string, unknown>
   const value: RuleInput = {}
@@ -104,7 +105,7 @@ export function parseRuleBody(
     value.sender_match_type = body.sender_match_type
   }
   if ("category_key" in body) {
-    if (typeof body.category_key !== "string" || !CATEGORY_BY_KEY.has(body.category_key)) return { ok: false, error: "Unknown category." }
+    if (typeof body.category_key !== "string" || !allowedCategoryKeys.has(body.category_key)) return { ok: false, error: "Unknown category." }
     value.category_key = body.category_key
   }
   if ("confidence" in body) {
