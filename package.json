@@ -15,7 +15,7 @@
     "desktop:dev": "electron .",
     "desktop:build": "npm run icons && npm run desktop:prepare && electron-builder",
     "dist:win": "npm run icons && npm run desktop:prepare && electron-builder --win nsis portable",
-    "release": "npm run icons && npm run desktop:prepare && electron-builder --win nsis --publish always",
+    "release": "node scripts/release.mjs",
     "postinstall": "echo 'Skipping Playwright install in CI/CD...'",
     "check:automation-schema": "node scripts/check-automation-schema.mjs",
     "setup-local": "npx playwright install chromium"
