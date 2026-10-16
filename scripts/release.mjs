@@ -1,10 +1,15 @@
 // Builds the Windows installer and publishes it to GitHub Releases, where
 // installed copies of the app look for updates (see "publish" in package.json).
 //
-// GitHub refuses to create a published release whose tag doesn't exist yet
-// ("Published releases must have a valid tag"), and electron-builder only sends
-// a tag name. So the tag v<version> is created here first, on the releases
-// repo's default branch, and electron-builder then attaches the files to it.
+// electron-builder can't be left to create the release itself:
+//   - GitHub refuses a published release whose tag doesn't exist yet
+//     ("Published releases must have a valid tag"), and it only sends a name.
+//   - It uploads the installer, blockmap and latest.yml in parallel, and each
+//     upload that finds no release creates its own - leaving duplicates.
+// So this script creates the tag and a single draft release up front,
+// electron-builder (releaseType "draft") uploads everything into that draft,
+// and only then is it published. Installed apps never see a half-uploaded
+// release, because the updater ignores drafts.
 //
 // Needs GH_TOKEN: a token with Contents: Read and write on the releases repo.
 import { spawnSync } from "node:child_process";
@@ -42,8 +47,9 @@ async function github(method, url, body) {
   return { status: response.status, payload };
 }
 
-// An existing release for this version means the version wasn't bumped -
-// installed apps would never see the "new" build as an update.
+// A published release for this version means the version wasn't bumped -
+// installed apps would never see the "new" build as an update. (Drafts aren't
+// returned by this endpoint; a leftover one from a failed run is reused below.)
 const existing = await github("GET", `/releases/tags/${tag}`);
 if (existing.status === 200) {
   fail(`${tag} is already released. Bump "version" in package.json before releasing again.`);
@@ -71,6 +77,25 @@ if (tagRef.status === 404) {
   console.log(`[release] tag ${tag} already exists`);
 }
 
+// Reuse a draft left by an earlier failed run, otherwise create one.
+const releases = await github("GET", "/releases?per_page=100");
+let draft = (Array.isArray(releases.payload) ? releases.payload : []).find((r) => r.draft && r.tag_name === tag);
+if (!draft) {
+  const created = await github("POST", "/releases", {
+    tag_name: tag,
+    name: pkg.version,
+    draft: true,
+    body: `Task Manager desktop ${pkg.version}`,
+  });
+  if (created.status !== 201) {
+    fail(`Could not create the draft release (HTTP ${created.status}): ${created.payload.message}`);
+  }
+  draft = created.payload;
+  console.log(`[release] created draft release ${tag}`);
+} else {
+  console.log(`[release] reusing draft release ${tag}`);
+}
+
 const run = (command) => {
   const result = spawnSync(command, { cwd: root, stdio: "inherit", shell: true });
   if (result.status !== 0) process.exit(result.status ?? 1);
@@ -80,4 +105,16 @@ run("npm run icons");
 run("npm run desktop:prepare");
 run("npx electron-builder --win nsis --publish always");
 
-console.log(`\n[release] ${tag} published: https://github.com/${owner}/${repo}/releases/tag/${tag}`);
+// Publish only once every file is attached, and only if latest.yml made it -
+// without it installed apps can't see this version at all.
+const assets = await github("GET", `/releases/${draft.id}/assets?per_page=100`);
+const names = (Array.isArray(assets.payload) ? assets.payload : []).map((a) => a.name);
+if (!names.includes("latest.yml")) {
+  fail(`The draft is missing latest.yml (has: ${names.join(", ") || "nothing"}). Left as a draft; re-run to retry.`);
+}
+const published = await github("PATCH", `/releases/${draft.id}`, { draft: false, make_latest: "true" });
+if (published.status !== 200) {
+  fail(`Uploaded, but could not publish the draft (HTTP ${published.status}): ${published.payload.message}`);
+}
+
+console.log(`\n[release] ${tag} published (${names.join(", ")}): ${published.payload.html_url}`);

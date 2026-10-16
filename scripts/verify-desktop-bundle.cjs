@@ -47,6 +47,11 @@ function loadSecretValues() {
       secrets.set(key, value);
     }
   }
+  // The release token comes from the shell rather than .env, so add it explicitly.
+  for (const key of ["GH_TOKEN", "GITHUB_TOKEN"]) {
+    const value = (process.env[key] || "").trim();
+    if (value.length >= 16) secrets.set(key, value);
+  }
   return secrets;
 }
 
