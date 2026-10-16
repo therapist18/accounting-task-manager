@@ -11,6 +11,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Settings2, ArrowUpDown, ArrowLeftRight, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, SearchX, Layers, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STEP_LABELS, resolveHandlingParty, getHandlingMethodOption, NOTIFIED_METHOD_LABELS, type HandlingStep } from "../utils/database";
+import { TableLoadingStateInline } from "@/components/table-loading-state"
 
 export const HANDLING_COLUMNS = [
   { id: "task_id", label: "Task ID" },
@@ -669,11 +670,8 @@ export function HandlingTable({
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={visibleCols.length + 2} className="h-72 bg-white">
-                  <div className="flex flex-col items-center justify-center gap-2">
-                    <Loader2 className="h-8 w-8 animate-spin text-custom-blue" />
-                    <p className="text-[14px] font-semibold text-slate-600">Loading tasks...</p>
-                  </div>
+                <TableCell colSpan={visibleCols.length + 2} className="h-72 bg-white p-0">
+                  <TableLoadingStateInline />
                 </TableCell>
               </TableRow>
             ) : sectionedRows.length > 0 ? (

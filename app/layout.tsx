@@ -24,6 +24,8 @@ export default function RootLayout({
         <meta name="referrer" content="no-referrer" />
       </head>
       <body className={inter.className}>
+        {/* Desktop app only: lets the frameless window be dragged on pages with no header (login). */}
+        <div data-desktop-drag-strip aria-hidden="true" />
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           {children}
           <Toaster />

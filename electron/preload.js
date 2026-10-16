@@ -8,6 +8,28 @@ function subscribe(channel, handler) {
   return () => ipcRenderer.removeListener(channel, listener);
 }
 
+// The window has no frame (titleBarOverlay in main.js). Flag the page so its CSS
+// can make the header the drag handle and keep clear of the window buttons
+// (see [data-desktop-titlebar] in app/globals.css). A data attribute rather
+// than a class, because React owns <html className> and would overwrite it.
+//
+// Also tells main when the app switches light/dark, so the buttons stay legible.
+window.addEventListener("DOMContentLoaded", () => {
+  const root = document.documentElement;
+  root.setAttribute("data-desktop-titlebar", "");
+
+  let lastTheme = null;
+  const reportTheme = () => {
+    if (!root.hasAttribute("data-desktop-titlebar")) root.setAttribute("data-desktop-titlebar", "");
+    const theme = root.classList.contains("dark") ? "dark" : "light";
+    if (theme === lastTheme) return;
+    lastTheme = theme;
+    ipcRenderer.send("app:theme", theme);
+  };
+  reportTheme();
+  new MutationObserver(reportTheme).observe(root, { attributes: true, attributeFilter: ["class", "data-desktop-titlebar"] });
+});
+
 contextBridge.exposeInMainWorld("desktop", {
   getAppInfo: () => ipcRenderer.invoke("app:get-info"),
 

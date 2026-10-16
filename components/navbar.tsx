@@ -18,6 +18,7 @@ import {
 import { Search, Settings, Menu, LayoutDashboard, LogOut, User } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import type { AuthUser } from "@/lib/auth/types"
+import { clearSessionCache } from "@/lib/sessionCache"
 
 function useCurrentUser() {
   const [user, setUser] = useState<AuthUser | null>(null)
@@ -51,7 +52,13 @@ export function Navbar() {
     )
     : "U"
   return (
-    <header className="flex h-16 shrink-0 items-center gap-2 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-white/10 px-4 shadow-sm">
+    // data-titlebar-*: in the desktop app this header doubles as the window's title
+    // bar - it drags the window and leaves room for the min/max/close buttons.
+    <header
+      data-titlebar-drag
+      data-titlebar-inset
+      className="flex h-16 shrink-0 items-center gap-2 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-white/10 px-4 shadow-sm"
+    >
       <SidebarTrigger className="md:hidden text-slate-600 dark:text-white/80 hover:bg-slate-100 dark:hover:bg-white/10" />
       <div className="flex flex-1 items-center gap-2">
         <div className="relative flex-1 max-w-md group">
@@ -101,6 +108,7 @@ export function Navbar() {
                   setIsSigningOut(true)
                   try {
                     await fetch("/api/auth/logout", { method: "POST" })
+                    clearSessionCache()
                     window.location.replace("/login")
                   } catch (error) {
                     setIsSigningOut(false)

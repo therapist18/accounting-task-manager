@@ -17,6 +17,7 @@ import { getSubDepartmentDisplay, getClassDisplay, getSubClassDisplay, getCompan
 import { getLinkedDocumentsForTaskStage } from "../../tasks/utils/taskManagerData";
 import { SUMMARY_COLUMNS, DEFAULT_VISIBLE_SUMMARY_COLUMN_IDS } from "../stageColumnConfig";
 import EditableStageCell from "../../tasks/components/EditableStageCell";
+import { TableLoadingStateInline } from "@/components/table-loading-state"
 
 const DEFAULT_COL_WIDTH = 170;
 const INDEX_COL_WIDTH = 48;
@@ -952,11 +953,8 @@ export function SummaryTable({
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={interleavedColumns.length + 2} className="h-64 bg-slate-50">
-                    <div className="flex flex-col items-center justify-center">
-                      <Loader2 className="h-8 w-8 animate-spin text-slate-400 mb-3" />
-                      <p className="text-[14px] font-semibold text-slate-700">Loading tasks...</p>
-                    </div>
+                  <TableCell colSpan={interleavedColumns.length + 2} className="h-64 bg-slate-50 p-0">
+                    <TableLoadingStateInline />
                   </TableCell>
                 </TableRow>
               ) : sectionedRows.length > 0 ? (

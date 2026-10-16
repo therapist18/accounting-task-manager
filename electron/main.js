@@ -9,6 +9,7 @@ const {
   nativeImage,
   powerSaveBlocker,
   safeStorage,
+  session,
   shell,
 } = require("electron");
 const { fork, execFile } = require("node:child_process");
@@ -57,6 +58,9 @@ if (!hasInstanceLock) {
 function showMainWindow() {
   if (!mainWindow) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
+  // Started hidden at login: the first time it's opened, open it maximized.
+  if (launchedHidden && !mainWindow.__shownOnce) mainWindow.maximize();
+  mainWindow.__shownOnce = true;
   mainWindow.show();
   mainWindow.focus();
 }
@@ -318,9 +322,7 @@ function notify({ title, body, jobId, status, navigateTo }) {
 
   notification.on("click", () => {
     if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+    showMainWindow();
     if (jobId) {
       mainWindow.webContents.send("automation:navigate", { jobId, status });
     }
@@ -464,10 +466,7 @@ function createTray() {
   tray.on("click", () => {
     if (!mainWindow) return;
     if (mainWindow.isVisible() && !mainWindow.isMinimized()) mainWindow.hide();
-    else {
-      mainWindow.show();
-      mainWindow.focus();
-    }
+    else showMainWindow();
   });
   updateTrayBadge();
 }
@@ -505,6 +504,10 @@ function buildTrayMenu() {
     },
     { type: "separator" },
     { label: "Open Task Manager", click: () => showMainWindow() },
+    // desktop.log (shell + automation server output), automation-server.log and
+    // failures/ (eTA failure screenshots) all live here.
+    { label: "Open logs folder", click: () => logFilePath && shell.openPath(path.dirname(logFilePath)) },
+    { label: `Version ${app.getVersion()}`, enabled: false },
     {
       label: "Start with Windows",
       type: "checkbox",
@@ -522,8 +525,28 @@ function buildTrayMenu() {
     },
   ]);
 }
-function createWindow(startUrl) {
-  mainWindow = new BrowserWindow({
+// Window Controls Overlay: no Windows frame; the OS draws only the min/max/close
+// buttons over the top-right of the page, and the web app's header is the drag
+// handle (see the [data-titlebar-*] rules in app/globals.css). The height
+// matches the navbar (h-16) so the buttons line up with it.
+const TITLEBAR_HEIGHT = 64;
+const TITLEBAR_LIGHT = { color: "#00000000", symbolColor: "#475569", height: TITLEBAR_HEIGHT };
+const TITLEBAR_DARK = { color: "#00000000", symbolColor: "#e2e8f0", height: TITLEBAR_HEIGHT };
+
+const APP_ORIGIN = new URL(APP_URL).origin;
+
+function isAppUrl(url) {
+  try {
+    return new URL(url).origin === APP_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+// Options for any window showing our own pages: same preload (the desktop
+// bridge, guarded by isTrustedSender) and the same frameless title bar.
+function appWindowOptions(extra = {}) {
+  return {
     width: 1440,
     height: 960,
     minWidth: 1024,
@@ -532,6 +555,8 @@ function createWindow(startUrl) {
     show: false,
     autoHideMenuBar: true,
     icon: iconPath,
+    titleBarStyle: "hidden",
+    titleBarOverlay: TITLEBAR_LIGHT,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -539,13 +564,44 @@ function createWindow(startUrl) {
       sandbox: true,
       webSecurity: true,
     },
-  });
+    ...extra,
+  };
+}
 
-  mainWindow.once("ready-to-show", () => {
-    // Without a tray icon there'd be no way to open a hidden window, so only stay hidden with one.
-    if (launchedHidden && tray) appendLog("Started at login - staying in the tray");
-    else mainWindow.show();
-  });
+// Documents, the invoice generator and other sites opened from the app: a plain
+// framed window with no preload, so third-party pages never see window.desktop.
+function externalWindowOptions() {
+  return {
+    width: 1200,
+    height: 900,
+    title: PRODUCT_NAME,
+    autoHideMenuBar: true,
+    icon: iconPath,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true },
+  };
+}
+
+// Links that belong to another application, not a page.
+function opensInOtherApp(url) {
+  try {
+    const { protocol, hostname } = new URL(url);
+    if (!["http:", "https:", "blob:", "data:"].includes(protocol)) return true; // mailto:, tel:, ...
+    return ["wa.me", "api.whatsapp.com", "web.whatsapp.com"].includes(hostname);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Behaviour shared by every window: zoom keys, page-error logging, and what
+ * happens on window.open / target="_blank".
+ *
+ * Those used to be handed to the default browser, so "Start application" and
+ * similar "open in new tab" buttons threw the user out into Chrome. They now
+ * open as windows of this app; only mail/WhatsApp links leave it.
+ */
+function configureContents(win) {
+  const contents = win.webContents;
 
   // Electron's BrowserWindow has no browser chrome, so Ctrl+scroll and
   // Ctrl+Plus/Minus/0 don't zoom on their own - Electron only emits
@@ -554,28 +610,81 @@ function createWindow(startUrl) {
   const ZOOM_MIN = -4;
   const ZOOM_MAX = 5;
   const adjustZoom = (delta) => {
-    const level = mainWindow.webContents.getZoomLevel() + delta;
-    mainWindow.webContents.setZoomLevel(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, level)));
+    const level = contents.getZoomLevel() + delta;
+    contents.setZoomLevel(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, level)));
   };
 
-  mainWindow.webContents.on("zoom-changed", (_event, direction) => {
+  contents.on("zoom-changed", (_event, direction) => {
     adjustZoom(direction === "in" ? ZOOM_STEP : -ZOOM_STEP);
   });
 
-  mainWindow.webContents.on("before-input-event", (_event, input) => {
+  contents.on("before-input-event", (_event, input) => {
     if (!(input.control || input.meta) || input.type !== "keyDown") return;
     if (input.key === "=" || input.key === "+" || input.code === "NumpadAdd") {
       adjustZoom(ZOOM_STEP);
     } else if (input.key === "-" || input.code === "NumpadSubtract") {
       adjustZoom(-ZOOM_STEP);
     } else if (input.key === "0" || input.code === "Numpad0") {
-      mainWindow.webContents.setZoomLevel(0);
+      contents.setZoomLevel(0);
     }
   });
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
-    return { action: "deny" };
+  contents.setWindowOpenHandler(({ url }) => {
+    if (opensInOtherApp(url)) {
+      shell.openExternal(url);
+      return { action: "deny" };
+    }
+    // "allow" (rather than creating the window ourselves) keeps blob: URLs and
+    // window.opener working for document previews.
+    const options = isAppUrl(url) ? appWindowOptions() : externalWindowOptions();
+    return { action: "allow", overrideBrowserWindowOptions: options };
+  });
+
+  contents.on("did-create-window", (child, { url }) => {
+    configureContents(child);
+    if (isAppUrl(url)) {
+      // Like the main window: open maximized once there's something to show.
+      child.once("ready-to-show", () => {
+        child.maximize();
+        child.show();
+      });
+    }
+  });
+
+  // Page errors land in desktop.log too, so a user's log file shows what went
+  // wrong in the web app as well as in the shell. Warnings and errors only.
+  contents.on("console-message", (details) => {
+    const level = details?.level;
+    if (level !== "error" && level !== "warning") return;
+    appendLog(`[page ${level}] ${details.message} (${details.sourceId || ""}:${details.lineNumber ?? ""})`);
+  });
+}
+
+// The preload reports the web app's light/dark theme so the window buttons stay
+// visible against the header in either.
+ipcMain.on("app:theme", (event, theme) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || !isTrustedSender(event) || typeof win.setTitleBarOverlay !== "function") return;
+  try {
+    win.setTitleBarOverlay(theme === "dark" ? TITLEBAR_DARK : TITLEBAR_LIGHT);
+  } catch {
+    // Window without an overlay (an external page) - nothing to recolour.
+  }
+});
+
+function createWindow(startUrl) {
+  mainWindow = new BrowserWindow(appWindowOptions());
+  configureContents(mainWindow);
+
+  mainWindow.once("ready-to-show", () => {
+    // Without a tray icon there'd be no way to open a hidden window, so only stay hidden with one.
+    if (launchedHidden && tray) {
+      appendLog("Started at login - staying in the tray");
+      return;
+    }
+    // Opens maximized; maximize() also shows the window.
+    mainWindow.maximize();
+    mainWindow.show();
   });
 
   // The app now lives on the internet, so a dropped connection is an ordinary
@@ -794,6 +903,19 @@ app.whenReady().then(async () => {
   } else {
     appendLog("Automation server skipped (ELECTRON_ENABLE_AUTOMATION_SERVER=false).");
   }
+
+  // A new-window link that turns out to be a file download (a .docx, a CSV
+  // export) would otherwise leave an empty window behind. The download itself
+  // carries on; only the blank window goes.
+  session.defaultSession.on("will-download", (_event, _item, contents) => {
+    const win = contents && BrowserWindow.fromWebContents(contents);
+    const url = contents?.getURL() || "";
+    if (win && win !== mainWindow && (!url || url === "about:blank")) {
+      setTimeout(() => {
+        if (!win.isDestroyed()) win.close();
+      }, 0);
+    }
+  });
 
   createWindow(APP_URL);
   createTray();

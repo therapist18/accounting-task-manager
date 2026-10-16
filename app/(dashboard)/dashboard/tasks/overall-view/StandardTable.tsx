@@ -11,6 +11,7 @@ import { AutomationMappingDialog } from "../components/AutomationMappingDialog"
 import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
 import { cn } from "@/lib/utils"
 import { computeStageDeltaDays } from "../../reports/utils/reportStageLogic"
+import { TableLoadingStateInline } from "@/components/table-loading-state"
 
 // --- INTERFACE ---
 interface StandardTableProps {
@@ -558,7 +559,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
           <TableBody>
             {/* --- DATA ROWS --- */}
             {dataLoading.tasks ? (
-              <TableRow><TableCell colSpan={100} className="h-48 text-center"><Loader2 className="h-8 w-8 animate-spin mx-auto text-[#376bae]" /></TableCell></TableRow>
+              <TableRow><TableCell colSpan={100} className="h-48 p-0"><TableLoadingStateInline /></TableCell></TableRow>
             ) : taskRows.length === 0 ? (
               <TableRow><TableCell colSpan={100} className="h-48 text-center text-slate-500">No records found matching criteria.</TableCell></TableRow>
             ) : (

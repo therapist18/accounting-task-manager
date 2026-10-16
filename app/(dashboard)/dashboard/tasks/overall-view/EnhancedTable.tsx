@@ -12,6 +12,7 @@ import { EnquiryDialog } from "../components/EnquiryDialog"
 import { userService, getOfficerDisplayName } from "@/lib/shared-user-assignment-service"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { TableLoadingStateInline } from "@/components/table-loading-state"
 
 // --- Helper Functions & Constants ---
 
@@ -874,8 +875,8 @@ export const EnhancedTable = forwardRef<any, EnhancedTableProps>(({
               </TableRow>
             ) : loading && filteredTableRows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={paginatedHeaderStructure.length * 4 + 2} className="h-32 text-center">
-                  <div className="flex justify-center items-center gap-2 text-slate-600"><Loader2 className="h-5 w-5 animate-spin" />Loading...</div>
+                <TableCell colSpan={paginatedHeaderStructure.length * 4 + 2} className="h-32 p-0">
+                  <TableLoadingStateInline />
                 </TableCell>
               </TableRow>
             ) : (

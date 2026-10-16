@@ -174,7 +174,13 @@ export async function PATCH(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => null);
-  const { runId, jobId, error } = (body || {}) as { runId?: string; jobId?: string; error?: string };
+  const { runId, jobId, error, interrupted } = (body || {}) as {
+    runId?: string;
+    jobId?: string;
+    error?: string;
+    // The local service lost the job (it restarted) - see lib/automations/client.
+    interrupted?: boolean;
+  };
   if (!runId || (!jobId && !error)) {
     return NextResponse.json(
       { success: false, error: "runId and either jobId or error are required." },
@@ -185,7 +191,13 @@ export async function PATCH(request: NextRequest) {
   const now = new Date().toISOString();
   const update = jobId
     ? { job_id: String(jobId), updated_at: now }
-    : { status: "failed", error: String(error), completed_at: now, updated_at: now, completion_secret: null };
+    : {
+        status: interrupted ? "interrupted" : "failed",
+        error: String(error),
+        completed_at: now,
+        updated_at: now,
+        completion_secret: null,
+      };
 
   // Scoped to the caller's own still-active run, so this can't touch anyone
   // else's history or reopen a settled run.

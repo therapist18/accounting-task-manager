@@ -26,6 +26,7 @@ import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import * as XLSX from 'xlsx'
 import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, invalidateAllDocumentsCache, fetchAllKycFields, fetchKycDocument, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document, fetchTasksDuplicate, fetchDocumentWorkflowLogs, REQUIREMENTS_LOCK_STAGE_IDS, STAGE_TAB_LINKS, captureRequirementsDocumentsSnapshot, fetchUploadedDocumentsForTasks, getLinkedDocumentsForTaskStage, fetchClassRequirements, hasAvailableDocumentForStage, WRITE_UP_STAGE_ID, ENDORSEMENT_STAGE_IDS } from "./utils/taskManagerData"
+import { departmentsResource, companiesResource, tasksByDepartment, type DepartmentTasksSnapshot } from "./utils/taskManagerCache"
 import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog';
 import { StandardTable } from './overall-view/StandardTable';
 import { EnhancedTable } from './overall-view/EnhancedTable';
@@ -54,9 +55,15 @@ const TERMINAL_STATUSES = ['write_up_completed', 'endorsed', 'completed', 'archi
 export default function DepartmentTasksManager({ error, onTaskAction, handleStageStatusSave, onTaskUpdate, getCurrentRequirements, initialSearchTerm, initialDeptId, initialSubDeptId }: DepartmentTasksManagerProps) {
   const { user: currentUser } = useCurrentUser();
   const enforceStageOrder = !hasPermission(currentUser, 'tasks.bypass_sequential_stages');
-  const [departments, setDepartments] = useState<Department[]>([])
-  const [companies, setCompanies] = useState<Map<number, { name: string; prefix: string }>>(new Map())
-  const [activeDepartmentTab, setActiveDepartmentTab] = useState<string>("")
+  // Seeded from the session cache (utils/taskManagerCache) so a return visit
+  // renders immediately; performInitialLoad below refreshes them.
+  const [departments, setDepartments] = useState<Department[]>(() => departmentsResource.getState().data ?? [])
+  const [companies, setCompanies] = useState<Map<number, { name: string; prefix: string }>>(() => companiesResource.getState().data ?? new Map())
+  const [activeDepartmentTab, setActiveDepartmentTab] = useState<string>(() => {
+    const cached = departmentsResource.getState().data
+    if (!cached?.length) return ""
+    return (initialDeptId && cached.find((d: any) => d.id.toString() === initialDeptId) ? initialDeptId : cached[0].id.toString())
+  })
   const [activeSubTab, setActiveSubTab] = useState<string>("wip-stages")
   const [activeSubdepartmentTab, setActiveSubdepartmentTab] = useState<string>("")
   const initialSubDeptApplied = useRef(false)
@@ -485,59 +492,46 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     }
   }, [departments])
 
-  const tasksCacheRef = useRef<Map<string, { tasks: UtilTask[], stages: any[], timestamp: number }>>(new Map())
   const tableRowsCacheRef = useRef<Map<string, { rows: any[], timestamp: number }>>(new Map())
   const CACHE_DURATION = 5 * 60 * 1000
 
   const clearTasksCache = useCallback((departmentId?: string, _subdepartmentId?: string) => {
-    const cacheKey = departmentId || 'all';
-    tasksCacheRef.current.delete(cacheKey);
+    if (departmentId) tasksByDepartment.get(departmentId).invalidate();
+    else tasksByDepartment.invalidateAll();
     tableRowsCacheRef.current.clear();
   }, []);
 
+  // Tasks come from the session cache (utils/taskManagerCache): cached tasks are
+  // shown at once and refreshed behind them, so returning to this page - or
+  // switching back to a department - no longer blanks the table behind a spinner.
+  // forceRefresh (after a write) skips the cached copy, which would briefly undo
+  // the optimistic update on screen.
   const loadTasksData = useCallback(async (departmentId?: string, _subdepartmentId?: string, forceRefresh: boolean = false, silent: boolean = false) => {
     if (!departmentId) return null;
 
-    const cacheKey = departmentId;
+    const resource = tasksByDepartment.get(departmentId);
+    const apply = (value: DepartmentTasksSnapshot) => {
+      setAllIndividualDocuments(value.individualDocsMap);
+      setAllCompanyDocuments(value.companyDocsMap);
+      setTasks(value.tasks as UtilTask[]);
+      setStages(value.stages);
+    };
 
-    // Clear cache if force refresh is requested
+    const cached = resource.getState().data;
     if (forceRefresh) {
-      tasksCacheRef.current.delete(cacheKey);
+      resource.invalidate();
       tableRowsCacheRef.current.clear();
-    }
-
-    const cached = tasksCacheRef.current.get(cacheKey);
-    const now = Date.now();
-
-    if (cached && (now - cached.timestamp) < CACHE_DURATION && !forceRefresh) {
-      setTasks(cached.tasks);
-      setStages(cached.stages);
-      return cached;
+    } else if (cached) {
+      apply(cached);
+      if (resource.isFresh()) return cached;
+      silent = true;
     }
 
     try {
       if (!silent) setIsLoadingTasks(true);
-      const [tasksData, stagesData] = await Promise.all([
-        fetchTasks(departmentId, undefined, companies),
-        fetchStages(departmentId, departments)
-      ])
-
-      const { individualDocsMap, companyDocsMap } = await fetchUploadedDocumentsForTasks(tasksData);
-      setAllIndividualDocuments(individualDocsMap);
-      setAllCompanyDocuments(companyDocsMap);
-
-      setTasks(tasksData)
-      setStages(stagesData)
-
-      const nextValue = {
-        tasks: tasksData,
-        stages: stagesData,
-        timestamp: now
-      }
-
-      tasksCacheRef.current.set(cacheKey, nextValue)
-      return nextValue
-
+      const value = await resource.refresh();
+      apply(value);
+      return value;
     } catch (error) {
       console.error('Error loading tasks data:', error)
       toast({
@@ -549,7 +543,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     } finally {
       if (!silent) setIsLoadingTasks(false);
     }
-  }, [departments, companies])
+  }, [])
 
   const refreshDocumentsAndTasks = useCallback(async () => {
     invalidateAllDocumentsCache();
@@ -2188,7 +2182,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
 
   // Clear cache when manually refreshing
   const clearCacheAndRefresh = useCallback(() => {
-    tasksCacheRef.current.clear();
+    tasksByDepartment.invalidateAll();
     tableRowsCacheRef.current.clear();
     refreshAllData();
   }, [refreshAllData]);
@@ -2331,8 +2325,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     setEditDialogOpen(false);
     setEditingTask(null);
     setTasks(prevTasks => prevTasks.map(t => t.id === updatedTask.id ? updatedTask : t));
-    const cacheKey = `${activeDepartmentTab}-${activeSubdepartmentTab || 'all'}`;
-    tasksCacheRef.current.delete(cacheKey);
+    if (activeDepartmentTab) tasksByDepartment.get(activeDepartmentTab).invalidate();
     // updatedTask is the raw row EnquiryDialog got back from `.update().select().single()` —
     // it lacks the top-level department_id/subdepartment_id fetchTasks() computes from
     // job_level (a jsonb column, not top-level columns), which getFilteredTasks filters on.
@@ -2466,8 +2459,7 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
         : [result, ...prevTasks];
     });
     // Invalidate cache so the next navigation triggers a fresh fetch
-    const cacheKey = `${activeDepartmentTab}-${activeSubdepartmentTab || 'all'}`;
-    tasksCacheRef.current.delete(cacheKey);
+    if (activeDepartmentTab) tasksByDepartment.get(activeDepartmentTab).invalidate();
     onTaskUpdate?.(result);
     // result is the raw DB row (missing fetchTasks()'s computed top-level department_id/
     // subdepartment_id — see handleTaskUpdate's comment above) — reload silently so a brand
@@ -3375,8 +3367,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
     const performInitialLoad = async () => {
       try {
         const [departmentsData, companiesData, documentsData, kycFieldsData, { usersMap: usersData }] = await Promise.all([
-          fetchDepartments(),
-          fetchCompanies(),
+          departmentsResource.load(),
+          companiesResource.load(),
           fetchAllDocuments(),
           fetchAllKycFields(),
           loadUserAssignmentData(),
@@ -3394,7 +3386,8 @@ export default function DepartmentTasksManager({ error, onTaskAction, handleStag
           const targetDept = initialDeptId
             ? (departmentsData.find((d: any) => d.id.toString() === initialDeptId) || departmentsData[0])
             : departmentsData[0];
-          setActiveDepartmentTab(targetDept.id.toString());
+          // Already set from the cache (and possibly changed by the user since) - keep it.
+          setActiveDepartmentTab(prev => prev || targetDept.id.toString());
         }
       } catch (error) {
         console.error('Error loading initial data:', error);

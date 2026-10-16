@@ -358,3 +358,33 @@ body {
 .sidebar-scroll::-webkit-scrollbar-thumb:hover {
   background-color: rgba(255, 255, 255, 0.55);
 }
+/* ── Desktop app title bar ──
+   In the Electron app the window has no frame: Windows draws only the
+   min/max/close buttons over the top-right corner (titleBarOverlay in
+   electron/main.js), and electron/preload.js sets data-desktop-titlebar on
+   <html>. None of this applies in a normal browser. */
+html[data-desktop-titlebar] [data-titlebar-drag] {
+  -webkit-app-region: drag;
+}
+/* Everything you can click in the header must stay clickable. */
+html[data-desktop-titlebar] [data-titlebar-drag] :is(button, a, input, select, textarea, label, [role="button"], [role="combobox"], [role="menuitem"], [tabindex]) {
+  -webkit-app-region: no-drag;
+}
+/* Keep header content clear of the window buttons. The env() values come from
+   Window Controls Overlay; 138px is the fallback width of the three buttons. */
+html[data-desktop-titlebar] [data-titlebar-inset] {
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)) + 1rem);
+}
+[data-desktop-drag-strip] {
+  display: none;
+}
+html[data-desktop-titlebar] [data-desktop-drag-strip] {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)));
+  height: 8px;
+  z-index: 2147483647;
+  -webkit-app-region: drag;
+}

@@ -22,6 +22,7 @@ import {
 } from "../tasks/utils/automationComputedFunctions"
 import { REQUIREMENTS_LOCK_STAGE_IDS } from "../tasks/utils/taskManagerData"
 import { normalizeJobLevelFilter } from "./utils/templateGenerationData"
+import { TableLoadingStateInline } from "@/components/table-loading-state"
 let htmlDocx: any = null;
 import('html-docx-js/dist/html-docx')
   .then(module => {
@@ -2955,7 +2956,7 @@ return (
 
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={totalColumns} className="h-32 text-center"><Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" /></TableCell></TableRow>
+              <TableRow><TableCell colSpan={totalColumns} className="h-32 p-0"><TableLoadingStateInline /></TableCell></TableRow>
             ) : (
               <>
                 {/* General Section */}

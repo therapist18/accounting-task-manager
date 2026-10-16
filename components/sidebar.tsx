@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useSidebar } from "./ui/sidebar";
 import { useCurrentUser as useSharedCurrentUser, hasPermission, type AuthUser } from "@/lib/hooks/use-current-user";
+import { clearSessionCache } from "@/lib/sessionCache";
 
 const navItems = [
     { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard, permission: "dashboard.view" },
@@ -324,6 +325,7 @@ const AppSidebar = () => {
         setIsSigningOut(true);
         try {
             await fetch("/api/auth/logout", { method: "POST" });
+            clearSessionCache();
             window.location.replace("/login");
         } catch (error) {
             setIsSigningOut(false);

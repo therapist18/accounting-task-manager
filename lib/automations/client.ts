@@ -158,8 +158,25 @@ async function getProgress(jobId: string): Promise<Response> {
   const persisted = await persistedResponse.json().catch(() => null);
 
   if (!job) {
-    // The service restarted or the job ran on another session: the persisted
-    // row is all there is, so the UI settles instead of polling a 404 forever.
+    // The service is up but has never heard of this job: it restarted (desktop
+    // app relaunched, `npm run dev` restarted) and took the run with it, since
+    // jobs live only in its memory. If the database still says "running", nothing
+    // will ever finish that row - close it out as interrupted so the UI stops
+    // polling and offers a fresh start instead of spinning forever.
+    const row = persisted?.job;
+    if (persistedResponse.ok && row?.isRunning && row.runId) {
+      const error = "The automation service restarted while this run was in progress, so it was lost. Start it again.";
+      await fetch("/api/automations/run", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId: row.runId, error, interrupted: true }),
+      }).catch(() => {});
+      return json({
+        success: true,
+        persisted: true,
+        job: { ...row, status: "interrupted", isRunning: false, error, message: error, currentStep: "Interrupted" },
+      });
+    }
     return json(persisted || { success: false, error: "Job not found." }, persistedResponse.status);
   }
 
@@ -172,6 +189,10 @@ async function stopRun(init?: RequestInit): Promise<Response> {
   const { jobId } = JSON.parse(String(init?.body || "{}"));
   if (!jobId) return json({ success: false, error: "jobId is required." }, 400);
   const result = await callLocal("POST", `/api/automations/jobs/${encodeURIComponent(jobId)}/stop`);
+  // 404 = the service no longer has this job (it restarted), so there is nothing
+  // left running to stop. Reporting that as an error left the Stop button failing
+  // forever; the next progress poll closes the run out as interrupted.
+  if (result.status === 404) return json({ success: true, jobId, alreadyStopped: true });
   return json(result.payload, result.status);
 }
 
